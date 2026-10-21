@@ -10,6 +10,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -70,16 +72,68 @@ private fun vazirTypography(): Typography {
 
 val LocalDark = compositionLocalOf { false }
 
-class ThemeController(initial: Boolean, private val prefs: android.content.SharedPreferences) {
-    var dark by mutableStateOf(initial)
+data class TgPalette(
+    val dark: Boolean,
+    val bg: Color,
+    val surface: Color,
+    val incoming: Color,
+    val outgoing: Color,
+    val text: Color,
+    val subtext: Color,
+    val border: Color,
+    val search: Color,
+    val note: Color,
+    val blue: Color = Color(0xFF24A1DE),
+)
+
+fun tgLight() = TgPalette(
+    dark = false,
+    bg = Color(0xFFEFEFF4),
+    surface = Color.White,
+    incoming = Color.White,
+    outgoing = Color(0xFFEFFDDE),
+    text = Color(0xFF222222),
+    subtext = Color(0xFF8E8E93),
+    border = Color(0xFFE2E8F0),
+    search = Color(0xFFF1F2F6),
+    note = Color(0xFFFFF4C2),
+)
+
+fun tgDark() = TgPalette(
+    dark = true,
+    bg = Color(0xFF0E1621),
+    surface = Color(0xFF17212B),
+    incoming = Color(0xFF182533),
+    outgoing = Color(0xFF2B5278),
+    text = Color.White,
+    subtext = Color(0xFF7F91A4),
+    border = Color(0xFF243242),
+    search = Color(0xFF242F3D),
+    note = Color(0xFF5C4A1F),
+)
+
+val LocalTg = compositionLocalOf { tgLight() }
+
+class ThemeController(initial: String, private val prefs: android.content.SharedPreferences) {
+    var mode by mutableStateOf(initial)
         private set
-    fun toggle() {
-        dark = !dark
-        prefs.edit().putBoolean("dark", dark).apply()
+
+    fun set(next: String) {
+        mode = next
+        prefs.edit().putString("theme", next).apply()
     }
 }
 
 class MainActivity : ComponentActivity() {
+    override fun attachBaseContext(newBase: android.content.Context) {
+        val locale = java.util.Locale("fa", "IR")
+        java.util.Locale.setDefault(locale)
+        val config = android.content.res.Configuration(newBase.resources.configuration)
+        config.setLocale(locale)
+        config.setLayoutDirection(locale)
+        super.attachBaseContext(newBase.createConfigurationContext(config))
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val app = application as App
@@ -87,16 +141,24 @@ class MainActivity : ComponentActivity() {
             val context = LocalContext.current
             val theme = remember {
                 val prefs = context.getSharedPreferences("tg", 0)
-                ThemeController(prefs.getBoolean("dark", false), prefs)
+                val stored = prefs.getString("theme", null) ?: if (prefs.getBoolean("dark", false)) "dark" else "system"
+                ThemeController(stored, prefs)
             }
-            val scheme = if (theme.dark) {
-                darkColorScheme(primary = Color(0xFF24A1DE), background = Color(0xFF0F172A), surface = Color(0xFF1E293B))
+            val dark = when (theme.mode) {
+                "light" -> false
+                "dark" -> true
+                else -> isSystemInDarkTheme()
+            }
+            val palette = if (dark) tgDark() else tgLight()
+            val background by animateColorAsState(palette.bg, tween(200), label = "bg")
+            val scheme = if (dark) {
+                darkColorScheme(primary = palette.blue, background = palette.bg, surface = palette.surface, onBackground = palette.text, onSurface = palette.text)
             } else {
-                lightColorScheme(primary = Color(0xFF24A1DE), background = Color.White)
+                lightColorScheme(primary = palette.blue, background = palette.bg, surface = palette.surface, onBackground = palette.text, onSurface = palette.text)
             }
-            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl, LocalDark provides theme.dark) {
+            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl, LocalDark provides dark, LocalTg provides palette) {
                 MaterialTheme(colorScheme = scheme, typography = vazirTypography()) {
-                    Surface(Modifier.fillMaxSize(), color = scheme.background) {
+                    Surface(Modifier.fillMaxSize(), color = background) {
                         Root(app, theme)
                     }
                 }
@@ -111,26 +173,22 @@ fun Root(app: App, theme: ThemeController) {
     var userId by remember { mutableStateOf(app.sessionId()) }
     val backStack by nav.currentBackStackEntryAsState()
     val route = backStack?.destination?.route ?: ""
-    val showBar = userId != null && route in setOf("chats", "contacts", "settings", "profile", "notices")
+    val showBar = userId != null && route in setOf("chats", "contacts", "profile")
     val user = userId?.let { app.db.user(it) }
-    val chatBadge = userId?.let { id -> app.db.people(id).count { it.hasNote } } ?: 0
+    var draftPhone by remember { mutableStateOf("") }
+    var openComposer by remember { mutableStateOf(false) }
+    val palette = LocalTg.current
+    val chatBadge = userId?.let { id -> app.db.people(id).sumOf { it.unread } } ?: 0
     Scaffold(
-        containerColor = if (theme.dark) Color(0xFF0F172A) else Color.White,
+        containerColor = palette.bg,
         bottomBar = {
             if (showBar && user != null) {
-                BottomBar(route, user.name, user.avatar, isAdmin(user.phone)) { nav.navigate(it) { launchSingleTop = true } }
+                BottomBar(route, chatBadge) { nav.navigate(it) { launchSingleTop = true } }
             }
         },
     ) { padding ->
         Box(Modifier.padding(padding)) {
-            NavHost(nav, startDestination = if (userId == null) "home" else "chats") {
-                composable("home") {
-                    LandingScreen(
-                        onLogin = { nav.navigate("login") },
-                        onSignup = { nav.navigate("signup") },
-                        onPricing = { nav.navigate("pricing") },
-                    )
-                }
+            NavHost(nav, startDestination = if (userId == null) "login" else "chats") {
                 composable("pricing") {
                     PricingScreen(onStart = { nav.navigate("signup") }, onBack = { nav.popBackStack() })
                 }
@@ -143,10 +201,10 @@ fun Root(app: App, theme: ThemeController) {
                         app,
                         { id ->
                             userId = id
-                            nav.navigate("chats") { popUpTo("home") { inclusive = true } }
+                            nav.navigate("chats") { popUpTo(0) }
                         },
-                        { nav.navigate("signup") { popUpTo("login") { inclusive = true } } },
-                        { nav.navigate("forgot") { popUpTo("login") { inclusive = true } } },
+                        { nav.navigate("signup") },
+                        { nav.navigate("forgot") },
                     )
                 }
                 composable(
@@ -156,8 +214,11 @@ fun Root(app: App, theme: ThemeController) {
                 ) {
                     SignUpScreen(
                         app,
+                        { id ->
+                            userId = id
+                            nav.navigate("chats") { popUpTo(0) }
+                        },
                         { nav.navigate("login") { popUpTo("signup") { inclusive = true } } },
-                        { nav.navigate("forgot") { popUpTo("signup") { inclusive = true } } },
                     )
                 }
                 composable(
@@ -178,13 +239,32 @@ fun Root(app: App, theme: ThemeController) {
                     NewPersonScreen(app, userId.orEmpty(), entry.arguments?.getString("phone").orEmpty()) { nav.popBackStack() }
                 }
                 composable("chats") {
-                    ChatsScreen(app, userId.orEmpty(), false, { nav.navigate("chat/$it") }, { nav.navigate("admin") }, { nav.navigate("notices") }, onCreate = { nav.navigate("new-person?phone=") })
+                    ChatsScreen(
+                        app,
+                        userId.orEmpty(),
+                        false,
+                        { nav.navigate("chat/$it") },
+                        { nav.navigate("admin") },
+                        { nav.navigate("notices") },
+                        onAi = { nav.navigate("ai") },
+                        onPay = { nav.navigate("pay") },
+                        draftPhone = draftPhone,
+                        openComposer = openComposer,
+                        onComposerHandled = { openComposer = false; draftPhone = "" },
+                    )
                 }
                 composable("contacts") {
                     PhoneContactsScreen(
                         { nav.navigate("chats") { launchSingleTop = true } },
-                        { phone -> nav.navigate("new-person?phone=${android.net.Uri.encode(phone)}") },
+                        { phone ->
+                            draftPhone = phone
+                            openComposer = true
+                            nav.navigate("chats") { launchSingleTop = true }
+                        },
                     )
+                }
+                composable("ai") {
+                    AiChatScreen(app, userId.orEmpty()) { nav.popBackStack() }
                 }
                 composable("chat/{id}", listOf(navArgument("id") { type = NavType.StringType })) { entry ->
                     ThreadScreen(app, userId.orEmpty(), entry.arguments?.getString("id").orEmpty()) { nav.popBackStack() }
@@ -194,14 +274,14 @@ fun Root(app: App, theme: ThemeController) {
                     ProfileScreen(app, userId.orEmpty(), theme, { nav.navigate("chats") { launchSingleTop = true } }, { nav.navigate("pay") }, { nav.navigate("pricing") }, { nav.navigate("admin") }, {
                         app.setSession(null)
                         userId = null
-                        nav.navigate("home") { popUpTo(0) }
+                        nav.navigate("login") { popUpTo(0) }
                     })
                 }
                 composable("profile") {
                     ProfileScreen(app, userId.orEmpty(), theme, { nav.navigate("chats") { launchSingleTop = true } }, { nav.navigate("pay") }, { nav.navigate("pricing") }, { nav.navigate("admin") }, {
                         app.setSession(null)
                         userId = null
-                        nav.navigate("home") { popUpTo(0) }
+                        nav.navigate("login") { popUpTo(0) }
                     })
                 }
                 composable("pay") { PayScreen(app, userId.orEmpty()) { nav.popBackStack() } }
@@ -209,7 +289,7 @@ fun Root(app: App, theme: ThemeController) {
                     AdminScreen(app, { nav.navigate("chats") { launchSingleTop = true } }) {
                         app.setSession(null)
                         userId = null
-                        nav.navigate("home") { popUpTo(0) }
+                        nav.navigate("login") { popUpTo(0) }
                     }
                 }
             }

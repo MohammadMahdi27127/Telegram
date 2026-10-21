@@ -12,6 +12,7 @@ class App : Application() {
         super.onCreate()
         db = Db(this)
         db.ensureAdmin()
+        db.ensureOpenRouter()
     }
 
     fun sessionId(): String? = getSharedPreferences("session", Context.MODE_PRIVATE).getString("userId", null)
@@ -43,4 +44,4 @@ fun normalizePhone(input: String): String? {
 const val ADMIN_PHONE = "09012345678"
 
 fun isAdmin(phone: String?) = phone == "09012345678" || phone == "09052893115"
-const val OTP = "1234"
+const val OTP = "123456"

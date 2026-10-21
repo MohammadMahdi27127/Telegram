@@ -32,6 +32,8 @@ data class Person(
     val lastKind: String?,
     val lastChannel: String?,
     val hasNote: Boolean,
+    val avatar: String? = null,
+    val unread: Int = 0,
 )
 
 data class Entry(
@@ -42,6 +44,7 @@ data class Entry(
     val occurredAt: Long,
     val pinned: Boolean = false,
     val voicePath: String? = null,
+    val mediaPath: String? = null,
 )
 
 data class Slip(
@@ -57,9 +60,10 @@ data class Slip(
 )
 
 data class Notice(val id: String, val title: String, val body: String, val createdAt: Long, val read: Boolean)
+data class AiMessage(val id: String, val personId: String, val role: String, val body: String, val image: String?, val createdAt: Long)
 data class Banner(val id: String, val title: String, val body: String, val image: String? = null)
 
-class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 9) {
+class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 12) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
             """CREATE TABLE users (
@@ -81,13 +85,16 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 9) {
         )
         db.execSQL("CREATE TABLE notices (id TEXT PRIMARY KEY, user_id TEXT, title TEXT, body TEXT, read INTEGER, created_at INTEGER)")
         db.execSQL("CREATE TABLE banners (id TEXT PRIMARY KEY, title TEXT NOT NULL, body TEXT NOT NULL, image TEXT, active INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL)")
-        db.execSQL("CREATE TABLE ai_models (id TEXT PRIMARY KEY, name TEXT, endpoint TEXT, model_id TEXT, api_key TEXT, input_cost REAL, output_cost REAL, created_at INTEGER)")
+        db.execSQL("CREATE TABLE ai_models (id TEXT PRIMARY KEY, name TEXT, endpoint TEXT, model_id TEXT, api_key TEXT, input_cost REAL, output_cost REAL, active INTEGER NOT NULL DEFAULT 0, created_at INTEGER)")
         db.execSQL("CREATE TABLE announcements (id TEXT PRIMARY KEY, title TEXT, body TEXT, created_at INTEGER)")
         db.execSQL("CREATE TABLE slips (id TEXT PRIMARY KEY, user_id TEXT, kind TEXT, plan TEXT, amount INTEGER, status TEXT, receipt TEXT, ref_code TEXT, created_at INTEGER)")
         db.execSQL("ALTER TABLE entries ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0")
         db.execSQL("ALTER TABLE entries ADD COLUMN voice_path TEXT")
+        db.execSQL("ALTER TABLE entries ADD COLUMN media_path TEXT")
+        db.execSQL("ALTER TABLE people ADD COLUMN avatar TEXT")
         db.execSQL("CREATE TABLE wallpapers (id TEXT PRIMARY KEY, title TEXT, category TEXT, path TEXT, created_at INTEGER)")
         db.execSQL("CREATE TABLE outbox (id TEXT PRIMARY KEY, kind TEXT, payload TEXT, created_at INTEGER)")
+        db.execSQL("CREATE TABLE ai_messages (id TEXT PRIMARY KEY, user_id TEXT, person_id TEXT, role TEXT, body TEXT, image_path TEXT, created_at INTEGER)")
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -107,7 +114,15 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 9) {
         if ("chat_bg" !in columns) db.execSQL("ALTER TABLE users ADD COLUMN chat_bg TEXT")
         if ("chat_color" !in columns) db.execSQL("ALTER TABLE users ADD COLUMN chat_color TEXT")
         if ("avatar" !in columns) db.execSQL("ALTER TABLE users ADD COLUMN avatar TEXT")
-        db.execSQL("CREATE TABLE IF NOT EXISTS ai_models (id TEXT PRIMARY KEY, name TEXT, endpoint TEXT, model_id TEXT, api_key TEXT, input_cost REAL, output_cost REAL, created_at INTEGER)")
+        db.execSQL("CREATE TABLE IF NOT EXISTS ai_models (id TEXT PRIMARY KEY, name TEXT, endpoint TEXT, model_id TEXT, api_key TEXT, input_cost REAL, output_cost REAL, active INTEGER NOT NULL DEFAULT 0, created_at INTEGER)")
+        val modelColumns = db.rawQuery("PRAGMA table_info(ai_models)", null).use {
+            val names = mutableListOf<String>()
+            while (it.moveToNext()) names += it.getString(1)
+            names
+        }
+        if ("active" !in modelColumns) db.execSQL("ALTER TABLE ai_models ADD COLUMN active INTEGER NOT NULL DEFAULT 0")
+        val activeCount = db.rawQuery("SELECT COUNT(*) FROM ai_models WHERE active=1", null).use { if (it.moveToFirst()) it.getInt(0) else 0 }
+        if (activeCount == 0) db.execSQL("UPDATE ai_models SET active=1 WHERE id=(SELECT id FROM ai_models ORDER BY created_at DESC LIMIT 1)")
         db.execSQL("CREATE TABLE IF NOT EXISTS announcements (id TEXT PRIMARY KEY, title TEXT, body TEXT, created_at INTEGER)")
         db.execSQL("CREATE TABLE IF NOT EXISTS slips (id TEXT PRIMARY KEY, user_id TEXT, kind TEXT, plan TEXT, amount INTEGER, status TEXT, receipt TEXT, ref_code TEXT, created_at INTEGER)")
         val entryColumns = db.rawQuery("PRAGMA table_info(entries)", null).use {
@@ -117,8 +132,16 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 9) {
         }
         if ("pinned" !in entryColumns) db.execSQL("ALTER TABLE entries ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0")
         if ("voice_path" !in entryColumns) db.execSQL("ALTER TABLE entries ADD COLUMN voice_path TEXT")
+        if ("media_path" !in entryColumns) db.execSQL("ALTER TABLE entries ADD COLUMN media_path TEXT")
+        val peopleColumns = db.rawQuery("PRAGMA table_info(people)", null).use {
+            val names = mutableListOf<String>()
+            while (it.moveToNext()) names += it.getString(1)
+            names
+        }
+        if ("avatar" !in peopleColumns) db.execSQL("ALTER TABLE people ADD COLUMN avatar TEXT")
         db.execSQL("CREATE TABLE IF NOT EXISTS wallpapers (id TEXT PRIMARY KEY, title TEXT, category TEXT, path TEXT, created_at INTEGER)")
         db.execSQL("CREATE TABLE IF NOT EXISTS outbox (id TEXT PRIMARY KEY, kind TEXT, payload TEXT, created_at INTEGER)")
+        db.execSQL("CREATE TABLE IF NOT EXISTS ai_messages (id TEXT PRIMARY KEY, user_id TEXT, person_id TEXT, role TEXT, body TEXT, image_path TEXT, created_at INTEGER)")
     }
 
     fun enqueue(kind: String, payload: String) {
@@ -155,6 +178,16 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 9) {
         val phone = "09012345678"
         val password = "11111111"
         if (findUser(phone) == null) signup(phone, "ادمین", password) else reset(phone, password)
+    }
+
+    fun signupGuest(): String {
+        var phone: String
+        do {
+            phone = "09" + (100_000_000..999_999_999).random()
+        } while (findUser(phone) != null)
+        val id = signup(phone, "مهمان", "guest-" + UUID.randomUUID().toString().replace("-", "").take(12))
+        writableDatabase.update("users", ContentValues().apply { put("plan", "guest") }, "id=?", arrayOf(id))
+        return id
     }
 
     fun signup(phone: String, name: String, password: String): String {
@@ -250,8 +283,9 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 9) {
     }
 
     fun people(userId: String): List<Person> {
-        val cursor = readableDatabase.rawQuery("SELECT id, name, phone, role, pinned, created_at FROM people WHERE user_id=? ORDER BY pinned DESC, created_at DESC", arrayOf(userId))
+        val cursor = readableDatabase.rawQuery("SELECT id, name, phone, role, pinned, created_at, avatar FROM people WHERE user_id=? ORDER BY pinned DESC, created_at DESC", arrayOf(userId))
         val list = mutableListOf<Person>()
+        val day = startOfDay()
         cursor.use {
             while (it.moveToNext()) {
                 val id = it.getString(0)
@@ -273,34 +307,49 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 9) {
                 }
                 val notes = readableDatabase.rawQuery("SELECT 1 FROM entries WHERE person_id=? AND kind='note' LIMIT 1", arrayOf(id))
                 val hasNote = notes.use { n -> n.moveToFirst() }
-                list += Person(id, it.getString(1), it.getString(2) ?: "", it.getString(3) ?: "", it.getInt(4) == 1, body, at, kind, channel, hasNote)
+                val unread = readableDatabase.rawQuery("SELECT COUNT(*) FROM entries WHERE person_id=? AND occurred_at>=?", arrayOf(id, day.toString())).use { row -> if (row.moveToFirst()) row.getInt(0) else 0 }
+                list += Person(id, it.getString(1), it.getString(2) ?: "", it.getString(3) ?: "", it.getInt(4) == 1, body, at, kind, channel, hasNote, if (it.isNull(6)) null else it.getString(6), unread)
             }
         }
         return list.sortedWith(compareByDescending<Person> { it.pinned }.thenByDescending { it.lastAt })
     }
 
-    fun addPerson(userId: String, name: String, phone: String, role: String): String {
-        if (name.isBlank() || role.isBlank()) error("لطفا همه فیلدها را پر کنید")
-        val taken = readableDatabase.rawQuery("SELECT 1 FROM people WHERE user_id=? AND phone=? LIMIT 1", arrayOf(userId, phone)).use { it.moveToFirst() }
-        if (taken) error("این شماره قبلاً ثبت شده")
+    fun addPerson(userId: String, name: String, phone: String, role: String, avatar: String? = null): String {
+        if (name.isBlank()) error("نام را بنویسید")
+        val owner = user(userId)
+        if (owner?.plan == "guest" && people(userId).isNotEmpty()) error("در حالت مهمان فقط یک نفر می‌توانید اضافه کنید")
+        val mobile = if (phone.isBlank()) "" else normalizePhone(phone) ?: error("شماره موبایل درست نیست")
+        if (mobile.isNotEmpty()) {
+            val taken = readableDatabase.rawQuery("SELECT 1 FROM people WHERE user_id=? AND phone=? LIMIT 1", arrayOf(userId, mobile)).use { it.moveToFirst() }
+            if (taken) error("این شماره قبلاً ثبت شده")
+        }
         val id = UUID.randomUUID().toString()
         writableDatabase.insert("people", null, ContentValues().apply {
             put("id", id)
             put("user_id", userId)
             put("name", name.trim())
-            put("phone", phone.trim())
+            put("phone", mobile)
             put("role", role.trim())
             put("pinned", 0)
             put("created_at", System.currentTimeMillis())
+            if (avatar == null) putNull("avatar") else put("avatar", avatar)
         })
         return id
     }
 
+    fun setPersonAvatar(id: String, path: String?) {
+        writableDatabase.update("people", ContentValues().apply {
+            if (path == null) putNull("avatar") else put("avatar", path)
+        }, "id=?", arrayOf(id))
+    }
+
     fun updatePerson(id: String, name: String, phone: String, role: String) {
-        if (name.isBlank() || role.isBlank()) error("لطفا همه فیلدها را پر کنید")
-        val mobile = normalizePhone(phone) ?: error("شماره موبایل درست نیست")
-        val taken = readableDatabase.rawQuery("SELECT 1 FROM people WHERE user_id=(SELECT user_id FROM people WHERE id=?) AND phone=? AND id<>? LIMIT 1", arrayOf(id, mobile, id)).use { it.moveToFirst() }
-        if (taken) error("این شماره قبلاً ثبت شده")
+        if (name.isBlank()) error("نام را بنویسید")
+        val mobile = if (phone.isBlank()) "" else normalizePhone(phone) ?: error("شماره موبایل درست نیست")
+        if (mobile.isNotEmpty()) {
+            val taken = readableDatabase.rawQuery("SELECT 1 FROM people WHERE user_id=(SELECT user_id FROM people WHERE id=?) AND phone=? AND id<>? LIMIT 1", arrayOf(id, mobile, id)).use { it.moveToFirst() }
+            if (taken) error("این شماره قبلاً ثبت شده")
+        }
         writableDatabase.update("people", ContentValues().apply {
             put("name", name.trim())
             put("phone", mobile)
@@ -314,12 +363,23 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 9) {
 
     fun entries(personId: String): List<Entry> {
         val cursor = readableDatabase.rawQuery(
-            "SELECT id, body, kind, channel, occurred_at, pinned, voice_path FROM entries WHERE person_id=? ORDER BY pinned DESC, occurred_at",
+            "SELECT id, body, kind, channel, occurred_at, pinned, voice_path, media_path FROM entries WHERE person_id=? ORDER BY pinned DESC, occurred_at",
             arrayOf(personId),
         )
         return cursor.use {
             val list = mutableListOf<Entry>()
-            while (it.moveToNext()) list += Entry(it.getString(0), it.getString(1), it.getString(2), it.getString(3), it.getLong(4), it.getInt(5) == 1, if (it.isNull(6)) null else it.getString(6))
+            while (it.moveToNext()) {
+                list += Entry(
+                    it.getString(0),
+                    it.getString(1),
+                    it.getString(2),
+                    it.getString(3),
+                    it.getLong(4),
+                    it.getInt(5) == 1,
+                    if (it.isNull(6)) null else it.getString(6),
+                    if (it.isNull(7)) null else it.getString(7),
+                )
+            }
             list
         }
     }
@@ -330,6 +390,10 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 9) {
     }
 
     fun quota(user: User): Pair<Int, Int> {
+        if (user.plan == "guest") {
+            val used = readableDatabase.rawQuery("SELECT COUNT(*) FROM entries WHERE user_id=?", arrayOf(user.id)).use { if (it.moveToFirst()) it.getInt(0) else 0 }
+            return used to 5
+        }
         val limit = if (user.plan == "free") 5 else 100
         val start = startOfDay()
         val cursor = readableDatabase.rawQuery("SELECT COUNT(*) FROM entries WHERE user_id=? AND created_at>=?", arrayOf(user.id, start.toString()))
@@ -341,9 +405,12 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 9) {
         writableDatabase.update("entries", ContentValues().apply { put("pinned", if (pinned) 1 else 0) }, "id=?", arrayOf(id))
     }
 
-    fun addEntry(user: User, personId: String, body: String, kind: String, channel: String, occurredAt: Long, voicePath: String? = null) {
+    fun addEntry(user: User, personId: String, body: String, kind: String, channel: String, occurredAt: Long, voicePath: String? = null, mediaPath: String? = null) {
         val (used, limit) = quota(user)
-        if (used >= limit) error("سقف یادداشت امروز تمام شده")
+        if (used >= limit) {
+            if (user.plan == "guest") error("در حالت مهمان فقط ۵ پیام آزمایشی می‌توانید بفرستید")
+            error("سقف پلن شما به اتمام رسیده، لطفا پلن خود را تغییر دهید")
+        }
         val now = System.currentTimeMillis()
         writableDatabase.insert("entries", null, ContentValues().apply {
             put("id", UUID.randomUUID().toString())
@@ -357,6 +424,7 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 9) {
             put("updated_at", now)
             put("pinned", 0)
             if (voicePath == null) putNull("voice_path") else put("voice_path", voicePath)
+            if (mediaPath == null) putNull("media_path") else put("media_path", mediaPath)
         })
     }
 
@@ -494,26 +562,99 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 9) {
         writableDatabase.update("users", ContentValues().apply { put("suspended", if (suspended) 1 else 0) }, "id=?", arrayOf(id))
     }
 
-    data class AiModel(val id: String, val name: String, val endpoint: String, val modelId: String, val apiKey: String, val inputCost: Double, val outputCost: Double)
+    data class AiModel(val id: String, val name: String, val endpoint: String, val modelId: String, val apiKey: String, val inputCost: Double, val outputCost: Double, val active: Boolean)
 
-    fun models(): List<AiModel> = readableDatabase.rawQuery("SELECT id, name, endpoint, model_id, api_key, input_cost, output_cost FROM ai_models ORDER BY created_at DESC", null).use {
+    fun models(): List<AiModel> = readableDatabase.rawQuery("SELECT id, name, endpoint, model_id, api_key, input_cost, output_cost, active FROM ai_models ORDER BY created_at DESC", null).use {
         val list = mutableListOf<AiModel>()
-        while (it.moveToNext()) list += AiModel(it.getString(0), it.getString(1), it.getString(2), it.getString(3), it.getString(4), it.getDouble(5), it.getDouble(6))
+        while (it.moveToNext()) list += AiModel(it.getString(0), it.getString(1), it.getString(2), it.getString(3), it.getString(4), it.getDouble(5), it.getDouble(6), it.getInt(7) == 1)
         list
+    }
+
+    fun activeModel(): AiModel? = models().firstOrNull { it.active } ?: models().firstOrNull()
+
+    fun aiMessages(userId: String, personId: String): List<AiMessage> = readableDatabase.rawQuery(
+        "SELECT id, person_id, role, body, image_path, created_at FROM ai_messages WHERE user_id=? AND person_id=? ORDER BY created_at",
+        arrayOf(userId, personId),
+    ).use {
+        val list = mutableListOf<AiMessage>()
+        while (it.moveToNext()) {
+            list += AiMessage(it.getString(0), it.getString(1), it.getString(2), it.getString(3), if (it.isNull(4)) null else it.getString(4), it.getLong(5))
+        }
+        list
+    }
+
+    fun addAiMessage(userId: String, personId: String, role: String, body: String, image: String?, createdAt: Long = System.currentTimeMillis()): AiMessage {
+        val id = UUID.randomUUID().toString()
+        writableDatabase.insert("ai_messages", null, ContentValues().apply {
+            put("id", id)
+            put("user_id", userId)
+            put("person_id", personId)
+            put("role", role)
+            put("body", body)
+            if (image == null) putNull("image_path") else put("image_path", image)
+            put("created_at", createdAt)
+        })
+        return AiMessage(id, personId, role, body, image, createdAt)
+    }
+
+    fun updateAiMessage(id: String, body: String, image: String?) {
+        writableDatabase.update("ai_messages", ContentValues().apply {
+            put("body", body)
+            if (image == null) putNull("image_path") else put("image_path", image)
+        }, "id=?", arrayOf(id))
+    }
+
+    fun deleteAiAfter(userId: String, personId: String, createdAt: Long) {
+        writableDatabase.delete("ai_messages", "user_id=? AND person_id=? AND created_at>?", arrayOf(userId, personId, createdAt.toString()))
+    }
+
+    fun clearAi(userId: String, personId: String) {
+        writableDatabase.delete("ai_messages", "user_id=? AND person_id=?", arrayOf(userId, personId))
+    }
+
+    fun ensureOpenRouter() {
+        if (models().isNotEmpty()) return
+        val key = BuildConfig.OPENROUTER_KEY.trim()
+        if (key.isBlank()) return
+        addModel("Gemma 4 31B", "https://openrouter.ai/api/v1", "google/gemma-4-31b-it:free", key, 0.0, 0.0)
     }
 
     fun addModel(name: String, endpoint: String, modelId: String, apiKey: String, inputCost: Double, outputCost: Double) {
         if (name.isBlank() || modelId.isBlank()) error("نام و شناسه مدل لازم است")
+        val id = UUID.randomUUID().toString()
+        val makeActive = models().none { it.active }
         writableDatabase.insert("ai_models", null, ContentValues().apply {
-            put("id", UUID.randomUUID().toString())
+            put("id", id)
             put("name", name.trim())
             put("endpoint", endpoint.trim().ifBlank { "https://api.openai.com/v1" })
             put("model_id", modelId.trim())
             put("api_key", apiKey.trim())
             put("input_cost", inputCost)
             put("output_cost", outputCost)
+            put("active", if (makeActive) 1 else 0)
             put("created_at", System.currentTimeMillis())
         })
+    }
+
+    fun activateModel(id: String) {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            db.execSQL("UPDATE ai_models SET active=0")
+            db.update("ai_models", ContentValues().apply { put("active", 1) }, "id=?", arrayOf(id))
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+    }
+
+    fun deleteModel(id: String) {
+        val wasActive = models().any { it.id == id && it.active }
+        writableDatabase.delete("ai_models", "id=?", arrayOf(id))
+        if (wasActive) {
+            val next = models().firstOrNull() ?: return
+            activateModel(next.id)
+        }
     }
 
     fun announcements(): List<Notice> = readableDatabase.rawQuery("SELECT id, title, body, created_at FROM announcements ORDER BY created_at DESC", null).use {

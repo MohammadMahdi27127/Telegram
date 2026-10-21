@@ -190,6 +190,7 @@ private fun SkyButton(label: String, color: Color = Sky, text: Color = Color.Whi
 @Composable
 private fun ModelsView(app: App) {
     var models by remember { mutableStateOf(app.db.models()) }
+    var provider by remember { mutableStateOf("openai") }
     var name by remember { mutableStateOf("") }
     var endpoint by remember { mutableStateOf("https://api.openai.com/v1") }
     var modelId by remember { mutableStateOf("") }
@@ -197,8 +198,31 @@ private fun ModelsView(app: App) {
     var input by remember { mutableStateOf("0") }
     var output by remember { mutableStateOf("0") }
     var error by remember { mutableStateOf("") }
+    fun selectProvider(id: String) {
+        provider = id
+        if (id == "openrouter") {
+            endpoint = "https://openrouter.ai/api/v1"
+            modelId = "google/gemma-4-31b-it:free"
+            if (name.isBlank()) name = "Gemma 4 31B"
+            if (key.isBlank()) key = BuildConfig.OPENROUTER_KEY
+            input = "0"
+            output = "0"
+        } else {
+            endpoint = "https://api.openai.com/v1"
+            if (modelId == "google/gemma-4-31b-it:free") modelId = ""
+        }
+    }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
         Text("مدل‌ها", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.End))
+        Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf("openai" to "OpenAI", "openrouter" to "OpenRouter").forEach { (id, label) ->
+                val selected = provider == id
+                Box(
+                    Modifier.weight(1f).clip(RoundedCornerShape(14.dp)).background(if (selected) Sky else Card).border(1.dp, if (selected) Sky else Line, RoundedCornerShape(14.dp)).clickable { selectProvider(id) }.padding(vertical = 12.dp),
+                    contentAlignment = Alignment.Center,
+                ) { Text(label, color = Color.White, fontWeight = FontWeight.Bold) }
+            }
+        }
         DarkField(name, { name = it }, "نام نمایشی")
         DarkField(endpoint, { endpoint = it }, "https://api.openai.com/v1")
         DarkField(modelId, { modelId = it }, "شناسه مدل")
@@ -215,7 +239,27 @@ private fun ModelsView(app: App) {
             } catch (e: Exception) { error = e.message ?: "خطا" }
         }
         models.forEach { model ->
-            Text("${model.name} · ${model.modelId}", color = Color(0xFFD6E2F0), modifier = Modifier.padding(top = 12.dp))
+            Column(Modifier.fillMaxWidth().padding(top = 12.dp).clip(RoundedCornerShape(16.dp)).background(Card).border(1.dp, if (model.active) Sky else Line, RoundedCornerShape(16.dp)).padding(14.dp)) {
+                Text(model.name, color = Color.White, fontWeight = FontWeight.Bold)
+                Text(model.modelId, color = Color(0xFF8BA0B8), fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
+                if (model.active) Text("فعال", color = Sky, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+                Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (!model.active) {
+                        Box(Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(Sky).clickable {
+                            app.db.activateModel(model.id)
+                            models = app.db.models()
+                        }.padding(vertical = 10.dp), contentAlignment = Alignment.Center) {
+                            Text("استفاده شود", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        }
+                    }
+                    Box(Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(Color(0xFF3F1D24)).clickable {
+                        app.db.deleteModel(model.id)
+                        models = app.db.models()
+                    }.padding(vertical = 10.dp), contentAlignment = Alignment.Center) {
+                        Text("حذف", color = Color(0xFFF87171), fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    }
+                }
+            }
         }
     }
 }
