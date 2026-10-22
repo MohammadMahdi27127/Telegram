@@ -3,13 +3,18 @@ package ir.daftar.goftogu
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
 import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.dp
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
@@ -34,12 +39,14 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.navigation.NavGraphBuilder
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import androidx.navigation.NavBackStackEntry
 
 private val Vazir = FontFamily(
     Font(R.font.vazirmatn_regular, FontWeight.Normal),
@@ -71,6 +78,17 @@ private fun vazirTypography(): Typography {
 }
 
 val LocalDark = compositionLocalOf { false }
+val LocalChatFont = compositionLocalOf { 16 }
+
+class ChatFontController(initial: Int, private val prefs: android.content.SharedPreferences) {
+    var size by mutableStateOf(initial.coerceIn(12, 22))
+        private set
+
+    fun set(next: Int) {
+        size = next.coerceIn(12, 22)
+        prefs.edit().putInt("chat_font_size", size).apply()
+    }
+}
 
 data class TgPalette(
     val dark: Boolean,
@@ -144,6 +162,10 @@ class MainActivity : ComponentActivity() {
                 val stored = prefs.getString("theme", null) ?: if (prefs.getBoolean("dark", false)) "dark" else "system"
                 ThemeController(stored, prefs)
             }
+            val chatFont = remember {
+                val prefs = context.getSharedPreferences("tg", 0)
+                ChatFontController(prefs.getInt("chat_font_size", 16), prefs)
+            }
             val dark = when (theme.mode) {
                 "light" -> false
                 "dark" -> true
@@ -156,10 +178,10 @@ class MainActivity : ComponentActivity() {
             } else {
                 lightColorScheme(primary = palette.blue, background = palette.bg, surface = palette.surface, onBackground = palette.text, onSurface = palette.text)
             }
-            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl, LocalDark provides dark, LocalTg provides palette) {
+            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl, LocalDark provides dark, LocalTg provides palette, LocalChatFont provides chatFont.size) {
                 MaterialTheme(colorScheme = scheme, typography = vazirTypography()) {
                     Surface(Modifier.fillMaxSize(), color = background) {
-                        Root(app, theme)
+                        Root(app, theme, chatFont)
                     }
                 }
             }
@@ -168,7 +190,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun Root(app: App, theme: ThemeController) {
+fun Root(app: App, theme: ThemeController, chatFont: ChatFontController) {
     val nav = rememberNavController()
     var userId by remember { mutableStateOf(app.sessionId()) }
     val backStack by nav.currentBackStackEntryAsState()
@@ -178,25 +200,37 @@ fun Root(app: App, theme: ThemeController) {
     var draftPhone by remember { mutableStateOf("") }
     var openComposer by remember { mutableStateOf(false) }
     val palette = LocalTg.current
-    val chatBadge = userId?.let { id -> app.db.people(id).sumOf { it.unread } } ?: 0
+    val shift = with(LocalDensity.current) { 24.dp.roundToPx() }
+    fun NavGraphBuilder.screen(
+        route: String,
+        arguments: List<androidx.navigation.NamedNavArgument> = emptyList(),
+        content: @Composable (NavBackStackEntry) -> Unit,
+    ) {
+        val motion = tween<androidx.compose.ui.unit.IntOffset>(220, easing = FastOutSlowInEasing)
+        val fade = tween<Float>(220, easing = FastOutSlowInEasing)
+        composable(
+            route,
+            arguments,
+            enterTransition = { fadeIn(fade) + slideInHorizontally(motion) { shift } + scaleIn(fade, initialScale = 0.98f) },
+            exitTransition = { fadeOut(fade) + slideOutHorizontally(motion) { -shift } },
+            popEnterTransition = { fadeIn(fade) + slideInHorizontally(motion) { -shift } + scaleIn(fade, initialScale = 0.98f) },
+            popExitTransition = { fadeOut(fade) + slideOutHorizontally(motion) { shift } },
+        ) { entry -> content(entry) }
+    }
     Scaffold(
         containerColor = palette.bg,
         bottomBar = {
             if (showBar && user != null) {
-                BottomBar(route, chatBadge) { nav.navigate(it) { launchSingleTop = true } }
+                BottomBar(route) { nav.navigate(it) { launchSingleTop = true } }
             }
         },
     ) { padding ->
         Box(Modifier.padding(padding)) {
             NavHost(nav, startDestination = if (userId == null) "login" else "chats") {
-                composable("pricing") {
+                screen("pricing") {
                     PricingScreen(onStart = { nav.navigate("signup") }, onBack = { nav.popBackStack() })
                 }
-                composable(
-                    "login",
-                    enterTransition = { fadeIn(tween(280)) + slideInHorizontally(tween(280)) { it / 6 } },
-                    exitTransition = { fadeOut(tween(160)) },
-                ) {
+                screen("login") {
                     AuthScreen(
                         app,
                         { id ->
@@ -207,11 +241,7 @@ fun Root(app: App, theme: ThemeController) {
                         { nav.navigate("forgot") },
                     )
                 }
-                composable(
-                    "signup",
-                    enterTransition = { fadeIn(tween(280)) + slideInHorizontally(tween(280)) { it / 6 } },
-                    exitTransition = { fadeOut(tween(160)) },
-                ) {
+                screen("signup") {
                     SignUpScreen(
                         app,
                         { id ->
@@ -221,24 +251,20 @@ fun Root(app: App, theme: ThemeController) {
                         { nav.navigate("login") { popUpTo("signup") { inclusive = true } } },
                     )
                 }
-                composable(
-                    "forgot",
-                    enterTransition = { fadeIn(tween(280)) + slideInHorizontally(tween(280)) { it / 6 } },
-                    exitTransition = { fadeOut(tween(160)) },
-                ) {
+                screen("forgot") {
                     ForgotScreen(
                         app,
                         { nav.navigate("login") { popUpTo("forgot") { inclusive = true } } },
                         { nav.navigate("signup") { popUpTo("forgot") { inclusive = true } } },
                     )
                 }
-                composable(
+                screen(
                     "new-person?phone={phone}",
                     listOf(navArgument("phone") { type = NavType.StringType; defaultValue = "" }),
                 ) { entry ->
                     NewPersonScreen(app, userId.orEmpty(), entry.arguments?.getString("phone").orEmpty()) { nav.popBackStack() }
                 }
-                composable("chats") {
+                screen("chats") {
                     ChatsScreen(
                         app,
                         userId.orEmpty(),
@@ -248,12 +274,14 @@ fun Root(app: App, theme: ThemeController) {
                         { nav.navigate("notices") },
                         onAi = { nav.navigate("ai") },
                         onPay = { nav.navigate("pay") },
+                        onToggleTheme = { theme.set(if (palette.dark) "light" else "dark") },
+                        darkTheme = palette.dark,
                         draftPhone = draftPhone,
                         openComposer = openComposer,
                         onComposerHandled = { openComposer = false; draftPhone = "" },
                     )
                 }
-                composable("contacts") {
+                screen("contacts") {
                     PhoneContactsScreen(
                         { nav.navigate("chats") { launchSingleTop = true } },
                         { phone ->
@@ -263,29 +291,29 @@ fun Root(app: App, theme: ThemeController) {
                         },
                     )
                 }
-                composable("ai") {
+                screen("ai") {
                     AiChatScreen(app, userId.orEmpty()) { nav.popBackStack() }
                 }
-                composable("chat/{id}", listOf(navArgument("id") { type = NavType.StringType })) { entry ->
+                screen("chat/{id}", listOf(navArgument("id") { type = NavType.StringType })) { entry ->
                     ThreadScreen(app, userId.orEmpty(), entry.arguments?.getString("id").orEmpty()) { nav.popBackStack() }
                 }
-                composable("notices") { NoticesScreen(app, userId.orEmpty()) { nav.popBackStack() } }
-                composable("settings") {
-                    ProfileScreen(app, userId.orEmpty(), theme, { nav.navigate("chats") { launchSingleTop = true } }, { nav.navigate("pay") }, { nav.navigate("pricing") }, { nav.navigate("admin") }, {
+                screen("notices") { NoticesScreen(app, userId.orEmpty()) { nav.popBackStack() } }
+                screen("settings") {
+                    ProfileScreen(app, userId.orEmpty(), theme, chatFont, { nav.navigate("chats") { launchSingleTop = true } }, { nav.navigate("pay") }, { nav.navigate("pricing") }, { nav.navigate("admin") }, {
                         app.setSession(null)
                         userId = null
                         nav.navigate("login") { popUpTo(0) }
                     })
                 }
-                composable("profile") {
-                    ProfileScreen(app, userId.orEmpty(), theme, { nav.navigate("chats") { launchSingleTop = true } }, { nav.navigate("pay") }, { nav.navigate("pricing") }, { nav.navigate("admin") }, {
+                screen("profile") {
+                    ProfileScreen(app, userId.orEmpty(), theme, chatFont, { nav.navigate("chats") { launchSingleTop = true } }, { nav.navigate("pay") }, { nav.navigate("pricing") }, { nav.navigate("admin") }, {
                         app.setSession(null)
                         userId = null
                         nav.navigate("login") { popUpTo(0) }
                     })
                 }
-                composable("pay") { PayScreen(app, userId.orEmpty()) { nav.popBackStack() } }
-                composable("admin") {
+                screen("pay") { PayScreen(app, userId.orEmpty()) { nav.popBackStack() } }
+                screen("admin") {
                     AdminScreen(app, { nav.navigate("chats") { launchSingleTop = true } }) {
                         app.setSession(null)
                         userId = null

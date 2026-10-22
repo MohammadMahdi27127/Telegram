@@ -34,6 +34,8 @@ data class Person(
     val hasNote: Boolean,
     val avatar: String? = null,
     val unread: Int = 0,
+    val isGroup: Boolean = false,
+    val saved: Boolean = false,
 )
 
 data class Entry(
@@ -45,6 +47,7 @@ data class Entry(
     val pinned: Boolean = false,
     val voicePath: String? = null,
     val mediaPath: String? = null,
+    val memberName: String? = null,
 )
 
 data class Slip(
@@ -61,9 +64,10 @@ data class Slip(
 
 data class Notice(val id: String, val title: String, val body: String, val createdAt: Long, val read: Boolean)
 data class AiMessage(val id: String, val personId: String, val role: String, val body: String, val image: String?, val createdAt: Long)
+data class Member(val id: String, val name: String)
 data class Banner(val id: String, val title: String, val body: String, val image: String? = null)
 
-class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 12) {
+class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 13) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
             """CREATE TABLE users (
@@ -92,6 +96,10 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 12) {
         db.execSQL("ALTER TABLE entries ADD COLUMN voice_path TEXT")
         db.execSQL("ALTER TABLE entries ADD COLUMN media_path TEXT")
         db.execSQL("ALTER TABLE people ADD COLUMN avatar TEXT")
+        db.execSQL("ALTER TABLE people ADD COLUMN is_group INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE people ADD COLUMN saved INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE entries ADD COLUMN member_id TEXT")
+        db.execSQL("CREATE TABLE members (id TEXT PRIMARY KEY, person_id TEXT, name TEXT, created_at INTEGER)")
         db.execSQL("CREATE TABLE wallpapers (id TEXT PRIMARY KEY, title TEXT, category TEXT, path TEXT, created_at INTEGER)")
         db.execSQL("CREATE TABLE outbox (id TEXT PRIMARY KEY, kind TEXT, payload TEXT, created_at INTEGER)")
         db.execSQL("CREATE TABLE ai_messages (id TEXT PRIMARY KEY, user_id TEXT, person_id TEXT, role TEXT, body TEXT, image_path TEXT, created_at INTEGER)")
@@ -139,6 +147,10 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 12) {
             names
         }
         if ("avatar" !in peopleColumns) db.execSQL("ALTER TABLE people ADD COLUMN avatar TEXT")
+        if ("is_group" !in peopleColumns) db.execSQL("ALTER TABLE people ADD COLUMN is_group INTEGER NOT NULL DEFAULT 0")
+        if ("saved" !in peopleColumns) db.execSQL("ALTER TABLE people ADD COLUMN saved INTEGER NOT NULL DEFAULT 0")
+        if ("member_id" !in entryColumns) db.execSQL("ALTER TABLE entries ADD COLUMN member_id TEXT")
+        db.execSQL("CREATE TABLE IF NOT EXISTS members (id TEXT PRIMARY KEY, person_id TEXT, name TEXT, created_at INTEGER)")
         db.execSQL("CREATE TABLE IF NOT EXISTS wallpapers (id TEXT PRIMARY KEY, title TEXT, category TEXT, path TEXT, created_at INTEGER)")
         db.execSQL("CREATE TABLE IF NOT EXISTS outbox (id TEXT PRIMARY KEY, kind TEXT, payload TEXT, created_at INTEGER)")
         db.execSQL("CREATE TABLE IF NOT EXISTS ai_messages (id TEXT PRIMARY KEY, user_id TEXT, person_id TEXT, role TEXT, body TEXT, image_path TEXT, created_at INTEGER)")
@@ -283,7 +295,7 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 12) {
     }
 
     fun people(userId: String): List<Person> {
-        val cursor = readableDatabase.rawQuery("SELECT id, name, phone, role, pinned, created_at, avatar FROM people WHERE user_id=? ORDER BY pinned DESC, created_at DESC", arrayOf(userId))
+        val cursor = readableDatabase.rawQuery("SELECT id, name, phone, role, pinned, created_at, avatar, is_group, saved FROM people WHERE user_id=? ORDER BY pinned DESC, created_at DESC", arrayOf(userId))
         val list = mutableListOf<Person>()
         val day = startOfDay()
         cursor.use {
@@ -308,16 +320,16 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 12) {
                 val notes = readableDatabase.rawQuery("SELECT 1 FROM entries WHERE person_id=? AND kind='note' LIMIT 1", arrayOf(id))
                 val hasNote = notes.use { n -> n.moveToFirst() }
                 val unread = readableDatabase.rawQuery("SELECT COUNT(*) FROM entries WHERE person_id=? AND occurred_at>=?", arrayOf(id, day.toString())).use { row -> if (row.moveToFirst()) row.getInt(0) else 0 }
-                list += Person(id, it.getString(1), it.getString(2) ?: "", it.getString(3) ?: "", it.getInt(4) == 1, body, at, kind, channel, hasNote, if (it.isNull(6)) null else it.getString(6), unread)
+                list += Person(id, it.getString(1), it.getString(2) ?: "", it.getString(3) ?: "", it.getInt(4) == 1, body, at, kind, channel, hasNote, if (it.isNull(6)) null else it.getString(6), unread, it.getInt(7) == 1, it.getInt(8) == 1)
             }
         }
         return list.sortedWith(compareByDescending<Person> { it.pinned }.thenByDescending { it.lastAt })
     }
 
-    fun addPerson(userId: String, name: String, phone: String, role: String, avatar: String? = null): String {
+    fun addPerson(userId: String, name: String, phone: String, role: String, avatar: String? = null, members: List<String> = emptyList(), saved: Boolean = false): String {
         if (name.isBlank()) error("نام را بنویسید")
         val owner = user(userId)
-        if (owner?.plan == "guest" && people(userId).isNotEmpty()) error("در حالت مهمان فقط یک نفر می‌توانید اضافه کنید")
+        if (owner?.plan == "guest" && people(userId).any { !it.saved }) error("در حالت مهمان فقط یک نفر می‌توانید اضافه کنید")
         val mobile = if (phone.isBlank()) "" else normalizePhone(phone) ?: error("شماره موبایل درست نیست")
         if (mobile.isNotEmpty()) {
             val taken = readableDatabase.rawQuery("SELECT 1 FROM people WHERE user_id=? AND phone=? LIMIT 1", arrayOf(userId, mobile)).use { it.moveToFirst() }
@@ -333,8 +345,41 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 12) {
             put("pinned", 0)
             put("created_at", System.currentTimeMillis())
             if (avatar == null) putNull("avatar") else put("avatar", avatar)
+            put("is_group", if (members.any { it.isNotBlank() }) 1 else 0)
+            put("saved", if (saved) 1 else 0)
         })
+        members.map { it.trim() }.filter { it.isNotEmpty() }.distinct().forEach { addMember(id, it) }
         return id
+    }
+
+    fun members(personId: String): List<Member> = readableDatabase.rawQuery(
+        "SELECT id, name FROM members WHERE person_id=? ORDER BY created_at",
+        arrayOf(personId),
+    ).use {
+        val list = mutableListOf<Member>()
+        while (it.moveToNext()) list += Member(it.getString(0), it.getString(1))
+        list
+    }
+
+    fun addMember(personId: String, name: String): String {
+        if (name.isBlank()) error("نام عضو را بنویسید")
+        val id = UUID.randomUUID().toString()
+        writableDatabase.insert("members", null, ContentValues().apply {
+            put("id", id)
+            put("person_id", personId)
+            put("name", name.trim())
+            put("created_at", System.currentTimeMillis())
+        })
+        writableDatabase.update("people", ContentValues().apply { put("is_group", 1) }, "id=?", arrayOf(personId))
+        return id
+    }
+
+    fun ensureSaved(userId: String): String {
+        val existing = readableDatabase.rawQuery("SELECT id FROM people WHERE user_id=? AND saved=1 LIMIT 1", arrayOf(userId)).use {
+            if (it.moveToFirst()) it.getString(0) else null
+        }
+        if (existing != null) return existing
+        return addPerson(userId, "پیام‌های ذخیره‌شده", "", "", saved = true)
     }
 
     fun setPersonAvatar(id: String, path: String?) {
@@ -363,7 +408,7 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 12) {
 
     fun entries(personId: String): List<Entry> {
         val cursor = readableDatabase.rawQuery(
-            "SELECT id, body, kind, channel, occurred_at, pinned, voice_path, media_path FROM entries WHERE person_id=? ORDER BY pinned DESC, occurred_at",
+            "SELECT e.id, e.body, e.kind, e.channel, e.occurred_at, e.pinned, e.voice_path, e.media_path, m.name FROM entries e LEFT JOIN members m ON m.id = e.member_id WHERE e.person_id=? ORDER BY e.pinned DESC, e.occurred_at",
             arrayOf(personId),
         )
         return cursor.use {
@@ -378,6 +423,7 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 12) {
                     it.getInt(5) == 1,
                     if (it.isNull(6)) null else it.getString(6),
                     if (it.isNull(7)) null else it.getString(7),
+                    if (it.isNull(8)) null else it.getString(8),
                 )
             }
             list
@@ -405,7 +451,7 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 12) {
         writableDatabase.update("entries", ContentValues().apply { put("pinned", if (pinned) 1 else 0) }, "id=?", arrayOf(id))
     }
 
-    fun addEntry(user: User, personId: String, body: String, kind: String, channel: String, occurredAt: Long, voicePath: String? = null, mediaPath: String? = null) {
+    fun addEntry(user: User, personId: String, body: String, kind: String, channel: String, occurredAt: Long, voicePath: String? = null, mediaPath: String? = null, memberId: String? = null) {
         val (used, limit) = quota(user)
         if (used >= limit) {
             if (user.plan == "guest") error("در حالت مهمان فقط ۵ پیام آزمایشی می‌توانید بفرستید")
@@ -425,6 +471,7 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 12) {
             put("pinned", 0)
             if (voicePath == null) putNull("voice_path") else put("voice_path", voicePath)
             if (mediaPath == null) putNull("media_path") else put("media_path", mediaPath)
+            if (memberId == null) putNull("member_id") else put("member_id", memberId)
         })
     }
 

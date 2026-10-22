@@ -277,13 +277,13 @@ private fun FinanceView(rate: String, note: String, onRate: (String) -> Unit, sa
         Text(title, color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
         Text("درآمد تأییدشده: ۰ تومان / ۰ دلار", color = Color(0xFFD6E2F0), modifier = Modifier.padding(top = 16.dp))
         Text("هزینه هوش مصنوعی که باید پرداخت شود: ۰ دلار / ۰ تومان", color = Color(0xFFD6E2F0), modifier = Modifier.padding(top = 6.dp))
-        Text("نرخ هر دلار $rate تومان از open.er-api · $note", color = Color(0xFF8BA0B8), fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
+        Text("نرخ هر دلار $rate تومان از tgju.org · $note", color = Color(0xFF8BA0B8), fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
         DarkField(rate, onRate, "165670", number = true)
         SkyButton("ثبت نرخ", onClick = save)
         Text(if (busy) "در حال دریافت..." else "گرفتن نرخ روز", color = Sky, modifier = Modifier.padding(top = 12.dp).clickable(enabled = !busy) {
             busy = true
             scope.launch {
-                val result = withContext(Dispatchers.IO) { runCatching { fetchIrr() }.getOrNull() }
+                val result = withContext(Dispatchers.IO) { runCatching { fetchTgjuToman() }.getOrNull() }
                 if (result != null) {
                     val clock = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
                     fetched("در امروز $clock", result.toLong().toString())
@@ -300,11 +300,15 @@ private fun adminPlan(plan: String) = when (plan) {
     else -> "رایگان"
 }
 
-private fun fetchIrr(): Double {
-    val conn = URL("https://open.er-api.com/v6/latest/USD").openConnection() as HttpURLConnection
+private fun fetchTgjuToman(): Double {
+    val conn = URL("https://www.tgju.org/profile/price_dollar_rl").openConnection() as HttpURLConnection
     conn.connectTimeout = 15000
+    conn.setRequestProperty("User-Agent", "Mozilla/5.0")
     val body = conn.inputStream.bufferedReader().readText()
-    return Regex(""""IRR"\s*:\s*([0-9.]+)""").find(body)?.groupValues?.get(1)?.toDouble() ?: error("نرخ پیدا نشد")
+    val rial = Regex("""data-col="info\.last_trade\.PDrCotVal">([0-9,]+)""")
+        .find(body)?.groupValues?.get(1)?.replace(",", "")?.toDouble()
+        ?: error("نرخ پیدا نشد")
+    return rial / 10.0
 }
 
 @Composable

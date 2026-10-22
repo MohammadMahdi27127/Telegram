@@ -13,8 +13,8 @@ android {
         applicationId = "ir.daftar.goftogu"
         minSdk = 26
         targetSdk = 36
-        versionCode = 5
-        versionName = "1.4"
+        versionCode = 11
+        versionName = "2.0"
         val local = Properties()
         val localFile = rootProject.file("local.properties")
         if (localFile.exists()) localFile.inputStream().use { local.load(it) }
