@@ -47,6 +47,8 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import androidx.navigation.NavBackStackEntry
+import ir.daftar.goftogu.ui.theme.AppThemeState
+import ir.daftar.goftogu.ui.theme.LocalAppTheme
 
 private val Vazir = FontFamily(
     Font(R.font.vazirmatn_regular, FontWeight.Normal),
@@ -101,12 +103,12 @@ data class TgPalette(
     val border: Color,
     val search: Color,
     val note: Color,
-    val blue: Color = Color(0xFF24A1DE),
+    val blue: Color = Color(0xFF043693),
 )
 
 fun tgLight() = TgPalette(
     dark = false,
-    bg = Color(0xFFEFEFF4),
+    bg = Color(0xFFE6E6FA),
     surface = Color.White,
     incoming = Color.White,
     outgoing = Color(0xFFEFFDDE),
@@ -131,6 +133,41 @@ fun tgDark() = TgPalette(
 )
 
 val LocalTg = compositionLocalOf { tgLight() }
+
+data class ChatThemePalette(
+    val id: String,
+    val name: String,
+    val primary: Color,
+    val outgoingBubble: Color,
+    val accent: Color,
+)
+
+val chatPalettes: List<ChatThemePalette> = listOf(
+    ChatThemePalette("classic", "آبی کلاسیک", Color(0xFF24A1DE), Color(0xFFEFF7FD), Color(0xFF0088CC)),
+    ChatThemePalette("emerald", "زمردی نئون", Color(0xFF10B981), Color(0xFFECFDF5), Color(0xFF059669)),
+    ChatThemePalette("ocean", "اقیانوسی ژرف", Color(0xFF0EA5E9), Color(0xFFF0F9FF), Color(0xFF0284C7)),
+    ChatThemePalette("sunset", "غروب مخملی", Color(0xFFF97316), Color(0xFFFFF7ED), Color(0xFFEA580C)),
+    ChatThemePalette("royalty", "یاقوت ارغوانی", Color(0xFF8B5CF6), Color(0xFFF5F3FF), Color(0xFF7C3AED)),
+    ChatThemePalette("rose", "رز مدرن", Color(0xFFF43F5E), Color(0xFFFFF1F2), Color(0xFFE11D48)),
+    ChatThemePalette("galaxy", "کهکشانی شب", Color(0xFF6366F1), Color(0xFFEEF2FF), Color(0xFF4F46E5)),
+    ChatThemePalette("olive", "سبز زیتونی مینیمال", Color(0xFF84CC16), Color(0xFFF7FEE7), Color(0xFF65A30D)),
+    ChatThemePalette("amber", "طلایی کهربایی", Color(0xFFF59E0B), Color(0xFFFFFBEB), Color(0xFFD97706)),
+    ChatThemePalette("slate", "نوک‌مدادی لوکس", Color(0xFF64748B), Color(0xFFF8FAFC), Color(0xFF475569)),
+)
+
+fun chatPaletteById(id: String?): ChatThemePalette = chatPalettes.firstOrNull { it.id == id } ?: chatPalettes.first()
+
+val LocalChatPalette = compositionLocalOf { chatPalettes.first() }
+
+class ChatPaletteController(initial: String, private val prefs: android.content.SharedPreferences) {
+    var id by mutableStateOf(initial)
+        private set
+
+    fun set(next: String) {
+        id = next
+        prefs.edit().putString("chat_palette", next).apply()
+    }
+}
 
 class ThemeController(initial: String, private val prefs: android.content.SharedPreferences) {
     var mode by mutableStateOf(initial)
@@ -166,22 +203,31 @@ class MainActivity : ComponentActivity() {
                 val prefs = context.getSharedPreferences("tg", 0)
                 ChatFontController(prefs.getInt("chat_font_size", 16), prefs)
             }
+            val chatPalette = remember {
+                val prefs = context.getSharedPreferences("tg", 0)
+                ChatPaletteController(prefs.getString("chat_palette", null) ?: "classic", prefs)
+            }
+            remember {
+                AppThemeState.init(context.getSharedPreferences("tg", 0))
+                true
+            }
+            val activeAppTheme = AppThemeState.current
             val dark = when (theme.mode) {
                 "light" -> false
                 "dark" -> true
                 else -> isSystemInDarkTheme()
             }
-            val palette = if (dark) tgDark() else tgLight()
+            val palette = (if (dark) tgDark() else tgLight()).copy(blue = activeAppTheme.buttonColor)
             val background by animateColorAsState(palette.bg, tween(200), label = "bg")
             val scheme = if (dark) {
-                darkColorScheme(primary = palette.blue, background = palette.bg, surface = palette.surface, onBackground = palette.text, onSurface = palette.text)
+                darkColorScheme(primary = activeAppTheme.buttonColor, onPrimary = activeAppTheme.onButtonColor, background = palette.bg, surface = palette.surface, onBackground = palette.text, onSurface = palette.text)
             } else {
-                lightColorScheme(primary = palette.blue, background = palette.bg, surface = palette.surface, onBackground = palette.text, onSurface = palette.text)
+                lightColorScheme(primary = activeAppTheme.buttonColor, onPrimary = activeAppTheme.onButtonColor, background = palette.bg, surface = palette.surface, onBackground = palette.text, onSurface = palette.text)
             }
-            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl, LocalDark provides dark, LocalTg provides palette, LocalChatFont provides chatFont.size) {
+            CompositionLocalProvider(LocalAppTheme provides activeAppTheme, LocalLayoutDirection provides LayoutDirection.Rtl, LocalDark provides dark, LocalTg provides palette, LocalChatFont provides chatFont.size, LocalChatPalette provides chatPaletteById(chatPalette.id)) {
                 MaterialTheme(colorScheme = scheme, typography = vazirTypography()) {
                     Surface(Modifier.fillMaxSize(), color = background) {
-                        Root(app, theme, chatFont)
+                        Root(app, theme, chatFont, chatPalette)
                     }
                 }
             }
@@ -190,12 +236,12 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun Root(app: App, theme: ThemeController, chatFont: ChatFontController) {
+fun Root(app: App, theme: ThemeController, chatFont: ChatFontController, chatPalette: ChatPaletteController) {
     val nav = rememberNavController()
     var userId by remember { mutableStateOf(app.sessionId()) }
     val backStack by nav.currentBackStackEntryAsState()
     val route = backStack?.destination?.route ?: ""
-    val showBar = userId != null && route in setOf("chats", "contacts", "profile")
+    val showBar = userId != null && route in setOf("chats", "contacts", "profile", "support")
     val user = userId?.let { app.db.user(it) }
     var draftPhone by remember { mutableStateOf("") }
     var openComposer by remember { mutableStateOf(false) }
@@ -221,7 +267,7 @@ fun Root(app: App, theme: ThemeController, chatFont: ChatFontController) {
         containerColor = palette.bg,
         bottomBar = {
             if (showBar && user != null) {
-                BottomBar(route) { nav.navigate(it) { launchSingleTop = true } }
+                BottomBar(route, user.avatar, user.name) { nav.navigate(it) { launchSingleTop = true } }
             }
         },
     ) { padding ->
@@ -299,26 +345,31 @@ fun Root(app: App, theme: ThemeController, chatFont: ChatFontController) {
                 }
                 screen("notices") { NoticesScreen(app, userId.orEmpty()) { nav.popBackStack() } }
                 screen("settings") {
-                    ProfileScreen(app, userId.orEmpty(), theme, chatFont, { nav.navigate("chats") { launchSingleTop = true } }, { nav.navigate("pay") }, { nav.navigate("pricing") }, { nav.navigate("admin") }, {
+                    ProfileScreen(app, userId.orEmpty(), theme, chatFont, chatPalette, { nav.navigate("chats") { launchSingleTop = true } }, { nav.navigate("pay") }, { nav.navigate("pricing") }, { nav.navigate("admin") }, {
                         app.setSession(null)
                         userId = null
                         nav.navigate("login") { popUpTo(0) }
                     })
                 }
                 screen("profile") {
-                    ProfileScreen(app, userId.orEmpty(), theme, chatFont, { nav.navigate("chats") { launchSingleTop = true } }, { nav.navigate("pay") }, { nav.navigate("pricing") }, { nav.navigate("admin") }, {
+                    ProfileScreen(app, userId.orEmpty(), theme, chatFont, chatPalette, { nav.navigate("chats") { launchSingleTop = true } }, { nav.navigate("pay") }, { nav.navigate("pricing") }, { nav.navigate("admin") }, {
                         app.setSession(null)
                         userId = null
                         nav.navigate("login") { popUpTo(0) }
                     })
                 }
+                screen("support") { SupportScreen(onStartChat = { nav.navigate("support-chat") }) }
+                screen("support-chat") { SupportChatRoom(app, userId.orEmpty(), false) { nav.popBackStack() } }
                 screen("pay") { PayScreen(app, userId.orEmpty()) { nav.popBackStack() } }
                 screen("admin") {
-                    AdminScreen(app, { nav.navigate("chats") { launchSingleTop = true } }) {
+                    AdminScreen(app, { nav.navigate("chats") { launchSingleTop = true } }, {
                         app.setSession(null)
                         userId = null
                         nav.navigate("login") { popUpTo(0) }
-                    }
+                    }, onSupport = { nav.navigate("admin-support/$it") })
+                }
+                screen("admin-support/{id}", listOf(navArgument("id") { type = NavType.StringType })) { entry ->
+                    SupportChatRoom(app, entry.arguments?.getString("id").orEmpty(), true) { nav.popBackStack() }
                 }
             }
         }

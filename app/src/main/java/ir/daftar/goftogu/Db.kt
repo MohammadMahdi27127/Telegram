@@ -19,6 +19,7 @@ data class User(
     val chatBg: String? = null,
     val chatColor: String? = null,
     val avatar: String? = null,
+    val username: String? = null,
 )
 
 data class Person(
@@ -63,17 +64,38 @@ data class Slip(
 )
 
 data class Notice(val id: String, val title: String, val body: String, val createdAt: Long, val read: Boolean)
+data class SupportMessage(
+    val id: String,
+    val userId: String,
+    val fromAdmin: Boolean,
+    val body: String,
+    val kind: String,
+    val path: String?,
+    val createdAt: Long,
+)
+data class SupportThread(
+    val userId: String,
+    val name: String,
+    val phone: String,
+    val username: String?,
+    val avatar: String?,
+    val lastBody: String,
+    val lastKind: String,
+    val lastAt: Long,
+    val unread: Int,
+)
 data class AiMessage(val id: String, val personId: String, val role: String, val body: String, val image: String?, val createdAt: Long)
 data class Member(val id: String, val name: String)
 data class Banner(val id: String, val title: String, val body: String, val image: String? = null)
 
-class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 13) {
+class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 15) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
             """CREATE TABLE users (
                 id TEXT PRIMARY KEY, phone TEXT UNIQUE, salt TEXT, password_hash TEXT,
                 name TEXT, plan TEXT, balance INTEGER, plan_expires_at INTEGER, suspended INTEGER,
-                banner_seen INTEGER NOT NULL DEFAULT 0, chat_bg TEXT, chat_color TEXT, avatar TEXT, created_at INTEGER
+                banner_seen INTEGER NOT NULL DEFAULT 0, chat_bg TEXT, chat_color TEXT, avatar TEXT,
+                username TEXT, created_at INTEGER
             )""",
         )
         db.execSQL(
@@ -103,6 +125,7 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 13) {
         db.execSQL("CREATE TABLE wallpapers (id TEXT PRIMARY KEY, title TEXT, category TEXT, path TEXT, created_at INTEGER)")
         db.execSQL("CREATE TABLE outbox (id TEXT PRIMARY KEY, kind TEXT, payload TEXT, created_at INTEGER)")
         db.execSQL("CREATE TABLE ai_messages (id TEXT PRIMARY KEY, user_id TEXT, person_id TEXT, role TEXT, body TEXT, image_path TEXT, created_at INTEGER)")
+        db.execSQL("CREATE TABLE support_messages (id TEXT PRIMARY KEY, user_id TEXT, from_admin INTEGER NOT NULL DEFAULT 0, body TEXT, kind TEXT, path TEXT, read_admin INTEGER NOT NULL DEFAULT 0, read_user INTEGER NOT NULL DEFAULT 0, created_at INTEGER)")
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -122,6 +145,7 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 13) {
         if ("chat_bg" !in columns) db.execSQL("ALTER TABLE users ADD COLUMN chat_bg TEXT")
         if ("chat_color" !in columns) db.execSQL("ALTER TABLE users ADD COLUMN chat_color TEXT")
         if ("avatar" !in columns) db.execSQL("ALTER TABLE users ADD COLUMN avatar TEXT")
+        if ("username" !in columns) db.execSQL("ALTER TABLE users ADD COLUMN username TEXT")
         db.execSQL("CREATE TABLE IF NOT EXISTS ai_models (id TEXT PRIMARY KEY, name TEXT, endpoint TEXT, model_id TEXT, api_key TEXT, input_cost REAL, output_cost REAL, active INTEGER NOT NULL DEFAULT 0, created_at INTEGER)")
         val modelColumns = db.rawQuery("PRAGMA table_info(ai_models)", null).use {
             val names = mutableListOf<String>()
@@ -154,6 +178,7 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 13) {
         db.execSQL("CREATE TABLE IF NOT EXISTS wallpapers (id TEXT PRIMARY KEY, title TEXT, category TEXT, path TEXT, created_at INTEGER)")
         db.execSQL("CREATE TABLE IF NOT EXISTS outbox (id TEXT PRIMARY KEY, kind TEXT, payload TEXT, created_at INTEGER)")
         db.execSQL("CREATE TABLE IF NOT EXISTS ai_messages (id TEXT PRIMARY KEY, user_id TEXT, person_id TEXT, role TEXT, body TEXT, image_path TEXT, created_at INTEGER)")
+        db.execSQL("CREATE TABLE IF NOT EXISTS support_messages (id TEXT PRIMARY KEY, user_id TEXT, from_admin INTEGER NOT NULL DEFAULT 0, body TEXT, kind TEXT, path TEXT, read_admin INTEGER NOT NULL DEFAULT 0, read_user INTEGER NOT NULL DEFAULT 0, created_at INTEGER)")
     }
 
     fun enqueue(kind: String, payload: String) {
@@ -184,6 +209,90 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 13) {
         val list = mutableListOf<Wallpaper>()
         while (it.moveToNext()) list += Wallpaper(it.getString(0), it.getString(1), it.getString(2), it.getString(3))
         list
+    }
+
+    fun sendSupport(userId: String, fromAdmin: Boolean, body: String, kind: String = "text", path: String? = null) {
+        writableDatabase.insert("support_messages", null, ContentValues().apply {
+            put("id", UUID.randomUUID().toString())
+            put("user_id", userId)
+            put("from_admin", if (fromAdmin) 1 else 0)
+            put("body", body)
+            put("kind", kind)
+            if (path == null) putNull("path") else put("path", path)
+            put("read_admin", if (fromAdmin) 1 else 0)
+            put("read_user", if (fromAdmin) 0 else 1)
+            put("created_at", System.currentTimeMillis())
+        })
+    }
+
+    fun supportMessages(userId: String): List<SupportMessage> {
+        val cursor = readableDatabase.rawQuery(
+            "SELECT id, user_id, from_admin, body, kind, path, created_at FROM support_messages WHERE user_id=? ORDER BY created_at",
+            arrayOf(userId),
+        )
+        val list = mutableListOf<SupportMessage>()
+        cursor.use {
+            while (it.moveToNext()) {
+                list += SupportMessage(
+                    it.getString(0),
+                    it.getString(1),
+                    it.getInt(2) == 1,
+                    it.getString(3).orEmpty(),
+                    it.getString(4).orEmpty(),
+                    if (it.isNull(5)) null else it.getString(5),
+                    it.getLong(6),
+                )
+            }
+        }
+        return list
+    }
+
+    fun supportThreads(): List<SupportThread> {
+        val cursor = readableDatabase.rawQuery(
+            """SELECT m.user_id, m.body, m.kind, m.created_at,
+                      (SELECT COUNT(*) FROM support_messages s WHERE s.user_id=m.user_id AND s.from_admin=0 AND s.read_admin=0),
+                      u.name, u.phone, u.username, u.avatar
+               FROM support_messages m
+               JOIN users u ON u.id = m.user_id
+               WHERE m.created_at = (SELECT MAX(s.created_at) FROM support_messages s WHERE s.user_id=m.user_id)
+               ORDER BY m.created_at DESC""",
+            null,
+        )
+        val list = mutableListOf<SupportThread>()
+        cursor.use {
+            while (it.moveToNext()) {
+                list += SupportThread(
+                    it.getString(0),
+                    it.getString(5).orEmpty(),
+                    it.getString(6).orEmpty(),
+                    if (it.isNull(7)) null else it.getString(7),
+                    if (it.isNull(8)) null else it.getString(8),
+                    it.getString(1).orEmpty(),
+                    it.getString(2).orEmpty(),
+                    it.getLong(3),
+                    it.getInt(4),
+                )
+            }
+        }
+        return list
+    }
+
+    fun supportUnreadForAdmin(): Int = readableDatabase.rawQuery(
+        "SELECT COUNT(*) FROM support_messages WHERE from_admin=0 AND read_admin=0",
+        null,
+    ).use { if (it.moveToFirst()) it.getInt(0) else 0 }
+
+    fun supportUnreadForUser(userId: String): Int = readableDatabase.rawQuery(
+        "SELECT COUNT(*) FROM support_messages WHERE user_id=? AND from_admin=1 AND read_user=0",
+        arrayOf(userId),
+    ).use { if (it.moveToFirst()) it.getInt(0) else 0 }
+
+    fun markSupportReadByAdmin(userId: String) {
+        writableDatabase.update("support_messages", ContentValues().apply { put("read_admin", 1) }, "user_id=? AND from_admin=0", arrayOf(userId))
+    }
+
+    fun markSupportReadByUser(userId: String) {
+        writableDatabase.update("support_messages", ContentValues().apply { put("read_user", 1) }, "user_id=? AND from_admin=1", arrayOf(userId))
     }
 
     fun ensureAdmin() {
@@ -251,7 +360,7 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 13) {
 
     fun user(id: String): User? {
         val cursor = readableDatabase.rawQuery(
-            "SELECT id, phone, name, plan, balance, plan_expires_at, suspended, banner_seen, chat_bg, chat_color, avatar FROM users WHERE id=?",
+            "SELECT id, phone, name, plan, balance, plan_expires_at, suspended, banner_seen, chat_bg, chat_color, avatar, username FROM users WHERE id=?",
             arrayOf(id),
         )
         cursor.use {
@@ -270,6 +379,7 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 13) {
                 if (it.isNull(8)) null else it.getString(8),
                 if (it.isNull(9)) null else it.getString(9),
                 if (it.isNull(10)) null else it.getString(10),
+                if (it.isNull(11)) null else it.getString(11),
             )
         }
     }
@@ -277,6 +387,12 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 13) {
     fun setAvatar(userId: String, path: String?) {
         writableDatabase.update("users", ContentValues().apply {
             if (path == null) putNull("avatar") else put("avatar", path)
+        }, "id=?", arrayOf(userId))
+    }
+
+    fun setUsername(userId: String, username: String?) {
+        writableDatabase.update("users", ContentValues().apply {
+            if (username.isNullOrBlank()) putNull("username") else put("username", username.trim().removePrefix("@"))
         }, "id=?", arrayOf(userId))
     }
 
@@ -523,6 +639,14 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 13) {
 
     fun deleteEntry(id: String) {
         writableDatabase.delete("entries", "id=?", arrayOf(id))
+    }
+
+    fun deletePerson(personId: String) {
+        val db = writableDatabase
+        db.delete("entries", "person_id=?", arrayOf(personId))
+        db.delete("members", "person_id=?", arrayOf(personId))
+        db.delete("ai_messages", "person_id=?", arrayOf(personId))
+        db.delete("people", "id=?", arrayOf(personId))
     }
 
     fun notices(userId: String): List<Notice> {

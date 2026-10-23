@@ -1,12 +1,40 @@
-﻿.gradle/
-.idea/
-.kotlin/
+# --- Android / Gradle ---
+.gradle/
 build/
 app/build/
-local.properties
-keystore.properties
-*.jks
+.kotlin/
 captures/
 .externalNativeBuild/
 .cxx/
+local.properties
+keystore.properties
+*.jks
+*.keystore
+
+# --- Signing / secrets ---
+.env
+.env.*
+!.env.example
+
+# --- Build output (binary) ---
+*.apk
+*.aab
+*.ap_
+*.dex
+*.hprof
 *.log
+
+# --- IDE / editor ---
+.idea/
+.trae/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+
+# --- Node / Next.js (زیرپوشه landing) ---
+node_modules/
+.next/
+out/
+.vercel
+*.tsbuildinfo

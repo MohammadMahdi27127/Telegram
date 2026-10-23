@@ -73,7 +73,7 @@ import kotlinx.coroutines.withContext
 private val Navy = Color(0xFF0B111E)
 private val Card = Color(0xFF101A2D)
 private val Line = Color(0xFF1E2D4A)
-private val Sky = Color(0xFF0098EA)
+private val Sky = Color(0xFF043693)
 private val Amber = Color(0xFFF5A623)
 
 private enum class AdminTab(val title: String) {
@@ -82,11 +82,12 @@ private enum class AdminTab(val title: String) {
     Models("اتصال و مدل‌های هوش مصنوعی"),
     Banners("بنرهای سیستمی"),
     Users("کاربران و گزارش مصرف"),
+    Support("پیام‌های پشتیبانی کاربران"),
     Security("امنیت و اطلاعیه‌ها"),
 }
 
 @Composable
-fun AdminScreen(app: App, onChat: () -> Unit, onLogout: () -> Unit) {
+fun AdminScreen(app: App, onChat: () -> Unit, onLogout: () -> Unit, onSupport: (String) -> Unit = {}) {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("tg", 0) }
     var tab by remember { mutableStateOf(AdminTab.Models) }
@@ -127,6 +128,7 @@ fun AdminScreen(app: App, onChat: () -> Unit, onLogout: () -> Unit) {
                     AdminTab.Models -> ModelsView(app)
                     AdminTab.Banners -> BannersView(app)
                     AdminTab.Users -> UsersView(app)
+                    AdminTab.Support -> AdminSupportInbox(app) { onSupport(it) }
                     AdminTab.Security -> SecurityView(app)
                 }
             }
@@ -145,6 +147,15 @@ fun AdminScreen(app: App, onChat: () -> Unit, onLogout: () -> Unit) {
                                     Text("0", color = Color.Black, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                 }
                                 Spacer(Modifier.size(8.dp))
+                            }
+                            if (item == AdminTab.Support) {
+                                val unread = app.db.supportUnreadForAdmin()
+                                if (unread > 0) {
+                                    Box(Modifier.size(22.dp).clip(CircleShape).background(Color(0xFFEF4444)), contentAlignment = Alignment.Center) {
+                                        Text(unread.toString(), color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                    Spacer(Modifier.size(8.dp))
+                                }
                             }
                             Text(item.title, color = Color.White, modifier = Modifier.weight(1f))
                         }
