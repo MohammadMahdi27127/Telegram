@@ -18,6 +18,7 @@ keystore.properties
 
 # --- Build output (binary) ---
 *.apk
+!landing/public/downloads/*.apk
 *.aab
 *.ap_
 *.dex
