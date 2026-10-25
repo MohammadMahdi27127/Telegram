@@ -11,6 +11,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -30,14 +31,23 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Menu
-import androidx.compose.material3.IconButton
 import androidx.compose.material.icons.filled.RocketLaunch
+import androidx.compose.material3.IconButton
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -53,6 +63,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -326,6 +339,7 @@ private fun fetchTgjuToman(): Double {
 private fun PaymentsView(app: App) {
     var filter by remember { mutableStateOf("همه") }
     var rows by remember { mutableStateOf(app.db.slips()) }
+    var viewingReceipt by remember { mutableStateOf<String?>(null) }
     val shown = rows.filter {
         when (filter) {
             "در انتظار" -> it.status == "pending"
@@ -345,8 +359,40 @@ private fun PaymentsView(app: App) {
         shown.forEach { slip ->
             Column(Modifier.fillMaxWidth().padding(top = 10.dp).clip(RoundedCornerShape(16.dp)).background(Card).padding(12.dp)) {
                 Text("${slip.userName} · ${slip.amount} تومان", color = Color.White, modifier = Modifier.align(Alignment.End))
-                Text(slip.refCode ?: "رسید تصویری", color = Color(0xFF8BA0B8), modifier = Modifier.align(Alignment.End))
-                if (slip.status == "pending") Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(Modifier.align(Alignment.End), verticalAlignment = Alignment.CenterVertically) {
+                    Text(slip.refCode ?: "پرداخت مستقیم", color = Color(0xFF8BA0B8))
+                    Text(" · ", color = Color(0xFF8BA0B8))
+                    
+                    if (slip.receipt != null) {
+                        Button(
+                            onClick = { viewingReceipt = slip.receipt },
+                            colors = ButtonDefaults.buttonColors(containerColor = Sky.copy(alpha = 0.1f)),
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                            modifier = Modifier.height(32.dp)
+                        ) {
+                            Icon(Icons.Filled.Visibility, null, tint = Sky, modifier = Modifier.size(14.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("مشاهده تصویر کامل فیش", color = Sky, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    } else {
+                        Button(
+                            onClick = {},
+                            enabled = false,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color.Transparent,
+                                disabledContainerColor = Color.Transparent,
+                                disabledContentColor = Color(0xFF6B7280)
+                            ),
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                            modifier = Modifier.height(32.dp).border(1.dp, Color(0xFF6B7280).copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+                        ) {
+                            Text("فاقد تصویر فیش", fontSize = 11.sp)
+                        }
+                    }
+                }
+                if (slip.status == "pending") Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("تأیید", color = Sky, modifier = Modifier.clickable {
                         app.db.reviewSlip(slip.id, "approved")
                         rows = app.db.slips()
@@ -355,6 +401,64 @@ private fun PaymentsView(app: App) {
                         app.db.reviewSlip(slip.id, "rejected")
                         rows = app.db.slips()
                     })
+                }
+            }
+        }
+    }
+    
+    // Fullscreen receipt viewer
+    viewingReceipt?.let { path ->
+        val file = java.io.File(path)
+        if (file.exists()) {
+            val bitmap = remember(path) { android.graphics.BitmapFactory.decodeFile(path) }
+            if (bitmap != null) {
+                Dialog(
+                    onDismissRequest = { viewingReceipt = null },
+                    properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
+                ) {
+                    Box(Modifier.fillMaxSize().background(Color.Black)) {
+                        var scale by remember { mutableStateOf(1f) }
+                        var offsetX by remember { mutableStateOf(0f) }
+                        var offsetY by remember { mutableStateOf(0f) }
+
+                        Box(
+                            Modifier
+                                .fillMaxSize()
+                                .pointerInput(Unit) {
+                                    detectTransformGestures { _, pan, zoom, _ ->
+                                        scale = (scale * zoom).coerceIn(1f, 5f)
+                                        offsetX += pan.x
+                                        offsetY += pan.y
+                                    }
+                                }
+                                .graphicsLayer(
+                                    scaleX = scale,
+                                    scaleY = scale,
+                                    translationX = offsetX,
+                                    translationY = offsetY
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Image(
+                                bitmap.asImageBitmap(),
+                                contentDescription = "Receipt Fullscreen",
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Fit
+                            )
+                        }
+
+                        // Top Close Button
+                        IconButton(
+                            onClick = { viewingReceipt = null },
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(top = 40.dp, end = 20.dp)
+                                .size(44.dp)
+                                .background(Color.Black.copy(alpha = 0.5f), CircleShape)
+                        ) {
+                            Icon(Icons.Filled.Close, "بستن", tint = Color.White, modifier = Modifier.size(24.dp))
+                        }
+                    }
                 }
             }
         }

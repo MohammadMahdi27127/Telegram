@@ -4,7 +4,10 @@ import android.content.ContentValues
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import java.text.SimpleDateFormat
 import java.util.Calendar
+import java.util.Date
+import java.util.Locale
 import java.util.UUID
 
 data class User(
@@ -20,6 +23,9 @@ data class User(
     val chatColor: String? = null,
     val avatar: String? = null,
     val username: String? = null,
+    val monthlyDownloadCount: Int = 0,
+    val monthlyAiUsageCount: Int = 0,
+    val lastQuotaResetMonth: String? = null,
 )
 
 data class Person(
@@ -37,10 +43,24 @@ data class Person(
     val unread: Int = 0,
     val isGroup: Boolean = false,
     val saved: Boolean = false,
+    val archived: Boolean = false,
 )
+
+data class Team(
+    val id: String,
+    val name: String,
+    val description: String,
+    val createdAt: Long,
+    val memberCount: Int,
+    val lastBody: String,
+    val lastAt: Long,
+)
+
+data class TeamMember(val id: String, val name: String, val contactId: String?, val isMe: Boolean)
 
 data class Entry(
     val id: String,
+    val userId: String,
     val body: String,
     val kind: String,
     val channel: String,
@@ -49,6 +69,7 @@ data class Entry(
     val voicePath: String? = null,
     val mediaPath: String? = null,
     val memberName: String? = null,
+    val targetRecipientId: String? = null,
 )
 
 data class Slip(
@@ -61,6 +82,16 @@ data class Slip(
     val status: String,
     val receipt: String?,
     val refCode: String?,
+    val createdAt: Long = 0,
+)
+
+data class ExportLog(
+    val id: String,
+    val userId: String,
+    val timestamp: Long,
+    val fileType: String,
+    val targetName: String,
+    val recordsCount: Int
 )
 
 data class Notice(val id: String, val title: String, val body: String, val createdAt: Long, val read: Boolean)
@@ -88,14 +119,17 @@ data class AiMessage(val id: String, val personId: String, val role: String, val
 data class Member(val id: String, val name: String)
 data class Banner(val id: String, val title: String, val body: String, val image: String? = null)
 
-class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 15) {
+class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 17) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
             """CREATE TABLE users (
                 id TEXT PRIMARY KEY, phone TEXT UNIQUE, salt TEXT, password_hash TEXT,
                 name TEXT, plan TEXT, balance INTEGER, plan_expires_at INTEGER, suspended INTEGER,
                 banner_seen INTEGER NOT NULL DEFAULT 0, chat_bg TEXT, chat_color TEXT, avatar TEXT,
-                username TEXT, created_at INTEGER
+                username TEXT, created_at INTEGER,
+                monthly_download_count INTEGER NOT NULL DEFAULT 0,
+                monthly_ai_usage_count INTEGER NOT NULL DEFAULT 0,
+                last_quota_reset_month TEXT
             )""",
         )
         db.execSQL(
@@ -106,7 +140,7 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 15) {
         db.execSQL(
             """CREATE TABLE entries (
                 id TEXT PRIMARY KEY, user_id TEXT, person_id TEXT, body TEXT, kind TEXT, channel TEXT,
-                occurred_at INTEGER, created_at INTEGER, updated_at INTEGER
+                occurred_at INTEGER, created_at INTEGER, updated_at INTEGER, target_recipient_id TEXT
             )""",
         )
         db.execSQL("CREATE TABLE notices (id TEXT PRIMARY KEY, user_id TEXT, title TEXT, body TEXT, read INTEGER, created_at INTEGER)")
@@ -126,9 +160,11 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 15) {
         db.execSQL("CREATE TABLE outbox (id TEXT PRIMARY KEY, kind TEXT, payload TEXT, created_at INTEGER)")
         db.execSQL("CREATE TABLE ai_messages (id TEXT PRIMARY KEY, user_id TEXT, person_id TEXT, role TEXT, body TEXT, image_path TEXT, created_at INTEGER)")
         db.execSQL("CREATE TABLE support_messages (id TEXT PRIMARY KEY, user_id TEXT, from_admin INTEGER NOT NULL DEFAULT 0, body TEXT, kind TEXT, path TEXT, read_admin INTEGER NOT NULL DEFAULT 0, read_user INTEGER NOT NULL DEFAULT 0, created_at INTEGER)")
+        db.execSQL("CREATE TABLE IF NOT EXISTS export_logs (id TEXT PRIMARY KEY, user_id TEXT, timestamp INTEGER, file_type TEXT, target_name TEXT, records_count INTEGER)")
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS export_logs (id TEXT PRIMARY KEY, user_id TEXT, timestamp INTEGER, file_type TEXT, target_name TEXT, records_count INTEGER)")
         db.execSQL("CREATE TABLE IF NOT EXISTS banners (id TEXT PRIMARY KEY, title TEXT NOT NULL, body TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL)")
         val columns = db.rawQuery("PRAGMA table_info(users)", null).use {
             val names = mutableListOf<String>()
@@ -146,6 +182,9 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 15) {
         if ("chat_color" !in columns) db.execSQL("ALTER TABLE users ADD COLUMN chat_color TEXT")
         if ("avatar" !in columns) db.execSQL("ALTER TABLE users ADD COLUMN avatar TEXT")
         if ("username" !in columns) db.execSQL("ALTER TABLE users ADD COLUMN username TEXT")
+        if ("monthly_download_count" !in columns) db.execSQL("ALTER TABLE users ADD COLUMN monthly_download_count INTEGER NOT NULL DEFAULT 0")
+        if ("monthly_ai_usage_count" !in columns) db.execSQL("ALTER TABLE users ADD COLUMN monthly_ai_usage_count INTEGER NOT NULL DEFAULT 0")
+        if ("last_quota_reset_month" !in columns) db.execSQL("ALTER TABLE users ADD COLUMN last_quota_reset_month TEXT")
         db.execSQL("CREATE TABLE IF NOT EXISTS ai_models (id TEXT PRIMARY KEY, name TEXT, endpoint TEXT, model_id TEXT, api_key TEXT, input_cost REAL, output_cost REAL, active INTEGER NOT NULL DEFAULT 0, created_at INTEGER)")
         val modelColumns = db.rawQuery("PRAGMA table_info(ai_models)", null).use {
             val names = mutableListOf<String>()
@@ -174,6 +213,7 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 15) {
         if ("is_group" !in peopleColumns) db.execSQL("ALTER TABLE people ADD COLUMN is_group INTEGER NOT NULL DEFAULT 0")
         if ("saved" !in peopleColumns) db.execSQL("ALTER TABLE people ADD COLUMN saved INTEGER NOT NULL DEFAULT 0")
         if ("member_id" !in entryColumns) db.execSQL("ALTER TABLE entries ADD COLUMN member_id TEXT")
+        if ("target_recipient_id" !in entryColumns) db.execSQL("ALTER TABLE entries ADD COLUMN target_recipient_id TEXT")
         db.execSQL("CREATE TABLE IF NOT EXISTS members (id TEXT PRIMARY KEY, person_id TEXT, name TEXT, created_at INTEGER)")
         db.execSQL("CREATE TABLE IF NOT EXISTS wallpapers (id TEXT PRIMARY KEY, title TEXT, category TEXT, path TEXT, created_at INTEGER)")
         db.execSQL("CREATE TABLE IF NOT EXISTS outbox (id TEXT PRIMARY KEY, kind TEXT, payload TEXT, created_at INTEGER)")
@@ -360,14 +400,14 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 15) {
 
     fun user(id: String): User? {
         val cursor = readableDatabase.rawQuery(
-            "SELECT id, phone, name, plan, balance, plan_expires_at, suspended, banner_seen, chat_bg, chat_color, avatar, username FROM users WHERE id=?",
+            "SELECT id, phone, name, plan, balance, plan_expires_at, suspended, banner_seen, chat_bg, chat_color, avatar, username, monthly_download_count, monthly_ai_usage_count, last_quota_reset_month FROM users WHERE id=?",
             arrayOf(id),
         )
         cursor.use {
             if (!it.moveToFirst()) return null
             val expires = if (it.isNull(5)) null else it.getLong(5)
             val plan = if (expires != null && expires < System.currentTimeMillis()) "free" else it.getString(3)
-            return User(
+            val user = User(
                 it.getString(0),
                 it.getString(1),
                 it.getString(2),
@@ -380,8 +420,41 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 15) {
                 if (it.isNull(9)) null else it.getString(9),
                 if (it.isNull(10)) null else it.getString(10),
                 if (it.isNull(11)) null else it.getString(11),
+                it.getInt(12),
+                it.getInt(13),
+                if (it.isNull(14)) null else it.getString(14),
             )
+            return ensureQuotaReset(user)
         }
+    }
+
+    private fun ensureQuotaReset(user: User): User {
+        val currentMonth = SimpleDateFormat("yyyy-MM", Locale.US).format(Date())
+        if (user.lastQuotaResetMonth != currentMonth) {
+            writableDatabase.update("users", ContentValues().apply {
+                put("monthly_download_count", 0)
+                put("monthly_ai_usage_count", 0)
+                put("last_quota_reset_month", currentMonth)
+            }, "id=?", arrayOf(user.id))
+            return user.copy(monthlyDownloadCount = 0, monthlyAiUsageCount = 0, lastQuotaResetMonth = currentMonth)
+        }
+        return user
+    }
+
+    fun incrementAiUsage(userId: String) {
+        writableDatabase.execSQL("UPDATE users SET monthly_ai_usage_count = monthly_ai_usage_count + 1 WHERE id=?", arrayOf(userId))
+    }
+
+    fun incrementDownloadUsage(userId: String) {
+        writableDatabase.execSQL("UPDATE users SET monthly_download_count = monthly_download_count + 1 WHERE id=?", arrayOf(userId))
+    }
+
+    fun mediaCount(userId: String): Int {
+        val cursor = readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM entries WHERE user_id=? AND (voice_path IS NOT NULL OR media_path IS NOT NULL)",
+            arrayOf(userId)
+        )
+        return cursor.use { if (it.moveToFirst()) it.getInt(0) else 0 }
     }
 
     fun setAvatar(userId: String, path: String?) {
@@ -524,7 +597,7 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 15) {
 
     fun entries(personId: String): List<Entry> {
         val cursor = readableDatabase.rawQuery(
-            "SELECT e.id, e.body, e.kind, e.channel, e.occurred_at, e.pinned, e.voice_path, e.media_path, m.name FROM entries e LEFT JOIN members m ON m.id = e.member_id WHERE e.person_id=? ORDER BY e.pinned DESC, e.occurred_at",
+            "SELECT e.id, e.user_id, e.body, e.kind, e.channel, e.occurred_at, e.pinned, e.voice_path, e.media_path, m.name, e.target_recipient_id FROM entries e LEFT JOIN members m ON m.id = e.member_id WHERE e.person_id=? ORDER BY e.pinned DESC, e.occurred_at",
             arrayOf(personId),
         )
         return cursor.use {
@@ -535,11 +608,13 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 15) {
                     it.getString(1),
                     it.getString(2),
                     it.getString(3),
-                    it.getLong(4),
-                    it.getInt(5) == 1,
-                    if (it.isNull(6)) null else it.getString(6),
+                    it.getString(4),
+                    it.getLong(5),
+                    it.getInt(6) == 1,
                     if (it.isNull(7)) null else it.getString(7),
                     if (it.isNull(8)) null else it.getString(8),
+                    if (it.isNull(9)) null else it.getString(9),
+                    if (it.isNull(10)) null else it.getString(10),
                 )
             }
             list
@@ -551,12 +626,44 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 15) {
         return cursor.use { if (it.moveToFirst()) it.getString(0) else "" }
     }
 
+    fun teams(userId: String): List<Team> {
+        val cursor = readableDatabase.rawQuery(
+            """SELECT p.id, p.name, p.role, p.created_at,
+                      (SELECT COUNT(*) FROM members m WHERE m.person_id = p.id),
+                      (SELECT body FROM entries e WHERE e.person_id = p.id ORDER BY e.occurred_at DESC LIMIT 1),
+                      (SELECT occurred_at FROM entries e WHERE e.person_id = p.id ORDER BY e.occurred_at DESC LIMIT 1)
+               FROM people p
+               WHERE p.user_id = ? AND p.is_group = 1
+               ORDER BY created_at DESC""",
+            arrayOf(userId)
+        )
+        val list = mutableListOf<Team>()
+        cursor.use {
+            while (it.moveToNext()) {
+                list += Team(
+                    it.getString(0),
+                    it.getString(1),
+                    it.getString(2) ?: "",
+                    it.getLong(3),
+                    it.getInt(4),
+                    it.getString(5) ?: "",
+                    it.getLong(6).takeIf { at -> at > 0 } ?: it.getLong(3)
+                )
+            }
+        }
+        return list
+    }
+
+    fun addTeam(userId: String, name: String, description: String, members: List<String>) {
+        addPerson(userId, name, "", description, members = members)
+    }
+
     fun quota(user: User): Pair<Int, Int> {
         if (user.plan == "guest") {
             val used = readableDatabase.rawQuery("SELECT COUNT(*) FROM entries WHERE user_id=?", arrayOf(user.id)).use { if (it.moveToFirst()) it.getInt(0) else 0 }
             return used to 5
         }
-        val limit = if (user.plan == "free") 5 else 100
+        val limit = if (user.plan == "free") 5 else 1000000
         val start = startOfDay()
         val cursor = readableDatabase.rawQuery("SELECT COUNT(*) FROM entries WHERE user_id=? AND created_at>=?", arrayOf(user.id, start.toString()))
         val used = cursor.use { if (it.moveToFirst()) it.getInt(0) else 0 }
@@ -567,7 +674,12 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 15) {
         writableDatabase.update("entries", ContentValues().apply { put("pinned", if (pinned) 1 else 0) }, "id=?", arrayOf(id))
     }
 
-    fun addEntry(user: User, personId: String, body: String, kind: String, channel: String, occurredAt: Long, voicePath: String? = null, mediaPath: String? = null, memberId: String? = null) {
+    fun addEntry(user: User, personId: String, body: String, kind: String, channel: String, occurredAt: Long, voicePath: String? = null, mediaPath: String? = null, memberId: String? = null, targetRecipientId: String? = null) {
+        if (voicePath != null || mediaPath != null) {
+            if (user.plan == "free" && mediaCount(user.id) >= 20) {
+                error("سقف بارگذاری فایل: شما به سقف مجاز ۲۰ فایل در پلن رایگان رسیده‌اید. برای ارسال نامحدود فایل، اشتراک پیشرفته را فعال کنید.")
+            }
+        }
         val (used, limit) = quota(user)
         if (used >= limit) {
             if (user.plan == "guest") error("در حالت مهمان فقط ۵ پیام آزمایشی می‌توانید بفرستید")
@@ -588,6 +700,7 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 15) {
             if (voicePath == null) putNull("voice_path") else put("voice_path", voicePath)
             if (mediaPath == null) putNull("media_path") else put("media_path", mediaPath)
             if (memberId == null) putNull("member_id") else put("member_id", memberId)
+            if (targetRecipientId == null) putNull("target_recipient_id") else put("target_recipient_id", targetRecipientId)
         })
     }
 
@@ -607,11 +720,39 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 15) {
         })
     }
 
-    fun slips(): List<Slip> = readableDatabase.rawQuery("SELECT id, user_id, kind, plan, amount, status, receipt, ref_code FROM slips ORDER BY created_at DESC", null).use {
+    fun slips(): List<Slip> = readableDatabase.rawQuery("SELECT id, user_id, kind, plan, amount, status, receipt, ref_code, created_at FROM slips ORDER BY created_at DESC", null).use {
         val list = mutableListOf<Slip>()
         while (it.moveToNext()) {
             val user = user(it.getString(1))
-            list += Slip(it.getString(0), it.getString(1), user?.name ?: "", it.getString(2), if (it.isNull(3)) null else it.getString(3), it.getInt(4), it.getString(5), if (it.isNull(6)) null else it.getString(6), if (it.isNull(7)) null else it.getString(7))
+            list += Slip(it.getString(0), it.getString(1), user?.name ?: "", it.getString(2), if (it.isNull(3)) null else it.getString(3), it.getInt(4), it.getString(5), if (it.isNull(6)) null else it.getString(6), if (it.isNull(7)) null else it.getString(7), it.getLong(8))
+        }
+        list
+    }
+
+    fun userSlips(userId: String): List<Slip> = readableDatabase.rawQuery("SELECT id, user_id, kind, plan, amount, status, receipt, ref_code, created_at FROM slips WHERE user_id=? ORDER BY created_at DESC", arrayOf(userId)).use {
+        val list = mutableListOf<Slip>()
+        while (it.moveToNext()) {
+            val user = user(it.getString(1))
+            list += Slip(it.getString(0), it.getString(1), user?.name ?: "", it.getString(2), if (it.isNull(3)) null else it.getString(3), it.getInt(4), it.getString(5), if (it.isNull(6)) null else it.getString(6), if (it.isNull(7)) null else it.getString(7), it.getLong(8))
+        }
+        list
+    }
+
+    fun addExportLog(userId: String, fileType: String, targetName: String, count: Int) {
+        writableDatabase.insert("export_logs", null, ContentValues().apply {
+            put("id", UUID.randomUUID().toString())
+            put("user_id", userId)
+            put("timestamp", System.currentTimeMillis())
+            put("file_type", fileType)
+            put("target_name", targetName)
+            put("records_count", count)
+        })
+    }
+
+    fun exportLogs(userId: String): List<ExportLog> = readableDatabase.rawQuery("SELECT id, user_id, timestamp, file_type, target_name, records_count FROM export_logs WHERE user_id=? ORDER BY timestamp DESC", arrayOf(userId)).use {
+        val list = mutableListOf<ExportLog>()
+        while (it.moveToNext()) {
+            list += ExportLog(it.getString(0), it.getString(1), it.getLong(2), it.getString(3), it.getString(4), it.getInt(5))
         }
         list
     }
@@ -620,7 +761,23 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 15) {
         val slip = slips().find { it.id == id } ?: error("پرداخت پیدا نشد")
         if (slip.status != "pending") error("این پرداخت بررسی شده")
         writableDatabase.update("slips", ContentValues().apply { put("status", status) }, "id=?", arrayOf(id))
-        if (status == "approved") topUp(slip.userId, slip.amount)
+        if (status == "approved") {
+            topUp(slip.userId, slip.amount)
+            // If the slip is for a plan, activate it immediately and deduct price
+            if (!slip.plan.isNullOrBlank()) {
+                val isSeasonal = slip.plan.contains("فصلی")
+                val planType = if (isSeasonal) "advanced" else "advanced" // Plus is advanced
+                val price = if (isSeasonal) 2_500_000 else 1_000_000
+                val durationDays = if (isSeasonal) 90L else 30L
+                val expires = System.currentTimeMillis() + durationDays * 24 * 60 * 60 * 1000
+                
+                writableDatabase.execSQL(
+                    "UPDATE users SET balance = balance - ?, plan=?, plan_expires_at=? WHERE id=?",
+                    arrayOf<Any>(price.toLong(), "advanced", expires, slip.userId),
+                )
+                addNotice(slip.userId, "اشتراک فعال شد", "اشتراک ${slip.plan} با موفقیت فعال شد و قابلیت تیم‌ها باز گردید.")
+            }
+        }
     }
 
     fun updateEntry(id: String, body: String, kind: String, channel: String, occurredAt: Long) {
@@ -712,15 +869,18 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 15) {
     }
 
     fun buyPlan(user: User, plan: String): String {
-        val price = if (plan == "advanced") 1_000_000 else 500_000
+        val isSeasonal = plan.contains("فصلی")
+        val price = if (isSeasonal) 2_500_000 else 1_000_000
+        val durationDays = if (isSeasonal) 90L else 30L
+        
         if (user.balance < price) error("موجودی کیف پول کافی نیست")
-        val expires = System.currentTimeMillis() + 30L * 24 * 60 * 60 * 1000
+        val expires = System.currentTimeMillis() + durationDays * 24 * 60 * 60 * 1000
         writableDatabase.execSQL(
             "UPDATE users SET balance = balance - ?, plan=?, plan_expires_at=? WHERE id=?",
-            arrayOf<Any>(price.toLong(), plan, expires, user.id),
+            arrayOf<Any>(price.toLong(), "advanced", expires, user.id),
         )
-        addNotice(user.id, "پلن فعال شد", "پلن برای ۳۰ روز فعال است.")
-        return if (plan == "advanced") "پیشرفته" else "پایه"
+        addNotice(user.id, "پلن فعال شد", "پلن ${if (isSeasonal) "فصلی" else "ماهانه"} با موفقیت فعال شد.")
+        return "پیشرفته"
     }
 
     fun users(): List<User> = readableDatabase.rawQuery("SELECT id FROM users ORDER BY created_at DESC", null).use {

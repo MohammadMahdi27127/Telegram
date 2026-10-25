@@ -25,10 +25,12 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -49,6 +51,7 @@ import androidx.navigation.navArgument
 import androidx.navigation.NavBackStackEntry
 import ir.daftar.goftogu.ui.theme.AppThemeState
 import ir.daftar.goftogu.ui.theme.LocalAppTheme
+import kotlinx.coroutines.delay
 
 private val Vazir = FontFamily(
     Font(R.font.vazirmatn_regular, FontWeight.Normal),
@@ -241,8 +244,25 @@ fun Root(app: App, theme: ThemeController, chatFont: ChatFontController, chatPal
     var userId by remember { mutableStateOf(app.sessionId()) }
     val backStack by nav.currentBackStackEntryAsState()
     val route = backStack?.destination?.route ?: ""
-    val showBar = userId != null && route in setOf("chats", "contacts", "profile", "support")
+    val showBar = userId != null && route in setOf("chats", "teams", "contacts", "profile", "support")
     val user = userId?.let { app.db.user(it) }
+    // وقتی پاسخ جدیدی از پشتیبانی می‌رسد، روی گوشی نوتیفیکیشن نمایش داده می‌شود.
+    val context = LocalContext.current
+    val currentRoute by rememberUpdatedState(route)
+    var seenSupportReply by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(userId) {
+        val uid = userId ?: return@LaunchedEffect
+        seenSupportReply = app.db.supportMessages(uid).lastOrNull { it.fromAdmin }?.id
+        while (true) {
+            delay(4000)
+            val latest = app.db.supportMessages(uid).lastOrNull { it.fromAdmin } ?: continue
+            if (latest.id == seenSupportReply) continue
+            seenSupportReply = latest.id
+            if (!currentRoute.startsWith("support")) {
+                showSupportNotification(context, "پشتیبانی مکالمات من", latest.body.ifBlank { "پیام جدید از پشتیبانی" })
+            }
+        }
+    }
     var draftPhone by remember { mutableStateOf("") }
     var openComposer by remember { mutableStateOf(false) }
     val palette = LocalTg.current
@@ -267,14 +287,20 @@ fun Root(app: App, theme: ThemeController, chatFont: ChatFontController, chatPal
         containerColor = palette.bg,
         bottomBar = {
             if (showBar && user != null) {
-                BottomBar(route, user.avatar, user.name) { nav.navigate(it) { launchSingleTop = true } }
+                BottomBar(route, user.avatar, user.name, user.plan == "advanced") { nav.navigate(it) { launchSingleTop = true } }
             }
         },
     ) { padding ->
         Box(Modifier.padding(padding)) {
             NavHost(nav, startDestination = if (userId == null) "login" else "chats") {
                 screen("pricing") {
-                    PricingScreen(onStart = { nav.navigate("signup") }, onBack = { nav.popBackStack() })
+                    PricingScreen(
+                        onPay = { plan -> 
+                            if (userId == null) nav.navigate("signup")
+                            else nav.navigate("pay") // Or pass the plan to pay screen
+                        }, 
+                        onBack = { nav.popBackStack() }
+                    )
                 }
                 screen("login") {
                     AuthScreen(
@@ -327,6 +353,15 @@ fun Root(app: App, theme: ThemeController, chatFont: ChatFontController, chatPal
                         onComposerHandled = { openComposer = false; draftPhone = "" },
                     )
                 }
+                screen("teams") {
+                    TeamsScreen(
+                        app,
+                        userId.orEmpty(),
+                        onOpenTeam = { nav.navigate("chat/$it") },
+                        onUpgrade = { nav.navigate("pricing") },
+                        onBack = { nav.popBackStack() }
+                    )
+                }
                 screen("contacts") {
                     PhoneContactsScreen(
                         { nav.navigate("chats") { launchSingleTop = true } },
@@ -341,26 +376,28 @@ fun Root(app: App, theme: ThemeController, chatFont: ChatFontController, chatPal
                     AiChatScreen(app, userId.orEmpty()) { nav.popBackStack() }
                 }
                 screen("chat/{id}", listOf(navArgument("id") { type = NavType.StringType })) { entry ->
-                    ThreadScreen(app, userId.orEmpty(), entry.arguments?.getString("id").orEmpty()) { nav.popBackStack() }
+                    ThreadScreen(app, userId.orEmpty(), entry.arguments?.getString("id").orEmpty(), { nav.popBackStack() }, { nav.navigate("pricing") })
                 }
                 screen("notices") { NoticesScreen(app, userId.orEmpty()) { nav.popBackStack() } }
                 screen("settings") {
-                    ProfileScreen(app, userId.orEmpty(), theme, chatFont, chatPalette, { nav.navigate("chats") { launchSingleTop = true } }, { nav.navigate("pay") }, { nav.navigate("pricing") }, { nav.navigate("admin") }, {
+                    ProfileScreen(app, userId.orEmpty(), theme, chatFont, chatPalette, { nav.navigate("chats") { launchSingleTop = true } }, { nav.navigate("payment-history") }, { nav.navigate("export-history") }, { nav.navigate("pricing") }, { nav.navigate("admin") }, {
                         app.setSession(null)
                         userId = null
                         nav.navigate("login") { popUpTo(0) }
                     })
                 }
                 screen("profile") {
-                    ProfileScreen(app, userId.orEmpty(), theme, chatFont, chatPalette, { nav.navigate("chats") { launchSingleTop = true } }, { nav.navigate("pay") }, { nav.navigate("pricing") }, { nav.navigate("admin") }, {
+                    ProfileScreen(app, userId.orEmpty(), theme, chatFont, chatPalette, { nav.navigate("chats") { launchSingleTop = true } }, { nav.navigate("payment-history") }, { nav.navigate("export-history") }, { nav.navigate("pricing") }, { nav.navigate("admin") }, {
                         app.setSession(null)
                         userId = null
                         nav.navigate("login") { popUpTo(0) }
                     })
                 }
+                screen("payment-history") { PaymentHistoryScreen(app, userId.orEmpty()) { nav.popBackStack() } }
+                screen("export-history") { ExportHistoryScreen(app, userId.orEmpty()) { nav.popBackStack() } }
                 screen("support") { SupportScreen(onStartChat = { nav.navigate("support-chat") }) }
                 screen("support-chat") { SupportChatRoom(app, userId.orEmpty(), false) { nav.popBackStack() } }
-                screen("pay") { PayScreen(app, userId.orEmpty()) { nav.popBackStack() } }
+                screen("pay") { PayScreen(app, userId.orEmpty(), { nav.popBackStack() }, null) }
                 screen("admin") {
                     AdminScreen(app, { nav.navigate("chats") { launchSingleTop = true } }, {
                         app.setSession(null)

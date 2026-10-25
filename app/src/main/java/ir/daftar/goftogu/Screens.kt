@@ -1,11 +1,16 @@
 package ir.daftar.goftogu
 
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.provider.ContactsContract
 import java.net.HttpURLConnection
 import java.net.URL
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.UUID
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
@@ -77,6 +82,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.AccountCircle
@@ -91,6 +97,10 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.TableChart
+import androidx.compose.material.icons.filled.OpenInNew
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Headphones
@@ -130,11 +140,18 @@ import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.HeadsetMic
 import androidx.compose.material.icons.outlined.People
 import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.Receipt
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.DropdownMenu
@@ -201,9 +218,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.unit.sp
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 import ir.daftar.goftogu.ui.theme.APP_THEMES
 import ir.daftar.goftogu.ui.theme.AppColorTheme
 import ir.daftar.goftogu.ui.theme.LocalAppTheme
@@ -267,24 +281,174 @@ fun LandingScreen(onLogin: () -> Unit, onSignup: () -> Unit, onPricing: () -> Un
 }
 
 @Composable
-fun PricingScreen(onStart: () -> Unit, onBack: () -> Unit) {
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp)) {
-        TextButton(onClick = onBack) { Text("بازگشت") }
-        Text("قیمت‌ها", fontSize = 28.sp, fontWeight = FontWeight.Bold)
-        Text("سقف روزانه هر دو نوع ثبت را می‌شمارد: موضوع صحبت و یادداشت.", color = Color.Gray, modifier = Modifier.padding(top = 6.dp, bottom = 12.dp))
-        PlanCard("رایگان", "۰ تومان", "پنج ثبت در روز", onStart)
-        PlanCard("پایه", "۵۰۰٬۰۰۰ تومان در ماه", "صد ثبت در روز و دانلود صحبت‌ها", onStart)
-        PlanCard("پیشرفته", "۱٬۰۰۰٬۰۰۰ تومان در ماه", "خلاصه هوشمند، به‌علاوه همه امکانات پایه", onStart)
+fun PricingScreen(onPay: (SubscriptionPlan?) -> Unit, onBack: () -> Unit) {
+    val dark = LocalDark.current
+    val palette = LocalTg.current
+    var isMonthly by remember { mutableStateOf(true) }
+    
+    val plusPlan = if (isMonthly) 
+        SubscriptionPlan("monthly", "پلن پلاس ماهانه", 1_000_000, "۳۰ روز")
+    else 
+        SubscriptionPlan("seasonal", "پلن پلاس فصلی", 2_500_000, "۹۰ روز")
+
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(if (dark) Color(0xFF0F172A) else Color(0xFFF8FAFC))
+            .verticalScroll(rememberScrollState())
+            .padding(20.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = palette.text) }
+            Text("پلن‌های اشتراک", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = palette.text)
+        }
+        
+        Text(
+            "امکانات و محدودیت‌های هر پلن را مشاهده کنید.",
+            color = palette.subtext,
+            fontSize = 14.sp,
+            modifier = Modifier.padding(top = 4.dp, bottom = 24.dp)
+        )
+
+        // Segmented Toggle
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(bottom = 24.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(if (dark) Color(0xFF1E293B) else Color(0xFFE2E8F0))
+                .padding(4.dp)
+        ) {
+            val toggleColors = if (dark) Color(0xFF334155) else Color.White
+            Box(
+                Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(if (isMonthly) toggleColors else Color.Transparent)
+                    .clickable { isMonthly = true }
+                    .padding(vertical = 10.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("ماهانه", color = if (isMonthly) Blue else palette.subtext, fontWeight = FontWeight.Bold)
+            }
+            Box(
+                Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(if (!isMonthly) toggleColors else Color.Transparent)
+                    .clickable { isMonthly = false }
+                    .padding(vertical = 10.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("فصلی", color = if (!isMonthly) Blue else palette.subtext, fontWeight = FontWeight.Bold)
+            }
+        }
+
+        // Plan Cards
+        PricingCard(
+            title = "پلن رایگان",
+            price = "۰ تومان",
+            features = listOf(
+                "ثبت نامحدود پیام",
+                "ذخیره ۲۰ رسانه (عکس و فیلم)",
+                "۵ دانلود گزارش در ماه (اکسل و متن)",
+                "۵ خلاصه‌ساز هوش مصنوعی در ماه",
+                "دفتر شخصی و ذخیره آفلاین"
+            ),
+            buttonText = "پلن فعلی شما",
+            onAction = { },
+            enabled = false,
+            dark = dark
+        )
+
+        PricingCard(
+            title = "پلن پلاس / پیشرفته",
+            price = if (isMonthly) "۱,۰۰۰,۰۰۰ تومان / ماه" else "۲,۵۰۰,۰۰۰ تومان / فصل",
+            features = listOf(
+                "تمام امکانات پلن رایگان",
+                "ساخت تیم و اشتراک‌گذاری گزارش با اعضا",
+                "نشان ستاره ویژه کنار نام",
+                "استفاده نامحدود از هوش مصنوعی",
+                "بارگذاری نامحدود رسانه و فایل",
+                "دانلود رایگان و نامحدود اکسل و متن"
+            ),
+            buttonText = "خرید اشتراک",
+            onAction = { onPay(plusPlan) },
+            dark = dark,
+            highlight = true
+        )
+
+        PricingCard(
+            title = "پلن هوشمند (AI) - به‌زودی",
+            price = "به‌زودی",
+            features = listOf(
+                "تمام امکانات پلن پلاس",
+                "گزارش‌های حرفه‌ای PDF",
+                "آماده‌سازی گزارش تحلیلی با هوش مصنوعی"
+            ),
+            buttonText = "به‌زودی / در حال آماده‌سازی",
+            onAction = { },
+            enabled = false,
+            dark = dark
+        )
     }
 }
 
 @Composable
-private fun PlanCard(title: String, price: String, blurb: String, onStart: () -> Unit) {
-    Column(Modifier.fillMaxWidth().padding(bottom = 12.dp).clip(RoundedCornerShape(24.dp)).background(Color(0xFFF7F9FB)).padding(16.dp)) {
-        Text(title, fontWeight = FontWeight.Bold, fontSize = 20.sp)
-        Text(price, color = Blue, modifier = Modifier.padding(top = 4.dp))
-        Text(blurb, color = Color.Gray, modifier = Modifier.padding(top = 6.dp))
-        Button(onClick = onStart, Modifier.padding(top = 12.dp)) { Text("شروع") }
+private fun PricingCard(
+    title: String,
+    price: String,
+    features: List<String>,
+    buttonText: String,
+    onAction: () -> Unit,
+    enabled: Boolean = true,
+    highlight: Boolean = false,
+    dark: Boolean = false
+) {
+    val cardColor = if (dark) Color(0xFF1E293B) else Color.White
+    val border = if (highlight) Blue else (if (dark) Color(0xFF334155) else Color(0xFFE2E8F0))
+    
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(bottom = 16.dp)
+            .shadow(if (highlight) 8.dp else 2.dp, RoundedCornerShape(24.dp))
+            .clip(RoundedCornerShape(24.dp))
+            .background(cardColor)
+            .border(if (highlight) 2.dp else 1.dp, border, RoundedCornerShape(24.dp))
+            .padding(20.dp)
+    ) {
+        Text(title, fontWeight = FontWeight.Bold, fontSize = 18.sp, color = if (dark) Color.White else Color.Black)
+        Text(price, color = if (highlight) Blue else (if (dark) Color(0xFF94A3B8) else Color(0xFF64748B)), fontSize = 16.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp))
+        
+        Spacer(Modifier.height(16.dp))
+        
+        features.forEach { feature ->
+            Row(Modifier.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Filled.Check, null, tint = if (highlight) Blue else Color(0xFF10B981), modifier = Modifier.size(16.dp))
+                Text(
+                    feature,
+                    color = if (dark) Color(0xFFCBD5E1) else Color(0xFF475569),
+                    fontSize = 13.sp,
+                    modifier = Modifier.padding(start = 8.dp)
+                )
+            }
+        }
+        
+        Button(
+            onClick = onAction,
+            modifier = Modifier.fillMaxWidth().padding(top = 20.dp).height(48.dp),
+            shape = RoundedCornerShape(14.dp),
+            enabled = enabled,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = if (highlight) Blue else (if (dark) Color(0xFF334155) else Color(0xFFF1F5F9)),
+                contentColor = if (highlight) Color.White else (if (dark) Color.White else Color.Black),
+                disabledContainerColor = if (dark) Color(0xFF0F172A) else Color(0xFFF1F5F9),
+                disabledContentColor = Color.Gray
+            )
+        ) {
+            Text(buttonText, fontWeight = FontWeight.Bold)
+        }
     }
 }
 
@@ -323,16 +487,16 @@ private fun RiseRow(id: String, index: Int, arrived: MutableList<String>, conten
 }
 
 @Composable
-fun BottomBar(route: String, avatar: String?, name: String, onSelect: (String) -> Unit) {
+fun BottomBar(route: String, avatar: String?, name: String, hasStar: Boolean = false, onSelect: (String) -> Unit) {
     val palette = LocalTg.current
     val idle = if (palette.dark) Color(0xFFE0E0E0) else Color(0xFF17212B)
     val accent = Blue
     val pill = themeContainer()
     val items = listOf(
         TabGlyph("chats", "چت‌ها", Icons.Outlined.ChatBubbleOutline),
-        TabGlyph("contacts", "مخاطبین", Icons.Outlined.People),
+        TabGlyph("teams", "تیم‌ها", Icons.Filled.Groups),
+        TabGlyph("support", "پشتیبانی", Icons.Outlined.HeadsetMic),
         TabGlyph("profile", "پروفایل", Icons.Outlined.Person),
-        TabGlyph("support", "ارتباط با ما", Icons.Filled.Headphones),
     )
     val dy = with(LocalDensity.current) { 20.dp.roundToPx() }
     val played = PlayedOnce.bottomBar
@@ -372,7 +536,7 @@ fun BottomBar(route: String, avatar: String?, name: String, onSelect: (String) -
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     if (item.id == "profile") {
-                        PersonAvatar(name, avatar, size = 20.dp)
+                        PersonAvatar(name, avatar, size = 20.dp, star = hasStar)
                     } else {
                         Icon(item.icon, item.label, tint = tint, modifier = Modifier.size(20.dp))
                     }
@@ -409,13 +573,201 @@ private fun openDeepLink(context: android.content.Context, targets: List<Pair<St
 /** نشانی صفحهٔ حمایت اختیاری روی سایت. */
 private const val SUPPORT_DONATE_URL = "https://hamsohbat.darkube.ir/donate"
 
+/** آیدی پشتیبانی در تلگرام. */
+private const val TELEGRAM_ID = "Mahdi27_127"
+
+/** آیدی پشتیبانی در پیام‌رسان بله. */
+private const val BALE_ID = "127_27"
+
 @Composable
-fun SupportScreen(onBack: (() -> Unit)? = null, onStartChat: () -> Unit = {}) {
+fun TeamsScreen(
+    app: App,
+    userId: String,
+    onOpenTeam: (String) -> Unit,
+    onUpgrade: () -> Unit,
+    onBack: () -> Unit
+) {
+    val user = app.db.user(userId) ?: return
+    val palette = LocalTg.current
+    val dark = palette.dark
+
+    if (user.plan != "advanced") {
+        Box(Modifier.fillMaxSize().background(palette.bg), contentAlignment = Alignment.Center) {
+            Card(
+                shape = RoundedCornerShape(28.dp),
+                colors = CardDefaults.cardColors(containerColor = palette.surface),
+                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+                modifier = Modifier.padding(24.dp).fillMaxWidth()
+            ) {
+                Column(
+                    Modifier.padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Box(
+                        Modifier.size(80.dp).clip(CircleShape).background(Blue.copy(alpha = 0.1f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Filled.Groups, null, tint = Blue, modifier = Modifier.size(40.dp))
+                        Icon(
+                            Icons.Filled.Lock,
+                            null,
+                            tint = Color.Black.copy(alpha = 0.6f),
+                            modifier = Modifier.size(20.dp).align(Alignment.BottomEnd).offset(x = (-4).dp, y = (-4).dp)
+                        )
+                    }
+                    Text(
+                        "قابلیت ویژه تیم‌سازی",
+                        color = palette.text,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 20.sp,
+                        modifier = Modifier.padding(top = 16.dp)
+                    )
+                    Text(
+                        "برای استفاده از قابلیت تیم‌سازی و گفتگوهای اشتراکی باید پلن پیشرفته را خریداری کنید.",
+                        color = palette.subtext,
+                        fontSize = 15.sp,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(top = 12.dp)
+                    )
+                    Button(
+                        onClick = onUpgrade,
+                        shape = RoundedCornerShape(16.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Blue),
+                        modifier = Modifier.padding(top = 24.dp).fillMaxWidth().height(52.dp)
+                    ) {
+                        Text("ارتقا به پلن پیشرفته / خرید اشتراک", fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    } else {
+        var teams by remember { mutableStateOf(app.db.teams(userId)) }
+        var creating by remember { mutableStateOf(false) }
+
+        Scaffold(
+            containerColor = palette.bg,
+            floatingActionButton = {
+                FloatingActionButton(
+                    onClick = { creating = true },
+                    containerColor = Blue,
+                    contentColor = Color.White,
+                    shape = CircleShape
+                ) {
+                    Icon(Icons.Filled.Add, "ایجاد تیم جدید")
+                }
+            }
+        ) { padding ->
+            Column(Modifier.padding(padding).fillMaxSize()) {
+                Row(
+                    Modifier.fillMaxWidth().padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = palette.text) }
+                    Text("تیم‌های من", color = palette.text, fontWeight = FontWeight.Bold, fontSize = 20.sp, modifier = Modifier.padding(start = 8.dp))
+                }
+                if (teams.isEmpty()) {
+                    Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                        Text("هنوز تیمی نساخته‌اید", color = palette.subtext)
+                    }
+                } else {
+                    LazyColumn(Modifier.weight(1f)) {
+                        items(teams) { team ->
+                            Card(
+                                shape = RoundedCornerShape(22.dp),
+                                colors = CardDefaults.cardColors(containerColor = Color.White),
+                                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp).clickable { onOpenTeam(team.id) }
+                            ) {
+                                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Box(Modifier.size(48.dp).clip(CircleShape).background(Blue.copy(alpha = 0.1f)), contentAlignment = Alignment.Center) {
+                                        Icon(Icons.Filled.Groups, null, tint = Blue)
+                                    }
+                                    Column(Modifier.weight(1f).padding(start = 16.dp)) {
+                                        Text(team.name, color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                        Text(team.lastBody.ifBlank { team.description }, color = Color.Gray, fontSize = 13.sp, maxLines = 1)
+                                    }
+                                    Text(listStamp(team.lastAt), color = Color.Gray, fontSize = 11.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (creating) {
+            AddTeamSheet(app, userId, onClose = { creating = false }, onSaved = {
+                teams = app.db.teams(userId)
+                creating = false
+            })
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AddTeamSheet(app: App, userId: String, onClose: () -> Unit, onSaved: () -> Unit) {
+    var name by remember { mutableStateOf("") }
+    var desc by remember { mutableStateOf("") }
+    var selectedContacts by remember { mutableStateOf(setOf<String>()) }
+    val contacts = remember { app.db.people(userId).filter { !it.isGroup } }
+    val palette = LocalTg.current
+
+    ModalBottomSheet(onDismissRequest = onClose, containerColor = palette.surface) {
+        Column(Modifier.padding(24.dp).fillMaxWidth()) {
+            Text("ایجاد تیم جدید", color = palette.text, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                label = { Text("نام تیم") },
+                modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
+                shape = RoundedCornerShape(12.dp)
+            )
+            OutlinedTextField(
+                value = desc,
+                onValueChange = { desc = it },
+                label = { Text("توضیحات (اختیاری)") },
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                shape = RoundedCornerShape(12.dp)
+            )
+            Text("انتخاب اعضا", color = palette.text, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 16.dp))
+            LazyColumn(Modifier.heightIn(max = 200.dp).padding(top = 8.dp)) {
+                items(contacts) { contact ->
+                    Row(
+                        Modifier.fillMaxWidth().clickable {
+                            selectedContacts = if (contact.id in selectedContacts) selectedContacts - contact.id else selectedContacts + contact.id
+                        }.padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(checked = contact.id in selectedContacts, onCheckedChange = null)
+                        Text(contact.name, modifier = Modifier.padding(start = 12.dp), color = palette.text)
+                    }
+                }
+            }
+            Button(
+                onClick = {
+                    if (name.isNotBlank()) {
+                        app.db.addTeam(userId, name, desc, selectedContacts.toList())
+                        onSaved()
+                    }
+                },
+                modifier = Modifier.fillMaxWidth().padding(top = 24.dp, bottom = 16.dp),
+                shape = RoundedCornerShape(16.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Blue)
+            ) {
+                Text("ایجاد تیم", fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+@Composable
+fun SupportScreen(onStartChat: () -> Unit, onBack: (() -> Unit)? = null) {
     val context = LocalContext.current
     val view = androidx.compose.ui.platform.LocalView.current
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
-    val dark = LocalDark.current
-    val page = if (dark) Color(0xFF0E1621) else Color(0xFFE6E6FA)
+    val palette = LocalTg.current
+    val dark = palette.dark
+    val page = palette.bg
     val card = if (dark) Color(0xFF17212B) else Color.White
     val ink = if (dark) Color.White else Color(0xFF111827)
     val muted = if (dark) Color(0xFF9CA3AF) else Color(0xFF6B7280)
@@ -433,14 +785,16 @@ fun SupportScreen(onBack: (() -> Unit)? = null, onStartChat: () -> Unit = {}) {
     }
     val mailSubject = Uri.encode("پشتیبانی دفتر گفتگو")
     val mailPrimary = "mailto:recamenderapp@gmail.com?subject=$mailSubject"
+    // دیپ‌لینک مستقیم به صفحهٔ گفتگو؛ اول اپ نصب‌شده هدف قرار می‌گیرد و در نهایت نسخهٔ وب.
     val telegramTargets = listOf(
-        "tg://resolve?domain=127_27" to "org.telegram.messenger",
-        "tg://resolve?domain=127_27" to null,
-        "https://t.me/127_27" to null,
+        "tg://resolve?domain=$TELEGRAM_ID" to "org.telegram.messenger",
+        "https://t.me/$TELEGRAM_ID" to "org.telegram.messenger",
+        "https://t.me/$TELEGRAM_ID" to null,
     )
     val baleTargets = listOf(
-        "bale://resolve?domain=127_27" to null,
-        "https://web.bale.ai/chat?uid=127_27" to null,
+        "bale://fill?id=$BALE_ID" to "ir.nasim",
+        "https://ble.ir/$BALE_ID" to "ir.nasim",
+        "https://ble.ir/$BALE_ID" to null,
     )
     val mailTargets = listOf(
         "googlegmail:///co?to=recamenderapp@gmail.com&subject=$mailSubject" to "com.google.android.gm",
@@ -552,11 +906,11 @@ fun SupportScreen(onBack: (() -> Unit)? = null, onStartChat: () -> Unit = {}) {
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.padding(bottom = 12.dp, start = 4.dp),
                     )
-                    SupportRow(SupportBrand.Telegram, if (dark) Color(0xFF17212B) else Color(0xFFF4F6F8), "تلگرام", "@127_27", ink, muted) {
-                        tap(telegramTargets, "@127_27", "آیدی تلگرام کپی شد: @127_27")
+                    SupportRow(SupportBrand.Telegram, if (dark) Color(0xFF17212B) else Color(0xFFF4F6F8), "تلگرام", "@$TELEGRAM_ID", ink, muted) {
+                        tap(telegramTargets, "@$TELEGRAM_ID", "آیدی تلگرام کپی شد: @$TELEGRAM_ID")
                     }
-                    SupportRow(SupportBrand.Bale, if (dark) Color(0xFF17212B) else Color(0xFFF4F6F8), "بله", "@127_27", ink, muted) {
-                        tap(baleTargets, "@127_27", "آیدی بله کپی شد: @127_27")
+                    SupportRow(SupportBrand.Bale, if (dark) Color(0xFF17212B) else Color(0xFFF4F6F8), "بله", "@$BALE_ID", ink, muted) {
+                        tap(baleTargets, "@$BALE_ID", "آیدی بله کپی شد: @$BALE_ID")
                     }
                     SupportRow(SupportBrand.Gmail, if (dark) Color(0xFF17212B) else Color(0xFFF4F6F8), "ایمیل پشتیبانی", "recamenderapp@gmail.com", ink, muted) {
                         tap(mailTargets, "recamenderapp@gmail.com", "ایمیل پشتیبانی کپی شد: recamenderapp@gmail.com")
@@ -808,6 +1162,7 @@ fun SupportChatRoom(app: App, userId: String, asAdmin: Boolean, onBack: () -> Un
     val recorder = remember { mutableStateOf<android.media.MediaRecorder?>(null) }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
+    val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
     fun reload() {
         messages = app.db.supportMessages(userId)
     }
@@ -831,6 +1186,10 @@ fun SupportChatRoom(app: App, userId: String, asAdmin: Boolean, onBack: () -> Un
         if (text.isBlank() && path == null) return
         app.db.sendSupport(userId, asAdmin, text.trim(), kind, path)
         reload()
+        // پیش از رسیدن پاسخ پشتیبانی، اجازهٔ نمایش نوتیفیکیشن را از کاربر می‌گیریم.
+        if (!asAdmin && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU && !notificationsAllowed(context)) {
+            notificationPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+        }
     }
     fun beginVoice() {
         val file = File(context.filesDir, "support-${System.currentTimeMillis()}.m4a")
@@ -1636,6 +1995,40 @@ private fun ChatSearchOverlay(
 }
 
 @Composable
+fun OfflineBanner() {
+    val context = LocalContext.current
+    var online by remember { mutableStateOf(isDeviceOnline(context)) }
+    val dark = LocalDark.current
+
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        val manager = context.getSystemService(android.net.ConnectivityManager::class.java)
+        val callback = object : android.net.ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: android.net.Network) { online = true }
+            override fun onLost(network: android.net.Network) { online = false }
+        }
+        runCatching { manager.registerDefaultNetworkCallback(callback) }
+        onDispose { runCatching { manager.unregisterNetworkCallback(callback) } }
+    }
+
+    AnimatedVisibility(
+        visible = !online,
+        enter = expandVertically() + fadeIn(),
+        exit = shrinkVertically() + fadeOut()
+    ) {
+        Text(
+            text = "کاربر گرامی اینترنت شما قطع می‌باشد و تغییرات روی گوشی شما ذخیره می‌شود. لطفاً برای همگام‌سازی اینترنت خود را روشن کنید.",
+            color = if (dark) Color(0xFFF59E0B) else Color(0xFFD97706),
+            fontSize = 12.sp,
+            lineHeight = 16.sp,
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 4.dp)
+        )
+    }
+}
+
+@Composable
 private fun SyncTitle(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     var online by remember { mutableStateOf(isDeviceOnline(context)) }
@@ -1767,29 +2160,162 @@ fun ChatsScreen(
                 Spacer(Modifier.weight(1f))
                 IconButton(onClick = { searching = true }) { Icon(Icons.Filled.Search, "جستجو", tint = headerInk, modifier = Modifier.size(22.dp)) }
                 if (onBack != null) IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "بازگشت", tint = headerInk) }
-                SyncTitle()
             }
             if (!contacts) {
-                Row(
-                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                Surface(
+                    shape = RoundedCornerShape(24.dp),
+                    color = if (dark) Color(0xFF1E293B) else Color(0xFFF1F5F9),
+                    border = BorderStroke(1.dp, if (dark) Color.White.copy(alpha = 0.1f) else Color.Black.copy(alpha = 0.05f)),
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
                 ) {
-                    listOf("all" to "همه", "direct" to "شخصی", "group" to "گروه", "note" to "یادداشت‌ها").forEach { (id, label) ->
-                        val on = filter == id
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        listOf("all" to "همه", "direct" to "گفتگوها", "note" to "یادداشت‌ها", "files" to "پرونده‌ها", "archive" to "بایگانی").forEach { (id, label) ->
+                            val on = filter == id
+                            Surface(
+                                shape = RoundedCornerShape(20.dp),
+                                color = if (on) (if (dark) Color(0xFF334155) else Color.White) else Color.Transparent,
+                                shadowElevation = if (on) 3.dp else 0.dp,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(20.dp))
+                                    .clickable { filter = id }
+                            ) {
+                                Box(
+                                    modifier = Modifier.padding(vertical = 8.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        label,
+                                        color = if (on) Blue else (if (dark) Color(0xFF94A3B8) else Color(0xFF64748B)),
+                                        fontSize = 12.sp,
+                                        fontWeight = if (on) FontWeight.Bold else FontWeight.Medium,
+                                        maxLines = 1
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                if (!notificationsAllowed(context)) {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 4.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(Color(0xFFFEF2F2))
+                            .border(1.dp, Color(0xFFFCA5A5), RoundedCornerShape(16.dp))
+                            .clickable {
+                                val intent = Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                                    putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, context.packageName)
+                                }
+                                context.startActivity(intent)
+                            }
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Filled.Email, null, tint = Color(0xFFDC2626), modifier = Modifier.size(18.dp))
                         Text(
-                            label,
-                            color = if (on) LocalAppTheme.current.onButtonColor else if (dark) Color(0xFFD1D5DB) else Color(0xFF4B5563),
-                            fontSize = 12.sp,
-                            fontWeight = if (on) FontWeight.SemiBold else FontWeight.Medium,
-                            modifier = Modifier
-                                .clip(CircleShape)
-                                .background(if (on) Blue else Color.Transparent)
-                                .clickable { filter = id }
-                                .padding(horizontal = if (on) 16.dp else 14.dp, vertical = 6.dp),
+                            "اعلان‌های برنامه غیرفعال است. برای اطلاع از پاسخ پشتیبانی، اعلان‌ها را فعال کنید.",
+                            color = Color(0xFF991B1B),
+                            fontSize = 11.sp,
+                            modifier = Modifier.padding(start = 8.dp)
                         )
                     }
                 }
+                
+                // Dynamic Announcement Banner
+                val context = LocalContext.current
+                val banner = remember { app.db.activeBanner() }
+                val prefs = remember { context.getSharedPreferences("tg", 0) }
+                var isAnnouncementBannerVisible by remember(banner?.id) { 
+                    mutableStateOf(banner != null && prefs.getString("dismissed_banner_id", "") != banner.id) 
+                }
+
+                AnimatedVisibility(
+                    visible = isAnnouncementBannerVisible && banner != null,
+                    enter = expandVertically(tween(300)) + fadeIn(tween(300)),
+                    exit = shrinkVertically(tween(240)) + fadeOut(tween(200))
+                ) {
+                    banner?.let { activeBanner ->
+                        Card(
+                            shape = RoundedCornerShape(20.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (dark) Color(0xFF1E293B) else Color(0xFFF8FAFC)
+                            ),
+                            border = BorderStroke(1.dp, if (dark) Color(0xFF334155) else Color(0xFFE2E8F0)),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 6.dp)
+                                .clickable {
+                                    // Banner action - can be extended to open a link
+                                }
+                        ) {
+                            Row(
+                                Modifier.padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                // Right side - App badge / Icon
+                                Box(
+                                    Modifier
+                                        .size(46.dp)
+                                        .clip(CircleShape)
+                                        .background(
+                                            Brush.linearGradient(
+                                                listOf(Color(0xFFF97316), Color(0xFFEA580C))
+                                            )
+                                        ),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(Icons.Filled.RocketLaunch, null, tint = Color.White, modifier = Modifier.size(24.dp))
+                                }
+                                
+                                // Center column - Text details
+                                Column(
+                                    Modifier
+                                        .weight(1f)
+                                        .padding(horizontal = 12.dp)
+                                ) {
+                                    Text(
+                                        activeBanner.title,
+                                        color = if (dark) Color.White else Color(0xFF1E293B),
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 14.sp
+                                    )
+                                    Text(
+                                        activeBanner.body,
+                                        color = if (dark) Color(0xFF94A3B8) else Color(0xFF64748B),
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        modifier = Modifier.padding(top = 2.dp)
+                                    )
+                                }
+                                
+                                // Left side - Close button
+                                IconButton(
+                                    onClick = { 
+                                        isAnnouncementBannerVisible = false 
+                                        prefs.edit().putString("dismissed_banner_id", activeBanner.id).apply()
+                                    },
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Filled.Close,
+                                        contentDescription = "بستن",
+                                        tint = if (dark) Color(0xFF94A3B8) else Color(0xFF64748B),
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
             }
+            OfflineBanner()
             }
             }
             LazyColumn(Modifier.weight(1f).padding(bottom = 88.dp), state = listState) {
@@ -1816,24 +2342,44 @@ fun ChatsScreen(
                 }
                 itemsIndexed(shown, key = { _, person -> person.id }) { index, person ->
                     RiseRow(person.id, index, arrived) {
-                    Column(Modifier.fillMaxWidth().clickable { open(person.id) }) {
-                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                            PersonAvatar(person.name, person.avatar, Modifier.padding(horizontal = 16.dp, vertical = 10.dp))
-                            Column(Modifier.weight(1f).padding(vertical = 10.dp)) {
-                                Text(person.name, color = palette.text, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, maxLines = 1)
-                                Text(
-                                    if (contacts) person.phone.ifBlank { person.role.ifBlank { "بدون شماره" } } else person.lastBody.ifBlank { person.role.ifBlank { "بدون ثبت" } },
-                                    color = palette.subtext,
-                                    fontSize = 14.sp,
-                                    maxLines = 1,
-                                )
+                        Card(
+                            shape = RoundedCornerShape(28.dp),
+                            colors = CardDefaults.cardColors(containerColor = if (dark) Color(0xFF1E293B) else Color.White),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 8.dp)
+                                .clickable { open(person.id) }
+                        ) {
+                            Row(
+                                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                PersonAvatar(person.name, person.avatar, size = 52.dp)
+                                Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+                                    Text(
+                                        person.name,
+                                        color = if (dark) Color.White else Color(0xFF1E293B),
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 15.sp,
+                                        maxLines = 1
+                                    )
+                                    Text(
+                                        if (contacts) person.phone.ifBlank { person.role.ifBlank { "بدون شماره" } } else person.lastBody.ifBlank { person.role.ifBlank { "بدون ثبت" } },
+                                        color = if (dark) Color(0xFF94A3B8) else Color(0xFF64748B),
+                                        fontSize = 13.sp,
+                                        maxLines = 1,
+                                    )
+                                }
+                                Column(horizontalAlignment = Alignment.End) {
+                                    Text(
+                                        listStamp(person.lastAt),
+                                        color = if (dark) Color(0xFF94A3B8) else Color(0xFF64748B),
+                                        fontSize = 11.sp
+                                    )
+                                }
                             }
-                            Text(listStamp(person.lastAt), color = palette.subtext, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 12.dp))
                         }
-                        if (index < shown.lastIndex) {
-                            Box(Modifier.padding(start = 76.dp, end = 16.dp).fillMaxWidth().height(0.5.dp).background(rowLine))
-                        }
-                    }
                     }
                 }
             }
@@ -1945,15 +2491,33 @@ fun ChatsScreen(
 }
 
 @Composable
-private fun PersonAvatar(name: String, path: String?, modifier: Modifier = Modifier, size: androidx.compose.ui.unit.Dp = 52.dp) {
+private fun PersonAvatar(name: String, path: String?, modifier: Modifier = Modifier, size: androidx.compose.ui.unit.Dp = 52.dp, star: Boolean = false) {
     val file = path?.let { File(it) }?.takeIf { it.exists() }
     val bitmap = file?.let { remember(it.absolutePath) { BitmapFactory.decodeFile(it.absolutePath) } }
-    Box(
-        modifier.size(size).clip(CircleShape).background(Color.hsl((name.sumOf { it.code } % 360).toFloat(), 0.55f, 0.42f)),
-        contentAlignment = Alignment.Center,
-    ) {
-        if (bitmap != null) Image(bitmap.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-        else Text(name.take(1), color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+    Box(modifier.size(size)) {
+        Box(
+            Modifier.fillMaxSize().clip(CircleShape).background(Color.hsl((name.sumOf { it.code } % 360).toFloat(), 0.55f, 0.42f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (bitmap != null) Image(bitmap.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+            else Text(name.take(1), color = Color.White, fontWeight = FontWeight.Bold, fontSize = (size.value * 0.35).sp)
+        }
+        if (star) {
+            Box(
+                Modifier
+                    .size((size.value * 0.35).dp)
+                    .align(Alignment.BottomEnd)
+                    .offset(x = (size.value * 0.05).dp, y = (size.value * 0.05).dp)
+                    .clip(CircleShape)
+                    .background(Color.White)
+                    .padding(1.dp)
+                    .clip(CircleShape)
+                    .background(Brush.linearGradient(listOf(Color(0xFFC4B5FD), Color(0xFF8B5CF6), Color(0xFF6D28D9)))),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Filled.Star, null, tint = Color.White, modifier = Modifier.size((size.value * 0.25).dp))
+            }
+        }
     }
 }
 
@@ -2516,8 +3080,8 @@ private fun ChatInputBar(
     Column(Modifier.fillMaxWidth().background(if (dark) Color(0xFF17212B) else Color.White).padding(horizontal = 8.dp).padding(top = 6.dp, bottom = 10.dp)) {
         if (group) {
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                InputChip("کل گروه", memberId == null, dark) { onMember(null) }
-                members.forEach { member -> InputChip(member.name, memberId == member.id, dark) { onMember(member.id) } }
+                InputChip("ارسال به همه اعضا", memberId == null, dark) { onMember(null) }
+                members.forEach { member -> InputChip("مخاطب: ${member.name}", memberId == member.id, dark) { onMember(member.id) } }
             }
         }
         if (pendingMedia != null) {
@@ -2615,6 +3179,7 @@ private fun FormatPill(label: String, selected: Boolean, dark: Boolean, modifier
 
 @Composable
 private fun AiSummaryDialog(
+    user: User,
     personName: String,
     entries: List<Entry>,
     dark: Boolean,
@@ -2626,6 +3191,8 @@ private fun AiSummaryDialog(
     val sub = if (dark) Color(0xFF9CA3AF) else Color(0xFF6B7280)
     val text = if (dark) Color(0xFFC7D2DE) else Color(0xFF4B5563)
     val count = entries.count { it.occurredAt >= rangeStart(range) }
+    val quotaReached = user.plan == "free" && user.monthlyAiUsageCount >= 5
+    val remaining = if (user.plan == "free") 5 - user.monthlyAiUsageCount else -1
     AlertDialog(
         onDismissRequest = onDismiss,
         shape = RoundedCornerShape(24.dp),
@@ -2639,17 +3206,28 @@ private fun AiSummaryDialog(
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 Text(
-                    "خلاصه با مدل‌های رایگان Gemini، OpenRouter و Nemotron ساخته می‌شود. متن گزاره‌های انتخابی فقط برای پردازش به سرویس مدل ارسال می‌شود و جای دیگری ذخیره نمی‌گردد.",
+                    "خلاصه با مدل‌های هوشمند ساخته می‌شود. متن گزاره‌های انتخابی فقط برای پردازش ارسال می‌شود و جای دیگری ذخیره نمی‌گردد.",
                     fontSize = 13.sp,
                     color = text,
                 )
                 RangeChips(selected = range, dark = dark, onSelect = { range = it })
-                Text("${persianDigits(count.toString())} گزاره · رایگان", color = Blue, fontSize = 12.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 10.dp))
+                Row(Modifier.padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("${persianDigits(count.toString())} گزاره", color = Blue, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                    if (user.plan == "free") {
+                        Spacer(Modifier.width(8.dp))
+                        Text("باقی‌مانده این ماه: ${persianDigits(remaining.coerceAtLeast(0).toString())} از ۵", color = if (quotaReached) Color.Red else Color.Gray, fontSize = 11.sp)
+                    }
+                }
             }
         },
         confirmButton = {
-            Button(onClick = { onConfirm(range) }, colors = ButtonDefaults.buttonColors(containerColor = Blue, contentColor = LocalAppTheme.current.onButtonColor), shape = RoundedCornerShape(14.dp)) {
-                Text("ساخت خلاصۀ رایگان")
+            Button(
+                onClick = { onConfirm(range) },
+                enabled = !quotaReached,
+                colors = ButtonDefaults.buttonColors(containerColor = if (quotaReached) Color.Gray else Blue, contentColor = Color.White),
+                shape = RoundedCornerShape(14.dp)
+            ) {
+                Text(if (quotaReached) "ارتقا به پلاس برای استفاده نامحدود" else "ساخت خلاصه")
             }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("انصراف", color = sub) } },
@@ -2658,10 +3236,13 @@ private fun AiSummaryDialog(
 
 @Composable
 private fun ExportReportDialog(
+    app: App,
+    user: User,
     personName: String,
     entries: List<Entry>,
     dark: Boolean,
     onDismiss: () -> Unit,
+    onIncrementDownload: () -> Unit,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -2670,18 +3251,26 @@ private fun ExportReportDialog(
     val ink = if (dark) Color.White else Color(0xFF111827)
     val sub = if (dark) Color(0xFF9CA3AF) else Color(0xFF6B7280)
     val filtered = entries.filter { it.occurredAt >= rangeStart(range) }.sortedBy { it.occurredAt }
+
+    val quotaReached = user.plan == "free" && user.monthlyDownloadCount >= 5
+    val remaining = if (user.plan == "free") 5 - user.monthlyDownloadCount else -1
+
     val xlsxLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")) { uri: Uri? ->
         if (uri != null) {
+            onIncrementDownload()
             scope.launch {
                 withContext(Dispatchers.IO) { runCatching { context.contentResolver.openOutputStream(uri)?.use { it.write(buildXlsx(reportRows(personName, filtered))) } } }
+                app.db.addExportLog(user.id, "xlsx", personName, filtered.size)
             }
         }
         onDismiss()
     }
     val txtLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri: Uri? ->
         if (uri != null) {
+            onIncrementDownload()
             scope.launch {
                 withContext(Dispatchers.IO) { runCatching { context.contentResolver.openOutputStream(uri)?.use { it.write(reportText(personName, filtered).toByteArray(Charsets.UTF_8)) } } }
+                app.db.addExportLog(user.id, "txt", personName, filtered.size)
             }
         }
         onDismiss()
@@ -2701,20 +3290,25 @@ private fun ExportReportDialog(
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 RangeChips(selected = range, dark = dark, onSelect = { range = it })
                 Text(stamp, fontSize = 12.sp, color = sub, modifier = Modifier.padding(top = 10.dp))
+                if (user.plan == "free") {
+                    Text("سقف دانلود ماهانه (${persianDigits(user.monthlyDownloadCount.toString())} از ۵) تکمیل شده است. برای دانلود نامحدود ارتقا دهید.", color = if (quotaReached) Color.Red else Blue, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
+                }
                 Text("قالب فایل", fontWeight = FontWeight.Bold, color = ink, fontSize = 13.sp, modifier = Modifier.padding(top = 12.dp))
                 Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FormatPill("Excel (.xlsx)", excel, dark, Modifier.weight(1f)) { excel = true }
                     FormatPill("TXT (.txt)", !excel, dark, Modifier.weight(1f)) { excel = false }
                 }
-                Text("محل ذخیره در مرحلۀ بعد انتخاب می‌شود.", fontSize = 11.sp, color = sub, modifier = Modifier.padding(top = 10.dp))
             }
         },
         confirmButton = {
             Button(
                 onClick = { if (excel) xlsxLauncher.launch("$personName.xlsx") else txtLauncher.launch("$personName.txt") },
-                colors = ButtonDefaults.buttonColors(containerColor = Blue, contentColor = LocalAppTheme.current.onButtonColor),
+                enabled = !quotaReached,
+                colors = ButtonDefaults.buttonColors(containerColor = if (quotaReached) Color.Gray else Blue, contentColor = Color.White),
                 shape = RoundedCornerShape(14.dp),
-            ) { Text("دانلود") }
+            ) {
+                Text(if (quotaReached) "سقف دانلود تکمیل شده" else "دانلود")
+            }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("انصراف", color = sub) } },
     )
@@ -2722,11 +3316,14 @@ private fun ExportReportDialog(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ThreadScreen(app: App, userId: String, personId: String, back: () -> Unit) {
+fun ThreadScreen(app: App, userId: String, personId: String, back: () -> Unit, onPricing: () -> Unit = {}) {
     val user = app.db.user(userId) ?: return
     var person by remember(personId) { mutableStateOf(app.db.people(userId).find { it.id == personId }) }
     val personTitle = person?.name ?: app.db.personName(personId)
-    var entries by remember { mutableStateOf(app.db.entries(personId)) }
+    var allEntries by remember { mutableStateOf(app.db.entries(personId)) }
+    var entries = if (person?.isGroup == true) {
+        allEntries.filter { it.userId == userId || it.targetRecipientId == null || it.targetRecipientId == userId }
+    } else allEntries
     var hidden by remember { mutableStateOf(setOf<String>()) }
     var fresh by remember { mutableStateOf(setOf<String>()) }
     var body by remember { mutableStateOf("") }
@@ -2836,12 +3433,18 @@ fun ThreadScreen(app: App, userId: String, personId: String, back: () -> Unit) {
                 return@launch
             }
             try {
-                app.db.addEntry(user, personId, saved.second, "file", channel, System.currentTimeMillis(), mediaPath = saved.first, memberId = memberId)
+                app.db.addEntry(user, personId, saved.second, "file", channel, System.currentTimeMillis(), mediaPath = saved.first, memberId = memberId, targetRecipientId = memberId)
                 if (!isDeviceOnline(context)) app.db.enqueue("entry", saved.second)
-                entries = app.db.entries(personId)
+                allEntries = app.db.entries(personId)
                 attachMenu = false
             } catch (e: Exception) {
-                if ((e.message ?: "").let { it.contains("سقف") || it.contains("مهمان") }) upgrade = true else error = e.message ?: "خطا"
+                val msg = e.message ?: ""
+                if (msg.contains("سقف") || msg.contains("مهمان")) {
+                    error = msg
+                    upgrade = true
+                } else {
+                    error = msg.ifBlank { "خطا" }
+                }
             }
         }
     }
@@ -2904,7 +3507,7 @@ fun ThreadScreen(app: App, userId: String, personId: String, back: () -> Unit) {
                     ) {
                         JournalBubble(entry, personTitle, onPin = {
                             app.db.setEntryPinned(entry.id, !entry.pinned)
-                            entries = app.db.entries(personId)
+                            allEntries = app.db.entries(personId)
                         }, onDelete = {
                             hidden = hidden + entry.id
                             scope.launch {
@@ -2933,8 +3536,8 @@ fun ThreadScreen(app: App, userId: String, personId: String, back: () -> Unit) {
                     if (voicePaused) runCatching { voiceRecorder.value?.resume() }
                     stopVoice(app, user, personId) { path ->
                         runCatching {
-                            app.db.addEntry(user, personId, "", "voice", channel, System.currentTimeMillis(), path, memberId = memberId)
-                            entries = app.db.entries(personId)
+                            app.db.addEntry(user, personId, "", "voice", channel, System.currentTimeMillis(), path, memberId = memberId, targetRecipientId = memberId)
+                            allEntries = app.db.entries(personId)
                         }.onFailure { error = it.message ?: "خطا" }
                     }
                 })
@@ -2988,25 +3591,40 @@ fun ThreadScreen(app: App, userId: String, personId: String, back: () -> Unit) {
                         } else {
                             val sendKind = if (pendingMedia != null) pendingKind else kind
                             val caption = body.ifBlank { if (pendingKind == "video") "فیلم" else if (pendingMedia != null) "عکس" else "" }
-                            app.db.addEntry(user, personId, caption, sendKind, channel, System.currentTimeMillis(), mediaPath = pendingMedia, memberId = memberId)
+                            app.db.addEntry(user, personId, caption, sendKind, channel, System.currentTimeMillis(), mediaPath = pendingMedia, memberId = memberId, targetRecipientId = memberId)
                             if (!isDeviceOnline(context)) app.db.enqueue("entry", caption)
                             pendingMedia = null
                         }
                         body = ""
-                        entries = app.db.entries(personId)
+                        allEntries = app.db.entries(personId)
                         upgrade = false
                     } catch (e: Exception) {
-                        if ((e.message ?: "").let { it.contains("سقف") || it.contains("مهمان") }) upgrade = true else error = e.message ?: "خطا"
+                        val msg = e.message ?: ""
+                        if (msg.contains("سقف") || msg.contains("مهمان")) {
+                            error = msg
+                            upgrade = true
+                        } else {
+                            error = msg.ifBlank { "خطا" }
+                        }
                     }
                 },
             )
         }
         }
         if (upgrade) {
+            val isMediaLimit = error.contains("سقف بارگذاری فایل")
             PrettyAlert(
-                "سقف پلن",
-                if (user.plan == "guest") "در حالت مهمان فقط ۵ پیام آزمایشی می‌توانید بفرستید." else "سقف پلن شما به اتمام رسیده، لطفا پلن خود را تغییر دهید",
-                onConfirm = { upgrade = false },
+                if (isMediaLimit) "سقف بارگذاری فایل" else "سقف پلن",
+                if (isMediaLimit) "شما به سقف مجاز ۲۰ فایل در پلن رایگان رسیده‌اید. برای ارسال نامحدود فایل، اشتراک پیشرفته را فعال کنید."
+                else if (user.plan == "guest") "در حالت مهمان فقط ۵ پیام آزمایشی می‌توانید بفرستید." 
+                else "سقف پلن شما به اتمام رسیده، لطفا پلن خود را تغییر دهید",
+                confirm = "ارتقا اشتراک",
+                onConfirm = { 
+                    upgrade = false
+                    onPricing()
+                },
+                dismiss = "بعداً",
+                onDismiss = { upgrade = false }
             )
         }
         if (error.isNotEmpty()) {
@@ -3062,12 +3680,18 @@ fun ThreadScreen(app: App, userId: String, personId: String, back: () -> Unit) {
                     val dest = File(context.filesDir, "photo-${System.currentTimeMillis()}.jpg")
                     dest.outputStream().use { saved.compress(Bitmap.CompressFormat.JPEG, 90, it) }
                     if (saved !== bitmap) saved.recycle()
-                    app.db.addEntry(user, personId, "عکس", "photo", channel, System.currentTimeMillis(), mediaPath = dest.absolutePath, memberId = memberId)
+                    app.db.addEntry(user, personId, "عکس", "photo", channel, System.currentTimeMillis(), mediaPath = dest.absolutePath, memberId = memberId, targetRecipientId = memberId)
                     if (!isDeviceOnline(context)) app.db.enqueue("entry", "عکس")
-                    entries = app.db.entries(personId)
+                    allEntries = app.db.entries(personId)
                     photoCrop = null
                 } catch (e: Exception) {
-                    if ((e.message ?: "").let { it.contains("سقف") || it.contains("مهمان") }) upgrade = true else error = e.message ?: "خطا"
+                    val msg = e.message ?: ""
+                    if (msg.contains("سقف") || msg.contains("مهمان")) {
+                        error = msg
+                        upgrade = true
+                    } else {
+                        error = msg.ifBlank { "خطا" }
+                    }
                 }
             }
         }
@@ -3095,6 +3719,7 @@ fun ThreadScreen(app: App, userId: String, personId: String, back: () -> Unit) {
         }
         if (summaryOpen) {
             AiSummaryDialog(
+                user = user,
                 personName = personTitle,
                 entries = entries,
                 dark = LocalDark.current,
@@ -3104,10 +3729,13 @@ fun ThreadScreen(app: App, userId: String, personId: String, back: () -> Unit) {
         }
         if (exportOpen) {
             ExportReportDialog(
+                app = app,
+                user = user,
                 personName = personTitle,
                 entries = entries,
                 dark = LocalDark.current,
                 onDismiss = { exportOpen = false },
+                onIncrementDownload = { app.db.incrementDownloadUsage(userId) }
             )
         }
         if (confirmDelete) {
@@ -3403,6 +4031,7 @@ private fun AiThread(app: App, userId: String, person: Person, palette: TgPalett
 
 @Composable
 private fun AiContextSheet(app: App, userId: String, personId: String, personName: String, onClose: () -> Unit) {
+    val user = app.db.user(userId) ?: return
     val palette = LocalTg.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -3416,6 +4045,10 @@ private fun AiContextSheet(app: App, userId: String, personId: String, personNam
     var busy by remember { mutableStateOf(false) }
     var toast by remember { mutableStateOf("") }
     val sheetBg = if (palette.dark) Color(0xF217212B) else Color(0xF2FFFFFF)
+    
+    val quotaReached = user.plan == "free" && user.monthlyAiUsageCount >= 5
+    val remaining = if (user.plan == "free") 5 - user.monthlyAiUsageCount else -1
+
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
         runCatching { preview = context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) } }.onFailure { toast = it.message ?: "عکس خوانده نشد" }
@@ -3429,10 +4062,15 @@ private fun AiContextSheet(app: App, userId: String, personId: String, personNam
                 Text("تحلیل گفتگو با هوش مصنوعی", color = palette.text, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f).padding(horizontal = 8.dp))
                 IconButton(onClick = onClose) { Icon(Icons.Filled.Close, "بستن", tint = palette.subtext) }
             }
-            Text(personName, color = palette.subtext, fontSize = 12.sp)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(personName, color = palette.subtext, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                if (user.plan == "free") {
+                    Text("باقی‌مانده: ${persianDigits(remaining.coerceAtLeast(0).toString())} از ۵", color = if (quotaReached) Color.Red else palette.blue, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+            }
             Row(Modifier.padding(top = 8.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 aiPrompts.forEach { prompt ->
-                    Text(prompt, color = palette.blue, fontSize = 12.sp, modifier = Modifier.clip(RoundedCornerShape(14.dp)).background(palette.search).clickable { input = prompt }.padding(horizontal = 10.dp, vertical = 6.dp))
+                    Text(prompt, color = palette.blue, fontSize = 12.sp, modifier = Modifier.clip(RoundedCornerShape(14.dp)).background(palette.search).clickable(enabled = !quotaReached) { input = prompt }.padding(horizontal = 10.dp, vertical = 6.dp))
                 }
             }
             LazyColumn(Modifier.padding(top = 8.dp).heightIn(max = 240.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -3440,14 +4078,18 @@ private fun AiContextSheet(app: App, userId: String, personId: String, personNam
                     AiBubble(turn, palette, onCopy = {
                         clipboard.setText(androidx.compose.ui.text.AnnotatedString(turn.body))
                         toast = "متن پیام کپی شد"
-                    }, onEdit = { editing = turn; input = turn.body; image = turn.image })
+                    }, onEdit = { if (!quotaReached) { editing = turn; input = turn.body; image = turn.image } })
                 }
             }
             if (busy) Text("در حال فکر کردن...", color = palette.subtext, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
             if (toast.isNotEmpty()) Text(toast, color = palette.blue, fontSize = 12.sp)
-            AiComposer(input, { input = it }, image, { image = null }, busy, palette, focus, { picker.launch("image/*") }) {
+            AiComposer(input, { input = it }, image, { image = null }, busy || quotaReached, palette, focus, { if (!quotaReached) picker.launch("image/*") }) {
                 val asked = input.trim()
                 if (asked.isBlank() && image == null) return@AiComposer
+                if (quotaReached) {
+                    toast = "سقف ماهانه هوش مصنوعی تکمیل شده"
+                    return@AiComposer
+                }
                 val edit = editing
                 val picture = image
                 if (edit != null) {
@@ -3587,6 +4229,11 @@ private fun inlineMarkdown(line: String) = buildAnnotatedString {
 }
 
 private fun askAboutChat(app: App, userId: String, personId: String, turns: List<AiMessage>): String {
+    val user = app.db.user(userId) ?: error("حساب پیدا نشد")
+    if (user.plan == "free" && user.monthlyAiUsageCount >= 5) {
+        error("سقف خلاصه‌ساز: شما به سقف مجاز ۵ خلاصه‌سازی در ماه رسیده‌اید. برای استفاده نامحدود ارتقا دهید.")
+    }
+
     val person = app.db.people(userId).find { it.id == personId } ?: error("گفتگو پیدا نشد")
     val transcript = app.db.entries(personId).takeLast(80).joinToString("\n") { entry ->
         val time = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date(entry.occurredAt))
@@ -3594,9 +4241,21 @@ private fun askAboutChat(app: App, userId: String, personId: String, turns: List
         val text = entry.body.ifBlank { if (entry.voicePath != null) "[ویس]" else "" }
         "$time $kind: $text"
     }.ifBlank { "هنوز متنی ثبت نشده." }.take(12000)
-    val system = "تو دستیار دفتر گفتگو هستی و فقط فارسی جواب می‌دهی. از عربی استفاده نکن. کاربر درباره گفتگوی ثبت‌شده با ${person.name} سؤال می‌پرسد. فقط از متن زیر جواب بده و اگر چیزی در آن نیست بگو در این گفتگو نیست.\n\n$transcript"
+
+    val system = """
+        من دستیار اختصاصی دفتر گفتگو هستم و فقط می‌توانم دربارهٔ پیام‌ها، یادداشت‌ها و خلاصه‌سازی گفتگوهای همین مخاطب به شما کمک کنم.
+        تنها از اطلاعات موجود در متن گفتگوها و یادداشت‌های ارائه شده برای پاسخگویی، تحلیل، خلاصه‌سازی و استخراج نکات عملی استفاده کن.
+        اگر کاربر سوالی پرسید که به متن زیر مربوط نمی‌شود (مانند سوالات عمومی، برنامه‌نویسی، دانستنی‌ها، مباحث فلسفی و غیره)، دقیقاً با این جمله پاسخ بده: "من دستیار اختصاصی دفتر گفتگو هستم و فقط می‌توانم دربارهٔ پیام‌ها، یادداشت‌ها و خلاصه‌سازی گفتگوهای همین مخاطب به شما کمک کنم."
+        لحن پاسخگویی محترمانه، حرفه‌ای، دقیق و کاملاً فارسی باشد. به حریم خصوصی احترام بگذار و هرگز اطلاعاتی که در متن وجود ندارد را جعل نکن.
+        
+        متن گفتگو با ${person.name}:
+        $transcript
+    """.trimIndent()
+
     val messages = listOf(Triple("system", system, null as String?)) + turns.map { Triple(it.role, it.body, it.image) }
-    return askModel(app, messages)
+    val response = askModel(app, messages)
+    app.db.incrementAiUsage(userId)
+    return response
 }
 
 private fun askModel(app: App, messages: List<Triple<String, String, String?>>): String {
@@ -4079,9 +4738,165 @@ private fun decodeWallpaper(file: File): Bitmap? {
     return BitmapFactory.decodeFile(file.absolutePath, sample)
 }
 
+@Composable
+fun PaymentHistoryScreen(app: App, userId: String, onBack: () -> Unit) {
+    val dark = LocalDark.current
+    val ink = if (dark) Color.White else Color(0xFF111827)
+    val card = if (dark) Color(0xFF1E293B) else Color.White
+    val page = if (dark) Color(0xFF0F172A) else Color(0xFFE6E6FA)
+    val slips = remember { app.db.userSlips(userId) }
+    
+    Column(Modifier.fillMaxSize().background(page)) {
+        Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "بازگشت", tint = ink) }
+            Text("پرداخت‌های من", color = ink, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+        }
+        
+        LazyColumn(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+            if (slips.isEmpty()) {
+                item {
+                    Box(Modifier.fillParentMaxSize(), contentAlignment = Alignment.Center) {
+                        Text("هنوز تراکنشی ثبت نشده است.", color = Color.Gray, fontSize = 14.sp)
+                    }
+                }
+            } else {
+                items(slips) { slip ->
+                    val statusColor = when (slip.status) {
+                        "approved" -> Color(0xFF0F9D58)
+                        "rejected" -> Color(0xFFDC2626)
+                        else -> Color(0xFFD97706)
+                    }
+                    val statusBg = when (slip.status) {
+                        "approved" -> Color(0xFFE6F4EA)
+                        "rejected" -> Color(0xFFFEE2E2)
+                        else -> Color(0xFFFEF3C7)
+                    }
+                    val statusText = when (slip.status) {
+                        "approved" -> "موفق (تأیید شده)"
+                        "rejected" -> "ناموفق (رد شده)"
+                        else -> "در حال بررسی (در انتظار)"
+                    }
+
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp)
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(card)
+                            .border(1.dp, if (dark) Color.White.copy(alpha = 0.05f) else Color.Black.copy(alpha = 0.05f), RoundedCornerShape(20.dp))
+                            .padding(16.dp)
+                    ) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            Text(slip.plan ?: "شارژ کیف پول", color = ink, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                            Text("${formatToman(slip.amount)} تومان", color = Blue, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                        }
+                        
+                        Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            Column {
+                                Text(persianDigits(SimpleDateFormat("yyyy/MM/dd - HH:mm", Locale.US).format(Date(slip.createdAt))), color = Color.Gray, fontSize = 12.sp)
+                                Text("پیگیری: ${slip.refCode ?: "—"}", color = Color.Gray, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
+                            }
+                            
+                            Surface(
+                                shape = RoundedCornerShape(50),
+                                color = statusBg
+                            ) {
+                                Text(
+                                    statusText,
+                                    color = statusColor,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ExportHistoryScreen(app: App, userId: String, onBack: () -> Unit) {
+    val dark = LocalDark.current
+    val ink = if (dark) Color.White else Color(0xFF111827)
+    val card = if (dark) Color(0xFF1E293B) else Color.White
+    val page = if (dark) Color(0xFF0F172A) else Color(0xFFE6E6FA)
+    val logs = remember { app.db.exportLogs(userId) }
+    
+    Column(Modifier.fillMaxSize().background(page)) {
+        Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "بازگشت", tint = ink) }
+            Text("گزارش خروجی‌های من", color = ink, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+        }
+        
+        LazyColumn(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+            if (logs.isEmpty()) {
+                item {
+                    Box(Modifier.fillParentMaxSize(), contentAlignment = Alignment.Center) {
+                        Text("هنوز گزارشی خروجی گرفته نشده است.", color = Color.Gray, fontSize = 14.sp)
+                    }
+                }
+            } else {
+                items(logs) { log ->
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp)
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(card)
+                            .border(1.dp, if (dark) Color.White.copy(alpha = 0.05f) else Color.Black.copy(alpha = 0.05f), RoundedCornerShape(20.dp))
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            Modifier.size(46.dp).clip(CircleShape).background(if (log.fileType == "xlsx") Color(0xFFE6F4EA) else Color(0xFFE3F2FD)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                if (log.fileType == "xlsx") Icons.Filled.TableChart else Icons.Filled.Description,
+                                null,
+                                tint = if (log.fileType == "xlsx") Color(0xFF0F9D58) else Color(0xFF1565C0),
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+                        
+                        Column(Modifier.weight(1f).padding(horizontal = 14.dp)) {
+                            Text("خروجی گفتگو: ${log.targetName}", color = ink, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            Text(
+                                "نوع: ${if (log.fileType == "xlsx") "اکسل" else "متن"} · ${persianDigits(SimpleDateFormat("MM/dd - HH:mm", Locale.US).format(Date(log.timestamp)))}",
+                                color = Color.Gray,
+                                fontSize = 12.sp,
+                                modifier = Modifier.padding(top = 2.dp)
+                            )
+                        }
+                        
+                        IconButton(onClick = { /* Handle re-download or open */ }) {
+                            Icon(Icons.Filled.Download, "دانلود مجدد", tint = Blue, modifier = Modifier.size(22.dp))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ProfileScreen(app: App, userId: String, theme: ThemeController, chatFont: ChatFontController, chatPalette: ChatPaletteController, onBack: () -> Unit, pay: () -> Unit, pricing: () -> Unit, onAdmin: () -> Unit, logout: () -> Unit) {
+fun ProfileScreen(
+    app: App, 
+    userId: String, 
+    theme: ThemeController, 
+    chatFont: ChatFontController, 
+    chatPalette: ChatPaletteController, 
+    onBack: () -> Unit, 
+    onPayments: () -> Unit,
+    onExports: () -> Unit,
+    pricing: () -> Unit, 
+    onAdmin: () -> Unit, 
+    logout: () -> Unit
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var user by remember { mutableStateOf(app.db.user(userId)) }
@@ -4095,9 +4910,6 @@ fun ProfileScreen(app: App, userId: String, theme: ThemeController, chatFont: Ch
     var crop by remember { mutableStateOf<Bitmap?>(null) }
     var message by remember { mutableStateOf("") }
     var chatSettingsOpen by remember { mutableStateOf(false) }
-    var walletOpen by remember { mutableStateOf(false) }
-    var plansOpen by remember { mutableStateOf(false) }
-    var billingTab by remember { mutableIntStateOf(0) }
     var donation by remember { mutableStateOf(false) }
     val wallpaperPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
@@ -4150,8 +4962,8 @@ fun ProfileScreen(app: App, userId: String, theme: ThemeController, chatFont: Ch
             }
         }
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            StatusCapsule(Modifier.weight(1f), Icons.Filled.Wallet, Color(0xFF10B981), "موجودی", "${formatToman(current.balance)} تومان", themeContainer(), dark)
-            StatusCapsule(Modifier.weight(1f), Icons.Filled.Star, Blue, "پلن فعلی", planDisplay(current.plan), themeContainer(), dark)
+            StatusCapsule(Modifier.weight(1f).clickable { pricing() }, Icons.Filled.Wallet, Color(0xFF10B981), "موجودی", "${formatToman(current.balance)} تومان", themeContainer(), dark)
+            StatusCapsule(Modifier.weight(1f).clickable { pricing() }, Icons.Filled.Star, Blue, "پلن فعلی", planDisplay(current.plan), themeContainer(), dark)
         }
         if (message.isNotEmpty()) Text(message, color = chatTheme.primary, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
         Column(Modifier.fillMaxWidth().padding(16.dp).clip(RoundedCornerShape(20.dp)).background(card)) {
@@ -4162,12 +4974,15 @@ fun ProfileScreen(app: App, userId: String, theme: ThemeController, chatFont: Ch
             SettingRow("تنظیمات گفتگو", "پس‌زمینه، اندازه قلم و ترکیب رنگ", Icons.Filled.Chat, Color(0xFFE0F7FA), Color(0xFF00ACC1)) { chatSettingsOpen = !chatSettingsOpen }
             AnimatedVisibility(chatSettingsOpen) { ChatSettingsSection(dark, ink, chatFont, chatPalette) { wallpapersOpen = true } }
             RowDivider(dark)
-            SettingRow("کیف پول", "${formatToman(current.balance)} تومان", Icons.Filled.Wallet, Color(0xFFE8F5E9), Color(0xFF2E7D32)) { if (paid) walletOpen = true else plansOpen = true }
+            SettingRow("کیف پول و اشتراک", "${formatToman(current.balance)} تومان", Icons.Filled.Wallet, Color(0xFFE8F5E9), Color(0xFF2E7D32), onClick = pricing)
+            RowDivider(dark)
+            SettingRow("پرداخت‌های من", "مشاهده فیش‌ها و سوابق", Icons.Filled.Receipt, Color(0xFFF3E5F5), Color(0xFF7B1FA2), onClick = onPayments)
+            RowDivider(dark)
+            SettingRow("گزارش خروجی‌های من", "تاریخچه دانلود اکسل و متن", Icons.Filled.FileDownload, Color(0xFFFFF3E0), Color(0xFFE65100), onClick = onExports)
             RowDivider(dark)
             SettingRow("رمز عبور", "", Icons.Filled.Lock, Color(0xFFE3F2FD), Color(0xFF1565C0)) { editPassword = true }
             RowDivider(dark)
             SettingRow("حمایت مالی", "حمایت از توسعه اپلیکیشن", Icons.Filled.Favorite, Color(0xFFFFE4E6), Color(0xFFF43F5E)) {
-                // با اتصال به اینترنت، صفحهٔ حمایت روی سایت باز می‌شود؛ در حالت آفلاین پیام راهنما نمایش داده می‌شود.
                 if (!isDeviceOnline(context) || !startView(context, SUPPORT_DONATE_URL)) donation = true
             }
             RowDivider(dark)
@@ -4197,6 +5012,7 @@ fun ProfileScreen(app: App, userId: String, theme: ThemeController, chatFont: Ch
             RowDivider(dark)
             SettingRow("خروج از حساب", "", Icons.Filled.Logout, Color(0xFFFFEBEE), Color(0xFFEF4444), danger = true, onClick = logout)
         }
+        
         Text("نسخه: V1", style = MaterialTheme.typography.bodySmall, color = Color.Gray, modifier = Modifier.padding(top = 16.dp, bottom = 24.dp))
     }
     if (editProfile) {
@@ -4351,54 +5167,6 @@ fun ProfileScreen(app: App, userId: String, theme: ThemeController, chatFont: Ch
                     Text("آپلود تصویر دلخواه", color = Color.White, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 8.dp))
                 }
             }
-            }
-        }
-    }
-    if (walletOpen) {
-        val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-        ModalBottomSheet(onDismissRequest = { walletOpen = false }, sheetState = sheet, containerColor = themeDialogContainer()) {
-            Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 28.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("کیف پول", fontWeight = FontWeight.Bold, fontSize = 20.sp, color = ink, modifier = Modifier.weight(1f))
-                    IconButton(onClick = { user = app.db.user(userId) }) { Icon(Icons.Filled.Refresh, "به‌روزرسانی", tint = Blue) }
-                }
-                Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    StatusCapsule(Modifier.weight(1f), Icons.Filled.Star, Blue, "پلن فعلی", planDisplay(current.plan), card, dark)
-                    StatusCapsule(Modifier.weight(1f), Icons.Filled.Schedule, Blue, "مدت باقی‌مانده", "${persianDigits(daysLeft.toString())} روز", card, dark)
-                }
-                Button(
-                    onClick = { walletOpen = false; pay() },
-                    Modifier.fillMaxWidth().padding(top = 16.dp),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Blue, contentColor = LocalAppTheme.current.onButtonColor),
-                ) { Text("پرداخت‌ها و گردش حساب") }
-            }
-        }
-    }
-    if (plansOpen) {
-        val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-        ModalBottomSheet(onDismissRequest = { plansOpen = false }, sheetState = sheet, containerColor = themeDialogContainer()) {
-            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 28.dp)) {
-                Text("خرید اشتراک", fontWeight = FontWeight.Bold, fontSize = 20.sp, color = ink)
-                Text("پلن مناسب خود را انتخاب کنید.", color = Color(0xFF6B7280), fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
-                Row(Modifier.padding(top = 12.dp).fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(if (dark) Color(0xFF243242) else Color(0xFFF1F2F6)).padding(4.dp)) {
-                    listOf("ماهانه", "فصلی").forEachIndexed { i, label ->
-                        val on = billingTab == i
-                        Text(
-                            label,
-                            color = if (on) Color.White else if (dark) Color(0xFFD1D5DB) else Color(0xFF707579),
-                            fontWeight = FontWeight.Medium,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.weight(1f).clip(RoundedCornerShape(16.dp)).background(if (on) Blue else Color.Transparent).clickable { billingTab = i }.padding(vertical = 8.dp),
-                        )
-                    }
-                }
-                val months = if (billingTab == 1) 3 else 1
-                PlanRow("رایگان", "۰ تومان", listOf("۵ ثبت در روز", "مکالمه و یادداشت", "بدون هزینه"), false, dark, months) { plansOpen = false; pay() }
-                PlanRow("پلاس", "${formatToman(500_000 * months)} تومان", listOf("۱۰۰ ثبت در روز", "دانلود صحبت‌ها", "پشتیبانی سریع"), true, dark, months) { plansOpen = false; pay() }
-                PlanRow("هوشمند", "${formatToman(1_000_000 * months)} تومان", listOf("همه امکانات پلاس", "خلاصه هوشمند با هوش مصنوعی", "سقف نامحدود ثبت"), false, dark, months) { plansOpen = false; pay() }
-                Text("پس از واریز و ثبت رسید، مدیر پرداخت را بررسی و اشتراک را فعال می‌کند.", color = Color(0xFF6B7280), fontSize = 12.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(top = 12.dp))
-                TextButton(onClick = { plansOpen = false; pricing() }, modifier = Modifier.fillMaxWidth()) { Text("مشاهده صفحه قیمت‌ها", color = Blue) }
             }
         }
     }
@@ -4721,106 +5489,395 @@ private fun cropBitmap(src: Bitmap, scale: Float, offset: Offset, view: Int, rot
     return out
 }
 
+data class SubscriptionPlan(
+    val id: String,
+    val name: String,
+    val price: Int,
+    val duration: String
+)
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PayScreen(app: App, userId: String, back: () -> Unit) {
+fun PayScreen(app: App, userId: String, back: () -> Unit, selectedPlan: SubscriptionPlan? = null) {
     val context = LocalContext.current
     val dark = LocalDark.current
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     var user by remember { mutableStateOf(app.db.user(userId)) }
-    var amount by remember { mutableStateOf("") }
-    var plan by remember { mutableStateOf<String?>(null) }
-    var deposit by remember { mutableStateOf("") }
-    var receipt by remember { mutableStateOf<String?>(null) }
-    var copied by remember { mutableStateOf(false) }
-    var message by remember { mutableStateOf("") }
+    var showTrackingDialog by remember { mutableStateOf(false) }
+    var showSuccessDialog by remember { mutableStateOf(false) }
+    var selectedSubscriptionPlan by remember { mutableStateOf(selectedPlan) }
+    var trackingId by remember { mutableStateOf("") }
+    var receiptPath by remember { mutableStateOf<String?>(null) }
+    var copiedCard by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
+    
     val page = if (dark) Color(0xFF0F172A) else Color(0xFFE6E6FA)
     val card = if (dark) Color(0xFF1E293B) else Color.White
     val ink = if (dark) Color.White else Color(0xFF111827)
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+    val cardNumber = "5041721252436135"
+    
+    val plans = listOf(
+        SubscriptionPlan("monthly", "پلن پلاس ماهانه", 1_000_000, "۳۰ روز"),
+        SubscriptionPlan("seasonal", "پلن پلاس فصلی", 2_500_000, "۹۰ روز")
+    )
+    
+    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
         val dest = File(context.filesDir, "receipt-$userId-${System.currentTimeMillis()}.jpg")
         context.contentResolver.openInputStream(uri)?.use { input -> dest.outputStream().use { input.copyTo(it) } }
-        receipt = dest.absolutePath
+        receiptPath = dest.absolutePath
     }
+    
     val current = user ?: return
+    
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).background(page).padding(16.dp)) {
+        // Header
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = back) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "بازگشت", tint = ink) }
-            Text("افزایش موجودی و پرداخت", color = ink, fontWeight = FontWeight.Bold, fontSize = 18.sp, modifier = Modifier.weight(1f))
+            Text("پرداخت اشتراک", color = ink, fontWeight = FontWeight.Bold, fontSize = 18.sp, modifier = Modifier.weight(1f))
             Icon(Icons.Filled.Wallet, null, tint = Blue)
         }
-        Text("موجودی فعلی: ${current.balance} تومان", color = ink, modifier = Modifier.padding(top = 12.dp).fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(card).padding(16.dp))
-        val cardNumber = "6219861465646171"
-        Column(Modifier.padding(top = 14.dp).fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(Color.White).border(1.dp, Color(0xFFF3F4F6), RoundedCornerShape(24.dp))) {
-            Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("بانک سامان", color = Color(0xFF0B3A82), fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                    Text("Saman Bank", color = Color(0xFF6B7280), fontSize = 11.sp)
-                }
-                Canvas(Modifier.size(42.dp, 32.dp)) {
-                    drawRoundRect(Color(0xFFD4AF37), cornerRadius = androidx.compose.ui.geometry.CornerRadius(8f, 8f))
-                    drawRoundRect(Color(0xFFB8860B), topLeft = Offset(8f, 8f), size = androidx.compose.ui.geometry.Size(size.width - 16f, 6f))
-                }
-            }
-            Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(persianDigits("6219 - 8614 - 6564 - 6171"), color = Color(0xFF111827), fontWeight = FontWeight.Bold, fontSize = 18.sp, modifier = Modifier.weight(1f).clickable {
-                    clipboard.setText(androidx.compose.ui.text.AnnotatedString(cardNumber))
-                    copied = true
-                })
-                Icon(if (copied) Icons.Filled.Check else Icons.Filled.ContentCopy, "کپی", tint = Blue, modifier = Modifier.clickable {
-                    clipboard.setText(androidx.compose.ui.text.AnnotatedString(cardNumber))
-                    copied = true
-                })
-            }
-            Box(Modifier.padding(top = 16.dp).fillMaxWidth().clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)).background(Blue).padding(vertical = 12.dp), contentAlignment = Alignment.Center) {
-                Text("محمد مهدی آبرودی", color = Color.White, fontWeight = FontWeight.Bold)
-            }
-        }
-        if (copied) {
-            Text("شماره کارت کپی شد", color = Blue, modifier = Modifier.padding(top = 8.dp))
-        }
-        Text("لطفاً پس از واریز، عکس رسید یا شناسه پیگیری را در فرم زیر ثبت کنید.", color = Color(0xFF6B7280), modifier = Modifier.padding(top = 8.dp))
-        Text("انتخاب مبلغ یا پلن", color = ink, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 16.dp))
+        
+        // Current Balance
+        Text(
+            "موجودی فعلی: ${formatToman(current.balance)} تومان",
+            color = ink,
+            modifier = Modifier.padding(top = 12.dp).fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(card).padding(16.dp)
+        )
+        
+        // Plan Selection
+        Text("انتخاب پلن", color = ink, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 16.dp))
+        
         Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf("basic" to "پلن پایه", "advanced" to "پلن پیشرفته", "50000" to "۵۰,۰۰۰", "100000" to "۱۰۰,۰۰۰").forEach { (id, label) ->
-                val on = plan == id || amount == id
-                Text(label, color = if (on) Color.White else ink, modifier = Modifier.clip(RoundedCornerShape(20.dp)).background(if (on) Blue else card).clickable {
-                    if (id == "basic" || id == "advanced") { plan = id; amount = if (id == "advanced") "1000000" else "500000" }
-                    else { plan = null; amount = id }
-                }.padding(horizontal = 12.dp, vertical = 8.dp))
+            plans.forEach { planItem ->
+                val selected = selectedSubscriptionPlan?.id == planItem.id
+                Column(
+                    Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(if (selected) Blue.copy(alpha = 0.1f) else card)
+                        .border(2.dp, if (selected) Blue else Color.Transparent, RoundedCornerShape(20.dp))
+                        .clickable { selectedSubscriptionPlan = planItem }
+                        .padding(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(planItem.name, color = if (selected) Blue else ink, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    Text(formatToman(planItem.price) + " تومان", color = if (selected) Blue else Color(0xFF6B7280), fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+                    Text(planItem.duration, color = Color(0xFF6B7280), fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp))
+                }
             }
         }
-        OutlinedTextField(amount, { amount = it.filter { ch -> ch.isDigit() }; plan = null }, Modifier.fillMaxWidth().padding(top = 8.dp), label = { Text("مبلغ دلخواه به تومان") })
-        OutlinedTextField(deposit, { deposit = it }, Modifier.fillMaxWidth(), label = { Text("شناسه واریز / کد پیگیری") })
-        Box(Modifier.padding(top = 8.dp).fillMaxWidth().clip(RoundedCornerShape(20.dp)).border(1.dp, Blue, RoundedCornerShape(20.dp)).clickable { picker.launch("image/*") }.padding(18.dp), contentAlignment = Alignment.Center) {
-            if (receipt != null) {
-                val preview = BitmapFactory.decodeFile(receipt)
-                if (preview != null) Image(preview.asImageBitmap(), null, Modifier.fillMaxWidth().height(120.dp).clip(RoundedCornerShape(12.dp)), contentScale = ContentScale.Crop)
-            } else Text("عکس رسید واریز", color = Blue)
+        
+        // Graphical Bank Card
+        Column(
+            Modifier.padding(top = 24.dp).fillMaxWidth()
+                .shadow(12.dp, RoundedCornerShape(24.dp))
+                .clip(RoundedCornerShape(24.dp))
+                .background(Brush.linearGradient(listOf(Color(0xFF1E3A8A), Color(0xFF2563EB))))
+                .padding(20.dp)
+        ) {
+            // Top Row - Bank Logo & Title
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                // Chip Icon
+                Canvas(Modifier.size(42.dp, 32.dp)) {
+                    drawRoundRect(Color(0xFFD4AF37), cornerRadius = CornerRadius(8f, 8f))
+                    drawRoundRect(Color(0xFFB8860B), topLeft = Offset(8f, 8f), size = Size(size.width - 16f, 6f))
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("بانک قرض‌الحسنه رسالت", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    Text("Resalat Bank", color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp)
+                }
+                Text("دفتر گفتگو", color = Color.White.copy(alpha = 0.9f), fontWeight = FontWeight.Bold, fontSize = 14.sp)
+            }
+            
+            // Center Row - Card Number
+            Row(
+                Modifier.padding(top = 24.dp).fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    persianDigits("5041 - 7212 - 5243 - 6135"),
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp,
+                    letterSpacing = 2.sp
+                )
+                IconButton(
+                    onClick = {
+                        clipboard.setText(androidx.compose.ui.text.AnnotatedString(cardNumber))
+                        copiedCard = true
+                    },
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        if (copiedCard) Icons.Filled.Check else Icons.Filled.ContentCopy,
+                        "کپی شماره کارت",
+                        tint = Color.White,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+            
+            // Bottom Row - Account Holder
+            Box(
+                Modifier.padding(top = 20.dp).fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color.White.copy(alpha = 0.15f))
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("محمد مهدی آبرودی", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+            }
         }
-        Button(onClick = {
-            try {
-                app.db.submitSlip(userId, "topup", null, amount.toIntOrNull() ?: 0, receipt, deposit.ifBlank { null })
-                message = "فیش برای شارژ فرستاده شد."
-                error = ""
-            } catch (e: Exception) { error = e.message ?: "خطا" }
-        }, Modifier.fillMaxWidth().padding(top = 12.dp), shape = RoundedCornerShape(16.dp)) { Text("ارسال فیش و شارژ حساب") }
-        OutlinedButton(onClick = {
-            val chosen = plan ?: "basic"
-            val price = if (chosen == "advanced") 1_000_000 else 500_000
-            if (current.balance < price) { error = "اول کیف پول را به اندازه پلن شارژ کن"; return@OutlinedButton }
-            try {
-                message = "پلن ${app.db.buyPlan(current, chosen)} از موجودی فعال شد"
-                error = ""
+        
+        // Copy Toast
+        if (copiedCard) {
+            Text("شماره کارت بانک رسالت کپی شد", color = Blue, modifier = Modifier.padding(top = 8.dp))
+        }
+        
+        // Dynamic Price Summary
+        selectedSubscriptionPlan?.let { plan ->
+            Column(
+                Modifier.padding(top = 16.dp).fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(card)
+                    .padding(16.dp)
+            ) {
+                Text("مبلغ قابل پرداخت:", color = Color(0xFF6B7280), fontSize = 13.sp)
+                Text(
+                    formatToman(plan.price) + " تومان",
+                    color = Blue,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 20.sp,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+            }
+        }
+        
+        // Helper Note
+        Text(
+            "لطفاً مبلغ مشخص‌شده را به شماره کارت بالا واریز نمایید و سپس دکمه تأیید را بزنید.",
+            color = Color(0xFF6B7280),
+            fontSize = 13.sp,
+            modifier = Modifier.padding(top = 16.dp),
+            textAlign = TextAlign.Center
+        )
+        
+        // Primary Action Button
+        Button(
+            onClick = { showTrackingDialog = true },
+            Modifier.fillMaxWidth().padding(top = 16.dp).height(52.dp),
+            shape = RoundedCornerShape(16.dp),
+            enabled = selectedSubscriptionPlan != null,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Blue,
+                disabledContainerColor = Color(0xFFE5E7EB)
+            )
+        ) {
+            Text("تأیید واریز و ثبت شناسه", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+        }
+        
+        // Secondary Button
+        TextButton(
+            onClick = back,
+            Modifier.fillMaxWidth().padding(top = 8.dp)
+        ) {
+            Text("انصراف", color = Color(0xFF6B7280))
+        }
+    }
+    
+    // Step 2: Tracking ID Dialog
+    if (showTrackingDialog) {
+        TrackingIdDialog(
+            plan = selectedSubscriptionPlan,
+            trackingId = trackingId,
+            onTrackingIdChange = { trackingId = it },
+            receiptPath = receiptPath,
+            onSelectReceipt = { imagePicker.launch("image/*") },
+            onSubmit = {
+                if (trackingId.isBlank() && receiptPath == null) {
+                    error = "شناسه واریز یا تصویر رسید الزامی است"
+                } else {
+                    try {
+                        app.db.submitSlip(
+                            userId,
+                            "subscription",
+                            selectedSubscriptionPlan?.id,
+                            selectedSubscriptionPlan?.price ?: 0,
+                            receiptPath,
+                            trackingId.ifBlank { null }
+                        )
+                        showTrackingDialog = false
+                        showSuccessDialog = true
+                        
+                        // Send notification
+                        showPaymentNotification(
+                            context,
+                            "دفتر گفتگو - ثبت پرداخت",
+                            "رسید پرداخت ${selectedSubscriptionPlan?.name} ثبت شد و در انتظار بررسی است."
+                        )
+                    } catch (e: Exception) {
+                        error = e.message ?: "خطا در ثبت رسید"
+                    }
+                }
+            },
+            onDismiss = { showTrackingDialog = false }
+        )
+    }
+    
+    // Success Dialog
+    if (showSuccessDialog) {
+        PaymentSuccessDialog(
+            planName = selectedSubscriptionPlan?.name ?: "",
+            onConfirm = {
+                showSuccessDialog = false
                 user = app.db.user(userId)
-            } catch (e: Exception) { error = e.message ?: "خطا" }
-        }, Modifier.fillMaxWidth().padding(top = 8.dp), shape = RoundedCornerShape(16.dp)) { Text("خرید مستقیم از موجودی فعلی") }
+            }
+        )
     }
-    val note = message.ifBlank { error }
-    if (note.isNotEmpty()) {
-        PrettyAlert(if (error.isNotEmpty()) "توجه" else "اعلان", note, onConfirm = { message = ""; error = "" })
+    
+    // Error Dialog
+    if (error.isNotEmpty()) {
+        PrettyAlert("توجه", error, onConfirm = { error = "" })
     }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun TrackingIdDialog(
+    plan: SubscriptionPlan?,
+    trackingId: String,
+    onTrackingIdChange: (String) -> Unit,
+    receiptPath: String?,
+    onSelectReceipt: () -> Unit,
+    onSubmit: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val dark = LocalDark.current
+    val card = if (dark) Color(0xFF1E293B) else Color.White
+    
+    Dialog(onDismissRequest = onDismiss) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(24.dp))
+                .background(card)
+                .padding(24.dp)
+        ) {
+            Text("ثبت شناسه واریز / شماره پیگیری", color = if (dark) Color.White else Color(0xFF111827), fontWeight = FontWeight.Bold, fontSize = 18.sp)
+            
+            OutlinedTextField(
+                value = trackingId,
+                onValueChange = { onTrackingIdChange(it.filter { ch -> ch.isDigit() }) },
+                modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
+                label = { Text("شناسه واریز / کد رهگیری بانکی") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                shape = RoundedCornerShape(12.dp)
+            )
+            
+            Button(
+                onClick = onSelectReceipt,
+                modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Blue.copy(alpha = 0.1f))
+            ) {
+                Icon(Icons.Filled.Image, null, tint = Blue, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("انتخاب تصویر فیش واریز", color = Blue)
+            }
+            
+            if (receiptPath != null) {
+                val preview = BitmapFactory.decodeFile(receiptPath)
+                if (preview != null) {
+                    Image(
+                        preview.asImageBitmap(),
+                        null,
+                        Modifier.fillMaxWidth().height(120.dp).padding(top = 8.dp).clip(RoundedCornerShape(12.dp)),
+                        contentScale = ContentScale.Crop
+                    )
+                }
+            }
+            
+            Button(
+                onClick = onSubmit,
+                modifier = Modifier.fillMaxWidth().padding(top = 20.dp).height(48.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Blue)
+            ) {
+                Text("ارسال نهایی رسید", fontWeight = FontWeight.Bold)
+            }
+            
+            TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                Text("انصراف", color = Color(0xFF6B7280))
+            }
+        }
+    }
+}
+
+@Composable
+fun PaymentSuccessDialog(planName: String, onConfirm: () -> Unit) {
+    Dialog(onDismissRequest = onConfirm) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(24.dp))
+                .background(Color.White)
+                .padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Box(
+                Modifier.size(72.dp).clip(CircleShape).background(Color(0xFF10B981).copy(alpha = 0.1f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Filled.Check, null, tint = Color(0xFF10B981), modifier = Modifier.size(40.dp))
+            }
+            
+            Text("رسید با موفقیت ثبت شد", color = Color(0xFF111827), fontWeight = FontWeight.Bold, fontSize = 18.sp, modifier = Modifier.padding(top = 16.dp))
+            
+            Text(
+                "شناسه واریز شما برای مدیریت ارسال گردید. پس از بررسی و تأیید، اشتراک شما فعال خواهد شد.",
+                color = Color(0xFF6B7280),
+                fontSize = 14.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(top = 8.dp)
+            )
+            
+            Button(
+                onClick = onConfirm,
+                modifier = Modifier.fillMaxWidth().padding(top = 20.dp).height(48.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Blue)
+            ) {
+                Text("متوجه شدم", fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
+private fun showPaymentNotification(context: android.content.Context, title: String, body: String) {
+    if (!notificationsAllowed(context)) return
+    val channelId = "payment_updates"
+    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+        val channel = android.app.NotificationChannel(channelId, "به‌روزرسانی پرداخت", android.app.NotificationManager.IMPORTANCE_HIGH)
+        context.getSystemService(android.app.NotificationManager::class.java)?.createNotificationChannel(channel)
+    }
+    val open = android.app.PendingIntent.getActivity(
+        context, 0,
+        android.content.Intent(context, MainActivity::class.java).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP),
+        android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+    )
+    val notification = androidx.core.app.NotificationCompat.Builder(context, channelId)
+        .setSmallIcon(R.drawable.ic_stat_support)
+        .setContentTitle(title)
+        .setContentText(body)
+        .setStyle(androidx.core.app.NotificationCompat.BigTextStyle().bigText(body))
+        .setPriority(androidx.core.app.NotificationCompat.PRIORITY_HIGH)
+        .setAutoCancel(true)
+        .setContentIntent(open)
+        .build()
+    runCatching { androidx.core.app.NotificationManagerCompat.from(context).notify(12728, notification) }
 }
 
 private fun planDisplay(plan: String) = when (plan) {
