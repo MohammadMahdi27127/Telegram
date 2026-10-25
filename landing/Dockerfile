@@ -9,8 +9,11 @@ FROM node:18-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 
-# ساخت پوشه public در صورت عدم وجود جهت جلوگیری از خطای داکر
-RUN mkdir -p public
+# ایجاد پوشه downloads جهت تضمین وجود مسیر و عدم وقوع خطای کپی در داکر
+RUN mkdir -p downloads
+
+# کپی کردن پوشه downloads حاوی فایل نصبی
+COPY --from=builder /app/downloads ./downloads
 
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
