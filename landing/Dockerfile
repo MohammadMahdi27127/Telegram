@@ -9,7 +9,7 @@ FROM node:18-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 
-# کپی پوشه public به همراه تمام فایل‌های دانلودی
+# کپی کل پوشه public (شامل پوشه downloads و فایل Tel.apk)
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
