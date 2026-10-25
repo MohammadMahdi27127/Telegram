@@ -9,12 +9,8 @@ FROM node:18-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 
-# ایجاد پوشه downloads جهت تضمین وجود مسیر و عدم وقوع خطای کپی در داکر
-RUN mkdir -p downloads
-
-# کپی کردن پوشه downloads حاوی فایل نصبی
-COPY --from=builder /app/downloads ./downloads
-
+# کپی پوشه public به همراه تمام فایل‌های دانلودی
+COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 
