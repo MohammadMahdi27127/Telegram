@@ -24,7 +24,7 @@ services:
     depends_on:
       - db
     networks:
-      - app_net
+      - app_net   
 
   landing:
     build:
