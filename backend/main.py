@@ -4,6 +4,8 @@ from typing import List
 app = FastAPI(title="Hamsohbat Backend")
 
 # مدیریت اتصالات وب‌سوکت چت
+# مدیریت اتصالات وب‌سوکت چت
+
 class ConnectionManager:
     def __init__(self):
         self.active_connections: List[WebSocket] = []
@@ -23,7 +25,7 @@ manager = ConnectionManager()
 
 @app.get("/api/health")
 def health_check():
-    return {"status": "ok", "app": "Daftar Goftogu"}
+    return {"status": "ok ", "app": "Daftar Goftogu"}
 
 @app.websocket("/ws/chat")
 async def websocket_endpoint(websocket: WebSocket):
