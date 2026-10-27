@@ -4,11 +4,12 @@ import { Info, Landmark, ShieldCheck, Wallet } from "lucide-react";
 import { CopyRow } from "@/components/donate/copy-row";
 
 /** اطلاعات واقعی مقصد واریز که از تنظیمات سامانه دریافت می‌شود. */
-const CARD_NUMBER_VALUE = "6219861909086315";
-const CARD_NUMBER_DISPLAY = "۶۲۱۹-۸۶۱۹-۰۹۰۸-۶۳۱۵";
-const IBAN_VALUE = "IR540560611828005125842101";
-const IBAN_DISPLAY = "IR54 0560 6118 2800 5125 8421 01";
-const ACCOUNT_OWNER = "محمدجواد رضوانیان";
+const CARD_NUMBER_VALUE = "5041721252436135";
+const CARD_NUMBER_DISPLAY = "۵۰۴۱-۷۲۱۲-۵۲۴۳-۶۱۳۵";
+const IBAN_VALUE = "IR450700010001114351458001";
+const IBAN_DISPLAY = "IR45 0700 0100 0111 4351 4580 01";
+const ACCOUNT_OWNER = "محمد مهدی آبرودی";
+const BANK_NAME = "قرض‌الحسنه رسالت";
 
 export function BankCard() {
   return (
@@ -18,9 +19,9 @@ export function BankCard() {
           <p className="text-[12px] font-medium text-rose-500">همراهی شما ارزشمند است</p>
           <h2 className="mt-2 text-[20px] font-bold tracking-tight text-ink">مقصد حمایت مالی</h2>
         </div>
-        <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-[11px] font-medium text-amber-700">
-          <Wallet className="h-3.5 w-3.5" />
-          واریز دلخواه
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[11px] font-medium text-emerald-700">
+          <Landmark className="h-3.5 w-3.5" />
+          {BANK_NAME}
         </span>
       </div>
 

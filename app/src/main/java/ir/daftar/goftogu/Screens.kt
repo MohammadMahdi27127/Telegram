@@ -149,6 +149,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.FabPosition
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.FloatingActionButton
@@ -571,7 +572,7 @@ private fun openDeepLink(context: android.content.Context, targets: List<Pair<St
     targets.any { (uri, pkg) -> startView(context, uri, pkg) }
 
 /** نشانی صفحهٔ حمایت اختیاری روی سایت. */
-private const val SUPPORT_DONATE_URL = "https://hamsohbat.darkube.ir/donate"
+private const val SUPPORT_DONATE_URL = "https://recamender.darkube.ir/donate"
 
 /** آیدی پشتیبانی در تلگرام. */
 private const val TELEGRAM_ID = "Mahdi27_127"
@@ -2112,8 +2113,47 @@ fun ChatsScreen(
     val hairline = if (dark) Color.White.copy(alpha = 0.06f) else Color.Black.copy(alpha = 0.04f)
     val rowLine = if (dark) Color.White.copy(alpha = 0.07f) else Color.Black.copy(alpha = 0.06f)
     val headerInk = if (dark) Color.White else Color.Black
-    Box(Modifier.fillMaxSize().background(palette.bg)) {
-        Column(Modifier.fillMaxSize()) {
+    Scaffold(
+        containerColor = palette.bg,
+        floatingActionButtonPosition = FabPosition.Start,
+        floatingActionButton = {
+            val fabScale by animateFloatAsState(if (creating) 0.9f else 1f, tween(200), label = "fab")
+            val fabPop = remember { Animatable(0.6f) }
+            val fabFade = remember { Animatable(0f) }
+            LaunchedEffect(Unit) {
+                delay(150)
+                launch { fabFade.animateTo(1f, tween(180, easing = FastOutSlowInEasing)) }
+                fabPop.animateTo(1f, spring(dampingRatio = 0.6f, stiffness = 350f))
+            }
+            FloatingActionButton(
+                onClick = {
+                    if (account?.plan == "guest" && people.isNotEmpty()) {
+                        alert = "حالت مهمان" to "در حالت مهمان فقط یک نفر می‌توانید اضافه کنید."
+                    } else {
+                        draft = ""
+                        groupMode = false
+                        creating = !creating
+                    }
+                },
+                shape = CircleShape,
+                containerColor = if (creating) Blue.copy(alpha = 0.85f) else Blue,
+                contentColor = Color.White,
+                modifier = Modifier
+                    .graphicsLayer {
+                        val scale = fabScale * fabPop.value
+                        scaleX = scale
+                        scaleY = scale
+                        alpha = fabFade.value
+                    }
+                    .size(56.dp)
+                    .border(if (creating) 2.dp else 0.dp, Color.White, CircleShape)
+            ) {
+                Icon(if (creating) Icons.Filled.Close else Icons.Filled.Edit, "شخص جدید", modifier = Modifier.size(24.dp))
+            }
+        }
+    ) { paddingValues ->
+        Box(Modifier.fillMaxSize().padding(paddingValues)) {
+            Column(Modifier.fillMaxSize()) {
             DropHeader {
             Column(
                 Modifier
@@ -2318,7 +2358,7 @@ fun ChatsScreen(
             OfflineBanner()
             }
             }
-            LazyColumn(Modifier.weight(1f).padding(bottom = 88.dp), state = listState) {
+            LazyColumn(Modifier.weight(1f), state = listState) {
                 if (!contacts && account?.plan == "advanced") {
                     item(key = "ai-chat") {
                         RiseRow("ai", 0, arrived) {
@@ -2364,8 +2404,14 @@ fun ChatsScreen(
                                         fontSize = 15.sp,
                                         maxLines = 1
                                     )
+                                    val subtitle = if (contacts) {
+                                        if (person.isGroup) person.role.ifBlank { "تیم / گروه" }
+                                        else person.phone.ifBlank { person.role.ifBlank { "بدون شماره" } }
+                                    } else {
+                                        person.lastBody.ifBlank { person.role.ifBlank { "بدون ثبت" } }
+                                    }
                                     Text(
-                                        if (contacts) person.phone.ifBlank { person.role.ifBlank { "بدون شماره" } } else person.lastBody.ifBlank { person.role.ifBlank { "بدون ثبت" } },
+                                        subtitle,
                                         color = if (dark) Color(0xFF94A3B8) else Color(0xFF64748B),
                                         fontSize = 13.sp,
                                         maxLines = 1,
@@ -2401,42 +2447,6 @@ fun ChatsScreen(
                 },
                 onClose = { searching = false; query = "" },
             )
-        }
-        val fabScale by animateFloatAsState(if (creating) 0.9f else 1f, tween(200), label = "fab")
-        val fabPop = remember { Animatable(0.6f) }
-        val fabFade = remember { Animatable(0f) }
-        LaunchedEffect(Unit) {
-            delay(150)
-            launch { fabFade.animateTo(1f, tween(180, easing = FastOutSlowInEasing)) }
-            fabPop.animateTo(1f, spring(dampingRatio = 0.6f, stiffness = 350f))
-        }
-        Box(
-            Modifier
-                .align(Alignment.BottomStart)
-                .padding(16.dp)
-                .graphicsLayer {
-                    val scale = fabScale * fabPop.value
-                    scaleX = scale
-                    scaleY = scale
-                    alpha = fabFade.value
-                }
-                .size(56.dp)
-                .shadow(8.dp, CircleShape)
-                .clip(CircleShape)
-                .background(if (creating) Blue.copy(alpha = 0.85f) else Blue)
-                .border(if (creating) 2.dp else 0.dp, Color.White, CircleShape)
-                .clickable {
-                    if (account?.plan == "guest" && people.isNotEmpty()) {
-                        alert = "حالت مهمان" to "در حالت مهمان فقط یک نفر می‌توانید اضافه کنید."
-                    } else {
-                        draft = ""
-                        groupMode = false
-                        creating = !creating
-                    }
-                },
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(if (creating) Icons.Filled.Close else Icons.Filled.Edit, "شخص جدید", tint = Color.White, modifier = Modifier.size(24.dp))
         }
         AnimatedVisibility(
             visible = creating,
@@ -2487,6 +2497,7 @@ fun ChatsScreen(
                 }
             }
         }
+    }
     }
 }
 
@@ -2960,6 +2971,7 @@ private fun IdentitySheet(
     phone: String,
     role: String,
     entries: List<Entry>,
+    showPhone: Boolean = true,
     onDismiss: () -> Unit,
     onSendMessage: () -> Unit,
     onEdit: () -> Unit,
@@ -2980,32 +2992,36 @@ private fun IdentitySheet(
         ) {
             PersonAvatar(name, avatar, size = 96.dp)
             Text(name, color = ink, fontWeight = FontWeight.Bold, fontSize = 20.sp, modifier = Modifier.padding(top = 12.dp))
-            Text(if (phone.isBlank()) "شماره ثبت نشده" else persianDigits(phone), color = muted, fontSize = 12.sp, modifier = Modifier.padding(top = 3.dp))
+            if (showPhone) {
+                Text(if (phone.isBlank()) "شماره ثبت نشده" else persianDigits(phone), color = muted, fontSize = 12.sp, modifier = Modifier.padding(top = 3.dp))
+            }
             Column(Modifier.fillMaxWidth().padding(top = 18.dp).clip(RoundedCornerShape(18.dp)).background(card)) {
-                Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("شماره موبایل", color = muted, fontSize = 11.sp)
-                        Text(if (phone.isBlank()) "ثبت نشده" else persianDigits(phone), color = ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                if (showPhone) {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("شماره موبایل", color = muted, fontSize = 11.sp)
+                            Text(if (phone.isBlank()) "ثبت نشده" else persianDigits(phone), color = ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                        if (phone.isNotBlank()) {
+                            Box(
+                                Modifier.size(38.dp).clip(CircleShape).background(Blue).clickable {
+                                    runCatching {
+                                        context.startActivity(android.content.Intent(android.content.Intent.ACTION_DIAL, Uri.parse("tel:$phone")))
+                                    }.onFailure { toast = "برنامه تلفن در دسترس نیست" }
+                                },
+                                contentAlignment = Alignment.Center,
+                            ) { Icon(Icons.Filled.Phone, "تماس", tint = Color.White, modifier = Modifier.size(18.dp)) }
+                            Box(
+                                Modifier.padding(start = 8.dp).size(38.dp).clip(CircleShape).background(if (dark) Color(0xFF334155) else Color(0xFFE9EDF5)).clickable {
+                                    clipboard.setText(androidx.compose.ui.text.AnnotatedString(phone))
+                                    toast = "شماره کپی شد"
+                                },
+                                contentAlignment = Alignment.Center,
+                            ) { Icon(Icons.Filled.ContentCopy, "کپی", tint = ink, modifier = Modifier.size(17.dp)) }
+                        }
                     }
-                    if (phone.isNotBlank()) {
-                        Box(
-                            Modifier.size(38.dp).clip(CircleShape).background(Blue).clickable {
-                                runCatching {
-                                    context.startActivity(android.content.Intent(android.content.Intent.ACTION_DIAL, Uri.parse("tel:$phone")))
-                                }.onFailure { toast = "برنامه تلفن در دسترس نیست" }
-                            },
-                            contentAlignment = Alignment.Center,
-                        ) { Icon(Icons.Filled.Phone, "تماس", tint = Color.White, modifier = Modifier.size(18.dp)) }
-                        Box(
-                            Modifier.padding(start = 8.dp).size(38.dp).clip(CircleShape).background(if (dark) Color(0xFF334155) else Color(0xFFE9EDF5)).clickable {
-                                clipboard.setText(androidx.compose.ui.text.AnnotatedString(phone))
-                                toast = "شماره کپی شد"
-                            },
-                            contentAlignment = Alignment.Center,
-                        ) { Icon(Icons.Filled.ContentCopy, "کپی", tint = ink, modifier = Modifier.size(17.dp)) }
-                    }
+                    Box(Modifier.fillMaxWidth().height(1.dp).background(if (dark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.05f)))
                 }
-                Box(Modifier.fillMaxWidth().height(1.dp).background(if (dark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.05f)))
                 Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp)) {
                     Text("توضیحات", color = muted, fontSize = 11.sp)
                     Text(role.ifBlank { "بدون توضیحات" }, color = ink, fontSize = 13.sp, lineHeight = 20.sp, modifier = Modifier.padding(top = 3.dp))
@@ -3637,6 +3653,7 @@ fun ThreadScreen(app: App, userId: String, personId: String, back: () -> Unit, o
                 phone = person?.phone.orEmpty(),
                 role = person?.role.orEmpty(),
                 entries = entries,
+                showPhone = person?.isGroup == false,
                 onDismiss = { profileOpen = false },
                 onSendMessage = { profileOpen = false },
                 onEdit = { profileOpen = false; info = true },
@@ -3644,23 +3661,38 @@ fun ThreadScreen(app: App, userId: String, personId: String, back: () -> Unit, o
             )
         }
         if (info) {
+            val ink = if (LocalDark.current) Color.White else Color(0xFF111827)
             ModalBottomSheet(onDismissRequest = { info = false }, sheetState = sheet, containerColor = themeDialogContainer()) {
                 Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp).padding(bottom = 28.dp)) {
                     Text("اطلاعات کاربر", fontWeight = FontWeight.Bold, fontSize = 20.sp)
-                    OutlinedTextField(newMember, { newMember = it }, Modifier.fillMaxWidth(), label = { Text("عضو جدید") })
-                    TextButton(onClick = {
-                        if (newMember.isBlank()) return@TextButton
-                        app.db.addMember(personId, newMember)
-                        members = app.db.members(personId)
-                        person = app.db.people(userId).find { it.id == personId }
-                        newMember = ""
-                    }) { Text("افزودن به گروه") }
+                    if (person?.isGroup == true) {
+                        Text("اعضای تیم", fontWeight = FontWeight.Bold, fontSize = 16.sp, modifier = Modifier.padding(top = 12.dp))
+                        members.forEach { m ->
+                            Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                PersonAvatar(m.name, null, size = 32.dp)
+                                Text(m.name, color = ink, fontSize = 14.sp, modifier = Modifier.padding(start = 8.dp))
+                            }
+                        }
+                        OutlinedTextField(newMember, { newMember = it }, Modifier.fillMaxWidth().padding(top = 8.dp), label = { Text("افزودن عضو (شماره یا نام کاربری)") })
+                        TextButton(onClick = {
+                            if (newMember.isBlank()) return@TextButton
+                            try {
+                                app.db.addMember(personId, newMember)
+                                members = app.db.members(personId)
+                                person = app.db.people(userId).find { it.id == personId }
+                                newMember = ""
+                                infoError = ""
+                            } catch (e: Exception) { infoError = e.message ?: "خطا" }
+                        }) { Text("افزودن به گروه") }
+                    }
                     Box(Modifier.padding(vertical = 8.dp).clickable { personPhoto.launch("image/*") }) {
                         PersonAvatar(editName.ifBlank { personTitle }, person?.avatar, size = 72.dp)
                     }
                     OutlinedTextField(editName, { editName = it }, Modifier.fillMaxWidth(), label = { Text("نام") })
-                    OutlinedTextField(editRole, { editRole = it }, Modifier.fillMaxWidth(), label = { Text("سمت") })
-                    OutlinedTextField(editPhone, { editPhone = it }, Modifier.fillMaxWidth(), label = { Text("شماره موبایل") })
+                    OutlinedTextField(editRole, { editRole = it }, Modifier.fillMaxWidth(), label = { Text(if (person?.isGroup == true) "توضیحات تیم" else "سمت") })
+                    if (person?.isGroup == false) {
+                        OutlinedTextField(editPhone, { editPhone = it }, Modifier.fillMaxWidth(), label = { Text("شماره موبایل") })
+                    }
                     if (infoError.isNotEmpty()) Text(infoError, color = Color.Red)
                     Button(onClick = {
                         try {

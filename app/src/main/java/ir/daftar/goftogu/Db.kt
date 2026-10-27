@@ -483,6 +483,17 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 17) {
         return user(id)
     }
 
+    fun findUserByContact(query: String): User? {
+        val q = query.trim().removePrefix("@")
+        if (q.isBlank()) return null
+        val cursor = readableDatabase.rawQuery(
+            "SELECT id FROM users WHERE phone=? OR username=? LIMIT 1",
+            arrayOf(q, q)
+        )
+        val id = cursor.use { if (it.moveToFirst()) it.getString(0) else null } ?: return null
+        return user(id)
+    }
+
     fun people(userId: String): List<Person> {
         val cursor = readableDatabase.rawQuery("SELECT id, name, phone, role, pinned, created_at, avatar, is_group, saved FROM people WHERE user_id=? ORDER BY pinned DESC, created_at DESC", arrayOf(userId))
         val list = mutableListOf<Person>()
@@ -546,17 +557,60 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 17) {
         arrayOf(personId),
     ).use {
         val list = mutableListOf<Member>()
-        while (it.moveToNext()) list += Member(it.getString(0), it.getString(1))
+        while (it.moveToNext()) {
+            val id = it.getString(0)
+            var name = it.getString(1)
+            // If name is a UUID, it's likely a user ID from old data
+            if (isUuid(name)) {
+                user(name)?.let { u ->
+                    name = if (!u.name.isNullOrBlank() && !u.username.isNullOrBlank()) {
+                        "${u.name} (@${u.username})"
+                    } else if (!u.username.isNullOrBlank()) {
+                        "@${u.username}"
+                    } else {
+                        u.name.ifBlank { "کاربر ${u.phone.takeLast(4)}" }
+                    }
+                    // Optionally update the database to fix it permanently
+                    writableDatabase.execSQL("UPDATE members SET name=? WHERE id=?", arrayOf(name, id))
+                }
+            }
+            list += Member(id, name)
+        }
         list
     }
 
-    fun addMember(personId: String, name: String): String {
-        if (name.isBlank()) error("نام عضو را بنویسید")
+    private fun isUuid(s: String?): Boolean {
+        if (s == null || s.length != 36) return false
+        return try {
+            UUID.fromString(s)
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    fun addMember(personId: String, contact: String): String {
+        if (contact.isBlank()) error("شماره تماس یا نام کاربری را بنویسید")
+        val user = findUserByContact(contact) ?: error("کاربری با این مشخصات یافت نشد")
+        
+        // Check for Plus Subscription
+        if (user.plan != "advanced") {
+            error("تنها کاربران دارای اشتراک پلاس امکان عضویت در تیم را دارند")
+        }
+        
+        val nameToSave = if (!user.name.isNullOrBlank() && !user.username.isNullOrBlank()) {
+            "${user.name} (@${user.username})"
+        } else if (!user.username.isNullOrBlank()) {
+            "@${user.username}"
+        } else {
+            user.name.ifBlank { "کاربر ${user.phone.takeLast(4)}" }
+        }
+        
         val id = UUID.randomUUID().toString()
         writableDatabase.insert("members", null, ContentValues().apply {
             put("id", id)
             put("person_id", personId)
-            put("name", name.trim())
+            put("name", nameToSave)
             put("created_at", System.currentTimeMillis())
         })
         writableDatabase.update("people", ContentValues().apply { put("is_group", 1) }, "id=?", arrayOf(personId))
