@@ -213,12 +213,21 @@ async def lifespan(app: FastAPI):
     """FastAPI lifespan context manager for startup/shutdown events."""
     # Startup
     logger.info("FastAPI application starting...")
-    init_db()
+    try:
+        init_db()
+        logger.info("Database initialization completed.")
+    except Exception as e:
+        logger.error(f"Database initialization error (non-fatal): {e}")
+        logger.warning("Application will continue, but database may not be ready.")
     yield
     # Shutdown
     logger.info("FastAPI application shutting down...")
-    if engine:
-        engine.dispose()
+    try:
+        if engine:
+            engine.dispose()
+            logger.info("Database engine disposed.")
+    except Exception as e:
+        logger.error(f"Error during shutdown: {e}")
 
 app = FastAPI(title="Hamsohbat Backend", lifespan=lifespan)
 
