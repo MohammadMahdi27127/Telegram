@@ -18,6 +18,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
@@ -149,6 +150,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.Divider
 import androidx.compose.material3.FabPosition
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -167,6 +169,11 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.Snackbar
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.rememberCoroutineScope
@@ -2116,7 +2123,9 @@ fun ChatsScreen(
             "note" -> it.hasNote
             "direct" -> !it.isGroup
             "group" -> it.isGroup
-            else -> true
+            "archive" -> it.archived
+            "files" -> it.lastKind?.let { kind -> kind.contains("voice", ignoreCase = true) || kind.contains("video", ignoreCase = true) || kind.contains("image", ignoreCase = true) } ?: false
+            else -> !it.archived
         }
     }
     val palette = LocalTg.current
@@ -2396,6 +2405,12 @@ fun ChatsScreen(
                     }
                 }
                 itemsIndexed(shown, key = { _, person -> person.id }) { index, person ->
+                    var showContextMenu by remember { mutableStateOf(false) }
+                    var deletedPersonId by remember { mutableStateOf<String?>(null) }
+                    var snackbarMessage by remember { mutableStateOf("") }
+                    var snackbarVisible by remember { mutableStateOf(false) }
+                    val snackbarHostState = remember { SnackbarHostState() }
+                    
                     RiseRow(person.id, index, arrived) {
                         Card(
                             shape = RoundedCornerShape(28.dp),
@@ -2404,7 +2419,10 @@ fun ChatsScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(horizontal = 16.dp, vertical = 8.dp)
-                                .clickable { open(person.id) }
+                                .combinedClickable(
+                                    onClick = { open(person.id) },
+                                    onLongClick = { showContextMenu = true }
+                                )
                         ) {
                             Row(
                                 Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
@@ -2438,6 +2456,128 @@ fun ChatsScreen(
                                         color = if (dark) Color(0xFF94A3B8) else Color(0xFF64748B),
                                         fontSize = 11.sp
                                     )
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Context Menu Dialog
+                    if (showContextMenu) {
+                        AlertDialog(
+                            onDismissRequest = { showContextMenu = false },
+                            containerColor = if (dark) Color(0xFF1E293B) else Color.White,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(20.dp))
+                                .animateContentSize(animationSpec = tween(200)),
+                            buttons = {
+                                Column(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 16.dp),
+                                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                                    horizontalAlignment = Alignment.End
+                                ) {
+                                    Text(
+                                        person.name,
+                                        color = if (dark) Color.White else Color(0xFF1E293B),
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 16.sp,
+                                        modifier = Modifier.fillMaxWidth(),
+                                        textAlign = TextAlign.End
+                                    )
+                                    Divider(color = if (dark) Color.White.copy(0.1f) else Color.Black.copy(0.1f), thickness = 1.dp, modifier = Modifier.fillMaxWidth())
+                                    
+                                    // Archive/Unarchive button
+                                    Button(
+                                        onClick = {
+                                            val isArchiving = !person.archived
+                                            app.db.updatePersonArchived(person.id, isArchiving)
+                                            people = app.db.people(userId)
+                                            showContextMenu = false
+                                            snackbarMessage = if (isArchiving) "گفتگو بایگانی شد" else "گفتگو از بایگانی خارج شد"
+                                            snackbarVisible = true
+                                        },
+                                        shape = RoundedCornerShape(12.dp),
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = if (dark) Color(0xFF334155) else Color(0xFFF1F5F9),
+                                            contentColor = if (dark) Color(0xFF94A3B8) else Color(0xFF64748B)
+                                        ),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text(
+                                            if (person.archived) "خروج از بایگانی" else "بایگانی گفتگو",
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
+                                    
+                                    // Delete button
+                                    Button(
+                                        onClick = {
+                                            showContextMenu = false
+                                            deletedPersonId = person.id
+                                            snackbarMessage = "گفتگو حذف شد"
+                                            snackbarVisible = true
+                                        },
+                                        shape = RoundedCornerShape(12.dp),
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = Color(0xFFEF4444).copy(alpha = 0.15f),
+                                            contentColor = Color(0xFFDC2626)
+                                        ),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text(
+                                            "حذف گفتگو",
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
+                                    
+                                    // Cancel button
+                                    Button(
+                                        onClick = { showContextMenu = false },
+                                        shape = RoundedCornerShape(12.dp),
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = Color.Transparent,
+                                            contentColor = if (dark) Color(0xFF94A3B8) else Color(0xFF64748B)
+                                        ),
+                                        border = BorderStroke(1.dp, if (dark) Color.White.copy(0.2f) else Color.Black.copy(0.1f)),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text(
+                                            "لغو",
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
+                                }
+                            }
+                        )
+                    }
+                    
+                    // Delete with Undo - Snackbar
+                    if (deletedPersonId == person.id && snackbarVisible) {
+                        LaunchedEffect(deletedPersonId) {
+                            val result = snackbarHostState.showSnackbar(
+                                message = snackbarMessage,
+                                actionLabel = "بازگردانی",
+                                duration = SnackbarDuration.Long,
+                                withDismissAction = true
+                            )
+                            
+                            when (result) {
+                                SnackbarResult.ActionPerformed -> {
+                                    // Undo delete - restore the person
+                                    // No need to restore since we haven't deleted yet
+                                    snackbarVisible = false
+                                    deletedPersonId = null
+                                }
+                                SnackbarResult.Dismissed -> {
+                                    // Actually delete after snackbar timeout
+                                    app.db.deletePerson(person.id)
+                                    people = app.db.people(userId)
+                                    snackbarVisible = false
+                                    deletedPersonId = null
                                 }
                             }
                         }

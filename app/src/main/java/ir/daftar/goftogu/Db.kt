@@ -154,6 +154,7 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 17) {
         db.execSQL("ALTER TABLE people ADD COLUMN avatar TEXT")
         db.execSQL("ALTER TABLE people ADD COLUMN is_group INTEGER NOT NULL DEFAULT 0")
         db.execSQL("ALTER TABLE people ADD COLUMN saved INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE people ADD COLUMN archived INTEGER NOT NULL DEFAULT 0")
         db.execSQL("ALTER TABLE entries ADD COLUMN member_id TEXT")
         db.execSQL("CREATE TABLE members (id TEXT PRIMARY KEY, person_id TEXT, name TEXT, created_at INTEGER)")
         db.execSQL("CREATE TABLE wallpapers (id TEXT PRIMARY KEY, title TEXT, category TEXT, path TEXT, created_at INTEGER)")
@@ -647,6 +648,10 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 17) {
 
     fun setPinned(id: String, pinned: Boolean) {
         writableDatabase.update("people", ContentValues().apply { put("pinned", if (pinned) 1 else 0) }, "id=?", arrayOf(id))
+    }
+
+    fun updatePersonArchived(personId: String, archived: Boolean) {
+        writableDatabase.update("people", ContentValues().apply { put("archived", if (archived) 1 else 0) }, "id=?", arrayOf(personId))
     }
 
     fun entries(personId: String): List<Entry> {
