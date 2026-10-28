@@ -42,6 +42,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -494,6 +495,7 @@ private fun RiseRow(id: String, index: Int, arrived: MutableList<String>, conten
     ) { content() }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun BottomBar(route: String, avatar: String?, name: String, hasStar: Boolean = false, onSelect: (String) -> Unit) {
     val palette = LocalTg.current
@@ -2461,98 +2463,97 @@ fun ChatsScreen(
                         }
                     }
                     
-                    // Context Menu Dialog
+                    // Context Menu Bottom Sheet
                     if (showContextMenu) {
-                        AlertDialog(
+                        ModalBottomSheet(
                             onDismissRequest = { showContextMenu = false },
                             containerColor = if (dark) Color(0xFF1E293B) else Color.White,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(20.dp))
-                                .animateContentSize(animationSpec = tween(200)),
-                            buttons = {
-                                Column(
-                                    Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 16.dp, vertical = 16.dp),
-                                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                                    horizontalAlignment = Alignment.End
+                            scrimColor = Color.Black.copy(alpha = 0.32f)
+                        ) {
+                            Column(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 16.dp),
+                                verticalArrangement = Arrangement.spacedBy(12.dp),
+                                horizontalAlignment = Alignment.End
+                            ) {
+                                Text(
+                                    person.name,
+                                    color = if (dark) Color.White else Color(0xFF1E293B),
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 16.sp,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    textAlign = TextAlign.End
+                                )
+                                Divider(color = if (dark) Color.White.copy(0.1f) else Color.Black.copy(0.1f), thickness = 1.dp, modifier = Modifier.fillMaxWidth())
+                                
+                                // Archive/Unarchive button
+                                Button(
+                                    onClick = {
+                                        val isArchiving = !person.archived
+                                        app.db.updatePersonArchived(person.id, isArchiving)
+                                        people = app.db.people(userId)
+                                        showContextMenu = false
+                                        snackbarMessage = if (isArchiving) "گفتگو بایگانی شد" else "گفتگو از بایگانی خارج شد"
+                                        snackbarVisible = true
+                                    },
+                                    shape = RoundedCornerShape(12.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = if (dark) Color(0xFF334155) else Color(0xFFF1F5F9),
+                                        contentColor = if (dark) Color(0xFF94A3B8) else Color(0xFF64748B)
+                                    ),
+                                    modifier = Modifier.fillMaxWidth()
                                 ) {
                                     Text(
-                                        person.name,
-                                        color = if (dark) Color.White else Color(0xFF1E293B),
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 16.sp,
-                                        modifier = Modifier.fillMaxWidth(),
-                                        textAlign = TextAlign.End
+                                        if (person.archived) "خروج از بایگانی" else "بایگانی گفتگو",
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Medium
                                     )
-                                    Divider(color = if (dark) Color.White.copy(0.1f) else Color.Black.copy(0.1f), thickness = 1.dp, modifier = Modifier.fillMaxWidth())
-                                    
-                                    // Archive/Unarchive button
-                                    Button(
-                                        onClick = {
-                                            val isArchiving = !person.archived
-                                            app.db.updatePersonArchived(person.id, isArchiving)
-                                            people = app.db.people(userId)
-                                            showContextMenu = false
-                                            snackbarMessage = if (isArchiving) "گفتگو بایگانی شد" else "گفتگو از بایگانی خارج شد"
-                                            snackbarVisible = true
-                                        },
-                                        shape = RoundedCornerShape(12.dp),
-                                        colors = ButtonDefaults.buttonColors(
-                                            containerColor = if (dark) Color(0xFF334155) else Color(0xFFF1F5F9),
-                                            contentColor = if (dark) Color(0xFF94A3B8) else Color(0xFF64748B)
-                                        ),
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        Text(
-                                            if (person.archived) "خروج از بایگانی" else "بایگانی گفتگو",
-                                            fontSize = 14.sp,
-                                            fontWeight = FontWeight.Medium
-                                        )
-                                    }
-                                    
-                                    // Delete button
-                                    Button(
-                                        onClick = {
-                                            showContextMenu = false
-                                            deletedPersonId = person.id
-                                            snackbarMessage = "گفتگو حذف شد"
-                                            snackbarVisible = true
-                                        },
-                                        shape = RoundedCornerShape(12.dp),
-                                        colors = ButtonDefaults.buttonColors(
-                                            containerColor = Color(0xFFEF4444).copy(alpha = 0.15f),
-                                            contentColor = Color(0xFFDC2626)
-                                        ),
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        Text(
-                                            "حذف گفتگو",
-                                            fontSize = 14.sp,
-                                            fontWeight = FontWeight.Medium
-                                        )
-                                    }
-                                    
-                                    // Cancel button
-                                    Button(
-                                        onClick = { showContextMenu = false },
-                                        shape = RoundedCornerShape(12.dp),
-                                        colors = ButtonDefaults.buttonColors(
-                                            containerColor = Color.Transparent,
-                                            contentColor = if (dark) Color(0xFF94A3B8) else Color(0xFF64748B)
-                                        ),
-                                        border = BorderStroke(1.dp, if (dark) Color.White.copy(0.2f) else Color.Black.copy(0.1f)),
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        Text(
-                                            "لغو",
-                                            fontSize = 14.sp,
-                                            fontWeight = FontWeight.Medium
-                                        )
-                                    }
                                 }
+                                
+                                // Delete button
+                                Button(
+                                    onClick = {
+                                        showContextMenu = false
+                                        deletedPersonId = person.id
+                                        snackbarMessage = "گفتگو حذف شد"
+                                        snackbarVisible = true
+                                    },
+                                    shape = RoundedCornerShape(12.sp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = Color(0xFFEF4444).copy(alpha = 0.15f),
+                                        contentColor = Color(0xFFDC2626)
+                                    ),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text(
+                                        "حذف گفتگو",
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                                
+                                // Cancel button
+                                Button(
+                                    onClick = { showContextMenu = false },
+                                    shape = RoundedCornerShape(12.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = Color.Transparent,
+                                        contentColor = if (dark) Color(0xFF94A3B8) else Color(0xFF64748B)
+                                    ),
+                                    border = BorderStroke(1.dp, if (dark) Color.White.copy(0.2f) else Color.Black.copy(0.1f)),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text(
+                                        "لغو",
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                                
+                                Spacer(Modifier.height(16.dp))
                             }
-                        )
+                        }
                     }
                     
                     // Delete with Undo - Snackbar
