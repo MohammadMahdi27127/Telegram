@@ -2,7 +2,7 @@ export const SITE = {
   name: "مکالمات من",
   tagline: "دفتر گفتگوهای شما",
   slogan: "گفتگوهای بهتر، خاطری آسوده‌تر.",
-  androidApk: "/downloads/Tel.apk",
+  androidApk: "/downloads/Recamender.apk",
   previewApk: "/downloads/hamsohbat-preview.apk",
 } as const;
 

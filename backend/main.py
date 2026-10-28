@@ -1,18 +1,45 @@
 import os
+import logging
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from typing import List
 from sqlalchemy import Column, String, Integer, BigInteger, Boolean, Float, ForeignKey, Text, create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
-from .config import settings
-from .auth import router as auth_router
+# Handle both Docker (absolute import) and local (relative import)
+try:
+    from .config import settings
+    from .auth import router as auth_router
+except ImportError:
+    from config import settings
+    from auth import router as auth_router
 
-# تنظیمات دیتابیس PostgreSQL
-DATABASE_URL = settings.DATABASE_URL
+logger = logging.getLogger(__name__)
 
-engine = create_engine(DATABASE_URL)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+# تنظیمات دیتابیس PostgreSQL - با تبدیل ایمن postgres:// به postgresql+psycopg2://
+def get_database_url(url: str) -> str:
+    """Convert postgres:// to postgresql+psycopg2:// for SQLAlchemy 2.0+ compatibility."""
+    if url.startswith("postgres://"):
+        url = url.replace("postgres://", "postgresql+psycopg2://", 1)
+    elif url.startswith("postgresql://"):
+        url = url.replace("postgresql://", "postgresql+psycopg2://", 1)
+    return url
+
+DATABASE_URL = get_database_url(settings.DATABASE_URL)
+logger.info(f"Database URL configured (masked): postgresql+psycopg2://***")
+
+try:
+    engine = create_engine(DATABASE_URL, echo=False, pool_pre_ping=True)
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+except Exception as e:
+    logger.error(f"Failed to create database engine: {e}")
+    # Fallback to SQLite if PostgreSQL fails
+    DATABASE_URL = "sqlite:///./hamsohbat.db"
+    engine = create_engine(DATABASE_URL, echo=False)
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    logger.info("Fell back to SQLite database")
+
 Base = declarative_base()
 
 # --- مدل‌های دیتابیس (مطابق با اندروید) ---
@@ -170,20 +197,34 @@ class ExportLog(Base):
     target_name = Column(String)
     records_count = Column(Integer)
 
-# ایجاد جداول در استارت‌آپ
+# ایجاد جداول در استارت‌آپ - با try/except برای جلوگیری از CrashLoopBackOff
 def init_db():
-    Base.metadata.create_all(bind=engine)
+    """Initialize database tables with retry logic."""
+    try:
+        logger.info("Initializing database tables...")
+        Base.metadata.create_all(bind=engine)
+        logger.info("Database tables created successfully.")
+    except Exception as e:
+        logger.error(f"Database initialization failed: {e}")
+        logger.warning("Database may not be ready yet. Will retry on next request.")
 
-app = FastAPI(title="Hamsohbat Backend")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """FastAPI lifespan context manager for startup/shutdown events."""
+    # Startup
+    logger.info("FastAPI application starting...")
+    init_db()
+    yield
+    # Shutdown
+    logger.info("FastAPI application shutting down...")
+    if engine:
+        engine.dispose()
+
+app = FastAPI(title="Hamsohbat Backend", lifespan=lifespan)
 
 # ثبت روترها
 app.include_router(auth_router)
 
-@app.on_event("startup")
-def on_startup():
-    init_db()
-
-# مدیریت اتصالات وب‌سوکت چت
 # مدیریت اتصالات وب‌سوکت چت
 
 class ConnectionManager:

@@ -8,7 +8,8 @@ class SMSService:
     @staticmethod
     async def send_otp(phone: str, code: str) -> bool:
         """
-        Sends an OTP code using the IPPanel pattern API.
+        Sends an OTP code using the IPPanel/Faraz SMS API.
+        Uses SMS_API_KEY token for authentication.
         """
         payload = {
             "user": settings.SMS_USERNAME,
@@ -16,7 +17,8 @@ class SMSService:
             "from": settings.SMS_ORIGINATOR,
             "to": phone,
             "pattern_code": settings.SMS_PATTERN_CODE,
-            "input_data": {"code": code}
+            "input_data": {"code": code},
+            "api_key": settings.SMS_API_KEY
         }
 
         async with httpx.AsyncClient() as client:

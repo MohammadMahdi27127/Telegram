@@ -713,6 +713,7 @@ fun AddTeamSheet(app: App, userId: String, onClose: () -> Unit, onSaved: () -> U
     var selectedContacts by remember { mutableStateOf(setOf<String>()) }
     val contacts = remember { app.db.people(userId).filter { !it.isGroup } }
     val palette = LocalTg.current
+    var error by remember { mutableStateOf("") }
 
     ModalBottomSheet(onDismissRequest = onClose, containerColor = palette.surface) {
         Column(Modifier.padding(24.dp).fillMaxWidth()) {
@@ -732,6 +733,7 @@ fun AddTeamSheet(app: App, userId: String, onClose: () -> Unit, onSaved: () -> U
                 shape = RoundedCornerShape(12.dp)
             )
             Text("انتخاب اعضا", color = palette.text, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 16.dp))
+            Text("تنها کاربران دارای اشتراک پلاس می‌تواند عضو تیم شوند", color = Color(0xFF64748B), fontSize = 12.sp, modifier = Modifier.padding(bottom = 8.dp))
             LazyColumn(Modifier.heightIn(max = 200.dp).padding(top = 8.dp)) {
                 items(contacts) { contact ->
                     Row(
@@ -745,11 +747,23 @@ fun AddTeamSheet(app: App, userId: String, onClose: () -> Unit, onSaved: () -> U
                     }
                 }
             }
+            if (error.isNotEmpty()) {
+                Text(
+                    error,
+                    color = Color(0xFFDC2626),
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(top = 12.dp).fillMaxWidth()
+                )
+            }
             Button(
                 onClick = {
                     if (name.isNotBlank()) {
-                        app.db.addTeam(userId, name, desc, selectedContacts.toList())
-                        onSaved()
+                        try {
+                            app.db.addTeam(userId, name, desc, selectedContacts.toList())
+                            onSaved()
+                        } catch (e: Exception) {
+                            error = e.message ?: "خطای نامشخص"
+                        }
                     }
                 },
                 modifier = Modifier.fillMaxWidth().padding(top = 24.dp, bottom = 16.dp),
@@ -2115,7 +2129,7 @@ fun ChatsScreen(
     val headerInk = if (dark) Color.White else Color.Black
     Scaffold(
         containerColor = palette.bg,
-        floatingActionButtonPosition = FabPosition.Start,
+        floatingActionButtonPosition = FabPosition.End,
         floatingActionButton = {
             val fabScale by animateFloatAsState(if (creating) 0.9f else 1f, tween(200), label = "fab")
             val fabPop = remember { Animatable(0.6f) }
@@ -2146,6 +2160,7 @@ fun ChatsScreen(
                         alpha = fabFade.value
                     }
                     .size(56.dp)
+                    .padding(bottom = 24.dp, end = 24.dp)
                     .border(if (creating) 2.dp else 0.dp, Color.White, CircleShape)
             ) {
                 Icon(if (creating) Icons.Filled.Close else Icons.Filled.Edit, "شخص جدید", modifier = Modifier.size(24.dp))
@@ -3097,7 +3112,7 @@ private fun ChatInputBar(
         if (group) {
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 InputChip("ارسال به همه اعضا", memberId == null, dark) { onMember(null) }
-                members.forEach { member -> InputChip("مخاطب: ${member.name}", memberId == member.id, dark) { onMember(member.id) } }
+                members.forEach { member -> InputChip(member.name, memberId == member.id, dark) { onMember(member.id) } }
             }
         }
         if (pendingMedia != null) {
