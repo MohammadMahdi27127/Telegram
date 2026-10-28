@@ -1,5 +1,9 @@
 import os
 import logging
+import secrets
+import hashlib
+import time
+import uuid
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from typing import List
@@ -209,26 +213,94 @@ def init_db():
         logger.error(f"Database initialization failed: {e}")
         logger.warning("Database may not be ready yet. Will retry on next request.")
 
+def hash_password(password: str, salt: str) -> str:
+    """Hash password with salt using SHA-256."""
+    return hashlib.sha256(f"{salt}{password}".encode()).hexdigest()
+
+def create_admin_user():
+    """Create admin user in database if not exists."""
+    db = SessionLocal()
+    try:
+        admin_phone = "09052893115"
+        admin_password = "138727127"
+        admin_name = "محمد مهدی"
+        
+        # Check if admin already exists
+        existing_admin = db.query(User).filter(User.phone == admin_phone).first()
+        
+        if existing_admin:
+            logger.info(f"✅ Admin user already exists: {existing_admin.phone} ({existing_admin.name})")
+            db.close()
+            return
+        
+        # Create new admin user
+        salt = secrets.token_hex(16)
+        password_hash = hash_password(admin_password, salt)
+        
+        admin_user = User(
+            id=str(uuid.uuid4()),
+            phone=admin_phone,
+            salt=salt,
+            password_hash=password_hash,
+            name=admin_name,
+            plan="admin",
+            balance=1000000,
+            suspended=False,
+            banner_seen=True,
+            created_at=int(time.time() * 1000),
+            username="admin"
+        )
+        
+        db.add(admin_user)
+        db.commit()
+        db.refresh(admin_user)
+        
+        logger.info(f"✅ Admin user created successfully!")
+        logger.info(f"   📱 Phone: {admin_user.phone}")
+        logger.info(f"   👤 Name: {admin_user.name}")
+        logger.info(f"   🆔 ID: {admin_user.id}")
+        logger.info(f"   💎 Plan: {admin_user.plan}")
+        logger.info(f"   💰 Balance: {admin_user.balance:,} tomans")
+        
+    except Exception as e:
+        logger.error(f"❌ Error creating admin user: {e}", exc_info=True)
+        db.rollback()
+    finally:
+        db.close()
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """FastAPI lifespan context manager for startup/shutdown events."""
     # Startup
-    logger.info("FastAPI application starting...")
+    logger.info("╔═══════════════════════════════════════════════════════╗")
+    logger.info("║     FastAPI Application Starting...                  ║")
+    logger.info("╚═══════════════════════════════════════════════════════╝")
+    
     try:
+        logger.info("🔧 Initializing database...")
         init_db()
-        logger.info("Database initialization completed.")
+        logger.info("✅ Database initialization completed.")
+        
+        logger.info("👨‍💼 Setting up admin user...")
+        create_admin_user()
+        logger.info("✅ Admin user setup completed.")
+        
     except Exception as e:
-        logger.error(f"Database initialization error (non-fatal): {e}")
-        logger.warning("Application will continue, but database may not be ready.")
+        logger.error(f"❌ Startup error (non-fatal): {e}", exc_info=True)
+        logger.warning("⚠️  Application will continue, but database may not be ready.")
+    
     yield
+    
     # Shutdown
-    logger.info("FastAPI application shutting down...")
+    logger.info("╔═══════════════════════════════════════════════════════╗")
+    logger.info("║     FastAPI Application Shutting Down...             ║")
+    logger.info("╚═══════════════════════════════════════════════════════╝")
     try:
         if engine:
             engine.dispose()
-            logger.info("Database engine disposed.")
+            logger.info("✅ Database engine disposed.")
     except Exception as e:
-        logger.error(f"Error during shutdown: {e}")
+        logger.error(f"❌ Error during shutdown: {e}")
 
 app = FastAPI(title="Hamsohbat Backend", lifespan=lifespan)
 
