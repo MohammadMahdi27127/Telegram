@@ -19,14 +19,23 @@ router = APIRouter(prefix="/api/v1/auth", tags=["Authentication"])
 otp_storage: Dict[str, Dict] = {}
 
 class OTPRequest(BaseModel):
-    phone: str = Field(..., pattern=r"^09\d{9}$", description="Phone number starting with 09")
+    phone: str = Field(..., pattern=r"^09\d{9}$", description="شماره موبایل با ۰۹")
 
 class OTPVerify(BaseModel):
     phone: str = Field(..., pattern=r"^09\d{9}$")
     code: str = Field(..., min_length=6, max_length=6)
 
+class LoginRequest(BaseModel):
+    phone: str = Field(..., pattern=r"^09\d{9}$")
+    password: str = Field(..., min_length=8)
+
+class SignupRequest(BaseModel):
+    phone: str = Field(..., pattern=r"^09\d{9}$")
+    name: str = Field(..., min_length=2)
+    password: str = Field(..., min_length=8)
+
 def generate_otp_code() -> str:
-    """Generates a secure 6-digit random code."""
+    """تولید کد ۶ رقمی امن"""
     return "".join(secrets.choice("0123456789") for _ in range(6))
 
 @router.post("/send-otp", status_code=status.HTTP_200_OK)
@@ -86,3 +95,140 @@ async def verify_otp(request: OTPVerify):
         "message": "احراز هویت با موفقیت انجام شد.",
         "status": "success"
     }
+
+@router.post("/login")
+async def login(request: LoginRequest):
+    """
+    ورود کاربر با شماره تلفن و رمز عبور
+    POST /api/v1/auth/login
+    
+    Body:
+    {
+        "phone": "09123456789",
+        "password": "رمزعبور"
+    }
+    """
+    from main import SessionLocal, User
+    import hashlib
+    
+    phone = request.phone
+    password = request.password
+    
+    db = SessionLocal()
+    try:
+        # جستجوی کاربر در database
+        user = db.query(User).filter(User.phone == phone).first()
+        
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="شماره تلفن یا رمز عبور نادرست است."
+            )
+        
+        # تایید رمز عبور
+        password_hash = hashlib.sha256(f"{user.salt}{password}".encode()).hexdigest()
+        if password_hash != user.password_hash:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="شماره تلفن یا رمز عبور نادرست است."
+            )
+        
+        # تایید اینکه کاربر معلق نشده
+        if user.suspended:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="این حساب معلق شده است."
+            )
+        
+        # موفقیت
+        return {
+            "message": "ورود موفق",
+            "user_id": user.id,
+            "phone": user.phone,
+            "name": user.name,
+            "plan": user.plan,
+            "status": "success"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"خطای سرور: {str(e)}"
+        )
+    finally:
+        db.close()
+
+@router.post("/signup")
+async def signup(request: SignupRequest):
+    """
+    ثبت نام کاربر جدید
+    POST /api/v1/auth/signup
+    
+    Body:
+    {
+        "phone": "09123456789",
+        "name": "محمد",
+        "password": "رمزعبور"
+    }
+    """
+    from main import SessionLocal, User
+    import hashlib
+    import uuid
+    
+    phone = request.phone
+    name = request.name
+    password = request.password
+    
+    db = SessionLocal()
+    try:
+        # تایید اینکه شماره قبلا ثبت نشده
+        existing = db.query(User).filter(User.phone == phone).first()
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="این شماره تلفن قبلا ثبت شده است."
+            )
+        
+        # ایجاد کاربر جدید
+        salt = secrets.token_hex(16)
+        password_hash = hashlib.sha256(f"{salt}{password}".encode()).hexdigest()
+        
+        new_user = User(
+            id=str(uuid.uuid4()),
+            phone=phone,
+            salt=salt,
+            password_hash=password_hash,
+            name=name,
+            plan="free",
+            balance=0,
+            suspended=False,
+            banner_seen=False,
+            created_at=int(time.time() * 1000),
+            username=None
+        )
+        
+        db.add(new_user)
+        db.commit()
+        db.refresh(new_user)
+        
+        return {
+            "message": "ثبت نام موفق",
+            "user_id": new_user.id,
+            "phone": new_user.phone,
+            "name": new_user.name,
+            "status": "success"
+        }
+        
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"خطای سرور: {str(e)}"
+        )
+    finally:
+        db.close()
