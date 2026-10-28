@@ -1437,6 +1437,10 @@ fun AuthScreen(app: App, onLoggedIn: (String) -> Unit, openSignup: () -> Unit, o
     var phone by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var alert by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var loading by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    
     Box(Modifier.fillMaxSize()) {
     AuthCard(title = "ورود") {
         AuthField(phone, { phone = it }, "شماره موبایل", KeyboardType.Phone)
@@ -1447,12 +1451,24 @@ fun AuthScreen(app: App, onLoggedIn: (String) -> Unit, openSignup: () -> Unit, o
                 alert = "شماره نادرست" to "شماره موبایل باید ۱۱ رقم و با ۰۹ شروع شود."
                 return@AuthButton
             }
-            try {
-                val user = app.db.login(normalized, password)
-                app.setSession(user.id)
-                onLoggedIn(user.id)
-            } catch (e: Exception) {
-                alert = "ورود ناموفق" to (e.message ?: "خطا")
+            
+            loading = true
+            scope.launch {
+                try {
+                    if (!NetworkHelper.isDeviceOnline(context)) {
+                        alert = "خطا در شبکه" to "لطفاً اتصال اینترنت را بررسی کنید"
+                        loading = false
+                        return@launch
+                    }
+                    
+                    val user = app.db.login(normalized, password)
+                    app.setSession(user.id)
+                    onLoggedIn(user.id)
+                    loading = false
+                } catch (e: Exception) {
+                    alert = "ورود ناموفق" to NetworkHelper.getErrorMessage(e)
+                    loading = false
+                }
             }
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
