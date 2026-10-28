@@ -13,7 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# به جای COPY . .
+# Copy backend files (environment variables come from Darkube/Kubernetes)
 COPY backend/ .
 
 RUN mkdir -p /app/downloads

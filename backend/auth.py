@@ -3,8 +3,13 @@ import time
 from typing import Dict, Optional
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
-from .sms_service import SMSService
-from .config import settings
+
+try:
+    from sms_service import SMSService
+    from config import settings
+except ImportError:
+    from .sms_service import SMSService
+    from .config import settings
 
 router = APIRouter(prefix="/api/v1/auth", tags=["Authentication"])
 

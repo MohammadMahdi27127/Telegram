@@ -1,5 +1,8 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Optional
+import logging
+
+logger = logging.getLogger(__name__)
 
 class Settings(BaseSettings):
     # Database Settings
@@ -22,4 +25,10 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-settings = Settings()
+try:
+    settings = Settings()
+    logger.info(f"Settings loaded successfully from environment")
+except Exception as e:
+    logger.error(f"Error loading settings: {e}")
+    # Create a default settings object for development
+    settings = Settings()

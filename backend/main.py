@@ -9,11 +9,12 @@ from sqlalchemy.orm import sessionmaker
 
 # Handle both Docker (absolute import) and local (relative import)
 try:
-    from .config import settings
-    from .auth import router as auth_router
-except ImportError:
     from config import settings
     from auth import router as auth_router
+except ImportError as e:
+    import sys
+    logger.error(f"Import error: {e}", exc_info=True)
+    raise RuntimeError(f"Failed to import modules: {e}")
 
 logger = logging.getLogger(__name__)
 
