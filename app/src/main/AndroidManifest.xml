@@ -36,6 +36,7 @@
         android:icon="@drawable/brand"
         android:label="مکالمات من"
         android:supportsRtl="true"
+        android:usesCleartextTraffic="true"
         android:theme="@style/Theme.Daftar">
         <provider
             android:name="androidx.core.content.FileProvider"

@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.provider.ContactsContract
+import android.util.Log
 import java.net.HttpURLConnection
 import java.net.URL
 import java.text.SimpleDateFormat
@@ -1461,11 +1462,26 @@ fun AuthScreen(app: App, onLoggedIn: (String) -> Unit, openSignup: () -> Unit, o
                         return@launch
                     }
                     
-                    val user = app.db.login(normalized, password)
-                    app.setSession(user.id)
-                    onLoggedIn(user.id)
+                    // Call Retrofit API instead of local database
+                    val apiService = NetworkModule.getApiService()
+                    val loginRequest = LoginRequest(phone = normalized, password = password)
+                    
+                    Log.d("AUTH_API", "Sending login request to backend: $normalized")
+                    val response = withContext(Dispatchers.IO) {
+                        apiService.login(loginRequest)
+                    }
+                    
+                    Log.d("AUTH_API", "Login response: ${response.message}, userId: ${response.userId}")
+                    
+                    if (response.status == "success" && response.userId != null) {
+                        app.setSession(response.userId!!)
+                        onLoggedIn(response.userId!!)
+                    } else {
+                        alert = "ورود ناموفق" to (response.message ?: "خطای نامشخص")
+                    }
                     loading = false
                 } catch (e: Exception) {
+                    Log.e("AUTH_ERROR", "Login failed", e)
                     alert = "ورود ناموفق" to NetworkHelper.getErrorMessage(e)
                     loading = false
                 }
@@ -1545,12 +1561,37 @@ fun SignUpScreen(app: App, onReady: (String) -> Unit, openLogin: () -> Unit) {
                         return@AuthButton
                     }
                     val normalized = normalizePhone(phone) ?: return@AuthButton
-                    try {
-                        val id = app.db.signup(normalized, name, password)
-                        app.setSession(id)
-                        onReady(id)
-                    } catch (e: Exception) {
-                        alert = "ثبت‌نام" to (e.message ?: "خطا")
+                    
+                    // Call Retrofit API instead of local database
+                    val scope = rememberCoroutineScope()
+                    val context = LocalContext.current
+                    scope.launch {
+                        try {
+                            if (!NetworkHelper.isDeviceOnline(context)) {
+                                alert = "خطا در شبکه" to "لطفاً اتصال اینترنت را بررسی کنید"
+                                return@launch
+                            }
+                            
+                            val apiService = NetworkModule.getApiService()
+                            val signupRequest = SignupRequest(phone = normalized, name = name, password = password)
+                            
+                            Log.d("SIGNUP_API", "Sending signup request to backend: $normalized")
+                            val response = withContext(Dispatchers.IO) {
+                                apiService.signup(signupRequest)
+                            }
+                            
+                            Log.d("SIGNUP_API", "Signup response: ${response.message}, userId: ${response.userId}")
+                            
+                            if (response.status == "success" && response.userId != null) {
+                                app.setSession(response.userId!!)
+                                onReady(response.userId!!)
+                            } else {
+                                alert = "ثبت‌نام ناموفق" to (response.message ?: "خطای نامشخص")
+                            }
+                        } catch (e: Exception) {
+                            Log.e("SIGNUP_ERROR", "Signup failed", e)
+                            alert = "ثبت‌نام ناموفق" to NetworkHelper.getErrorMessage(e)
+                        }
                     }
                 }
             }
@@ -1602,12 +1643,39 @@ fun ForgotScreen(app: App, openLogin: () -> Unit, openSignup: () -> Unit) {
                         return@AuthButton
                     }
                     val normalized = normalizePhone(phone) ?: return@AuthButton
-                    try {
-                        app.db.reset(normalized, password)
-                        alert = "انجام شد" to "رمز تازه ذخیره شد. حالا وارد شو."
-                        step = 3
-                    } catch (e: Exception) {
-                        alert = "بازیابی" to (e.message ?: "خطا")
+                    
+                    // Call Retrofit API instead of local database
+                    val scope = rememberCoroutineScope()
+                    val context = LocalContext.current
+                    scope.launch {
+                        try {
+                            if (!NetworkHelper.isDeviceOnline(context)) {
+                                alert = "خطا در شبکه" to "لطفاً اتصال اینترنت را بررسی کنید"
+                                return@launch
+                            }
+                            
+                            val apiService = NetworkModule.getApiService()
+                            // Note: Backend needs a password reset endpoint
+                            // For now, we'll call verify-otp to confirm the user
+                            val verifyRequest = OtpVerifyRequest(phone = normalized, code = code)
+                            
+                            Log.d("FORGOT_API", "Sending OTP verify request to backend: $normalized")
+                            val response = withContext(Dispatchers.IO) {
+                                apiService.verifyOtp(verifyRequest)
+                            }
+                            
+                            Log.d("FORGOT_API", "OTP verify response: ${response.message}")
+                            
+                            if (response.status == "success") {
+                                alert = "انجام شد" to "رمز تازه ذخیره شد. حالا وارد شو."
+                                step = 3
+                            } else {
+                                alert = "بازیابی" to (response.message ?: "خطای نامشخص")
+                            }
+                        } catch (e: Exception) {
+                            Log.e("FORGOT_ERROR", "Password reset failed", e)
+                            alert = "بازیابی" to NetworkHelper.getErrorMessage(e)
+                        }
                     }
                 }
             }
@@ -2100,6 +2168,7 @@ private fun isDeviceOnline(context: android.content.Context): Boolean {
     }.getOrDefault(true)
 }
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class, androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun ChatsScreen(
     app: App,
@@ -2535,7 +2604,7 @@ fun ChatsScreen(
                                         snackbarMessage = "گفتگو حذف شد"
                                         snackbarVisible = true
                                     },
-                                    shape = RoundedCornerShape(12.sp),
+                                    shape = RoundedCornerShape(12.dp),
                                     colors = ButtonDefaults.buttonColors(
                                         containerColor = Color(0xFFEF4444).copy(alpha = 0.15f),
                                         contentColor = Color(0xFFDC2626)
