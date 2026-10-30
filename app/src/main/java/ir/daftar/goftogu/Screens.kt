@@ -1453,37 +1453,48 @@ fun AuthScreen(app: App, onLoggedIn: (String) -> Unit, openSignup: () -> Unit, o
                 return@AuthButton
             }
             
+            // Set loading state on main thread first
             loading = true
-            scope.launch {
+            
+            // Launch network call on IO thread
+            scope.launch(Dispatchers.Main) {
                 try {
+                    // Network check on main thread first
                     if (!NetworkHelper.isDeviceOnline(context)) {
-                        alert = "خطا در شبکه" to "لطفاً اتصال اینترنت را بررسی کنید"
-                        loading = false
+                        withContext(Dispatchers.Main) {
+                            alert = "خطا در شبکه" to "لطفاً اتصال اینترنت را بررسی کنید"
+                            loading = false
+                        }
                         return@launch
                     }
                     
-                    // Call Retrofit API instead of local database
-                    val apiService = NetworkModule.getApiService()
-                    val loginRequest = LoginRequest(phone = normalized, password = password)
-                    
-                    Log.d("AUTH_API", "Sending login request to backend: $normalized")
+                    // Perform network call on IO thread
                     val response = withContext(Dispatchers.IO) {
+                        val apiService = NetworkModule.getApiService()
+                        val loginRequest = LoginRequest(phone = normalized, password = password)
+                        
+                        Log.d("AUTH_API", "Sending login request to backend: $normalized")
                         apiService.login(loginRequest)
                     }
                     
-                    Log.d("AUTH_API", "Login response: ${response.message}, userId: ${response.userId}")
-                    
-                    if (response.status == "success" && response.userId != null) {
-                        app.setSession(response.userId!!)
-                        onLoggedIn(response.userId!!)
-                    } else {
-                        alert = "ورود ناموفق" to (response.message ?: "خطای نامشخص")
+                    // Update UI on main thread
+                    withContext(Dispatchers.Main) {
+                        Log.d("AUTH_API", "Login response: ${response.message}, userId: ${response.userId}")
+                        
+                        if (response.status == "success" && response.userId != null) {
+                            app.setSession(response.userId!!)
+                            onLoggedIn(response.userId!!)
+                        } else {
+                            alert = "ورود ناموفق" to (response.message ?: "خطای نامشخص")
+                        }
+                        loading = false
                     }
-                    loading = false
                 } catch (e: Exception) {
-                    Log.e("AUTH_ERROR", "Login failed", e)
-                    alert = "ورود ناموفق" to NetworkHelper.getErrorMessage(e)
-                    loading = false
+                    withContext(Dispatchers.Main) {
+                        Log.e("AUTH_ERROR", "Login failed", e)
+                        alert = "ورود ناموفق" to NetworkHelper.getErrorMessage(e)
+                        loading = false
+                    }
                 }
             }
         }
@@ -1491,12 +1502,25 @@ fun AuthScreen(app: App, onLoggedIn: (String) -> Unit, openSignup: () -> Unit, o
             Text("ثبت‌نام", color = Color(0xFF0288D1), fontSize = 14.sp, modifier = Modifier.clickable(onClick = openSignup))
             Text("فراموشی رمز", color = Color(0xFF0288D1), fontSize = 14.sp, modifier = Modifier.clickable(onClick = openForgot))
             Text("ورود مهمان", color = Color(0xFF0288D1), fontSize = 14.sp, modifier = Modifier.clickable {
-                try {
-                    val id = app.db.signupGuest()
-                    app.setSession(id)
-                    onLoggedIn(id)
-                } catch (e: Exception) {
-                    alert = "مهمان" to (e.message ?: "خطا")
+                loading = true
+                scope.launch(Dispatchers.Main) {
+                    try {
+                        // Guest signup on IO thread (blocking DB operation)
+                        val id = withContext(Dispatchers.IO) {
+                            app.db.signupGuest()
+                        }
+                        
+                        withContext(Dispatchers.Main) {
+                            app.setSession(id)
+                            onLoggedIn(id)
+                            loading = false
+                        }
+                    } catch (e: Exception) {
+                        withContext(Dispatchers.Main) {
+                            alert = "مهمان" to (e.message ?: "خطا")
+                            loading = false
+                        }
+                    }
                 }
             })
         }
@@ -1516,7 +1540,11 @@ fun SignUpScreen(app: App, onReady: (String) -> Unit, openLogin: () -> Unit) {
     var password by remember { mutableStateOf("") }
     var confirm by remember { mutableStateOf("") }
     var alert by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var loading by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     val verified = code == OTP
+    
     Box(Modifier.fillMaxSize()) {
     AuthCard(title = "ثبت‌نام") {
         when (step) {
@@ -1562,35 +1590,47 @@ fun SignUpScreen(app: App, onReady: (String) -> Unit, openLogin: () -> Unit) {
                     }
                     val normalized = normalizePhone(phone) ?: return@AuthButton
                     
-                    // Call Retrofit API instead of local database
-                    val scope = rememberCoroutineScope()
-                    val context = LocalContext.current
-                    scope.launch {
+                    // Set loading state on main thread
+                    loading = true
+                    
+                    // Launch signup on IO thread
+                    scope.launch(Dispatchers.Main) {
                         try {
                             if (!NetworkHelper.isDeviceOnline(context)) {
-                                alert = "خطا در شبکه" to "لطفاً اتصال اینترنت را بررسی کنید"
+                                withContext(Dispatchers.Main) {
+                                    alert = "خطا در شبکه" to "لطفاً اتصال اینترنت را بررسی کنید"
+                                    loading = false
+                                }
                                 return@launch
                             }
                             
-                            val apiService = NetworkModule.getApiService()
-                            val signupRequest = SignupRequest(phone = normalized, name = name, password = password)
-                            
-                            Log.d("SIGNUP_API", "Sending signup request to backend: $normalized")
+                            // Network call on IO thread
                             val response = withContext(Dispatchers.IO) {
+                                val apiService = NetworkModule.getApiService()
+                                val signupRequest = SignupRequest(phone = normalized, name = name, password = password)
+                                
+                                Log.d("SIGNUP_API", "Sending signup request to backend: $normalized")
                                 apiService.signup(signupRequest)
                             }
                             
-                            Log.d("SIGNUP_API", "Signup response: ${response.message}, userId: ${response.userId}")
-                            
-                            if (response.status == "success" && response.userId != null) {
-                                app.setSession(response.userId!!)
-                                onReady(response.userId!!)
-                            } else {
-                                alert = "ثبت‌نام ناموفق" to (response.message ?: "خطای نامشخص")
+                            // Update UI on main thread
+                            withContext(Dispatchers.Main) {
+                                Log.d("SIGNUP_API", "Signup response: ${response.message}, userId: ${response.userId}")
+                                
+                                if (response.status == "success" && response.userId != null) {
+                                    app.setSession(response.userId!!)
+                                    onReady(response.userId!!)
+                                } else {
+                                    alert = "ثبت‌نام ناموفق" to (response.message ?: "خطای نامشخص")
+                                }
+                                loading = false
                             }
                         } catch (e: Exception) {
-                            Log.e("SIGNUP_ERROR", "Signup failed", e)
-                            alert = "ثبت‌نام ناموفق" to NetworkHelper.getErrorMessage(e)
+                            withContext(Dispatchers.Main) {
+                                Log.e("SIGNUP_ERROR", "Signup failed", e)
+                                alert = "ثبت‌نام ناموفق" to NetworkHelper.getErrorMessage(e)
+                                loading = false
+                            }
                         }
                     }
                 }
@@ -1606,13 +1646,19 @@ fun SignUpScreen(app: App, onReady: (String) -> Unit, openLogin: () -> Unit) {
 
 @Composable
 fun ForgotScreen(app: App, openLogin: () -> Unit, openSignup: () -> Unit) {
+@Composable
+fun ForgotScreen(app: App, openLogin: () -> Unit, openSignup: () -> Unit) {
     var step by remember { mutableIntStateOf(0) }
     var phone by remember { mutableStateOf("") }
     var code by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var confirm by remember { mutableStateOf("") }
     var alert by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var loading by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     val verified = code == OTP
+    
     Box(Modifier.fillMaxSize()) {
     AuthCard(title = "بازیابی رمز") {
         when (step) {
@@ -1644,37 +1690,47 @@ fun ForgotScreen(app: App, openLogin: () -> Unit, openSignup: () -> Unit) {
                     }
                     val normalized = normalizePhone(phone) ?: return@AuthButton
                     
-                    // Call Retrofit API instead of local database
-                    val scope = rememberCoroutineScope()
-                    val context = LocalContext.current
-                    scope.launch {
+                    // Set loading state on main thread
+                    loading = true
+                    
+                    // Launch password reset on IO thread
+                    scope.launch(Dispatchers.Main) {
                         try {
                             if (!NetworkHelper.isDeviceOnline(context)) {
-                                alert = "خطا در شبکه" to "لطفاً اتصال اینترنت را بررسی کنید"
+                                withContext(Dispatchers.Main) {
+                                    alert = "خطا در شبکه" to "لطفاً اتصال اینترنت را بررسی کنید"
+                                    loading = false
+                                }
                                 return@launch
                             }
                             
-                            val apiService = NetworkModule.getApiService()
-                            // Note: Backend needs a password reset endpoint
-                            // For now, we'll call verify-otp to confirm the user
-                            val verifyRequest = OtpVerifyRequest(phone = normalized, code = code)
-                            
-                            Log.d("FORGOT_API", "Sending OTP verify request to backend: $normalized")
+                            // Verify OTP on IO thread
                             val response = withContext(Dispatchers.IO) {
+                                val apiService = NetworkModule.getApiService()
+                                val verifyRequest = OtpVerifyRequest(phone = normalized, code = code)
+                                
+                                Log.d("FORGOT_API", "Sending OTP verify request to backend: $normalized")
                                 apiService.verifyOtp(verifyRequest)
                             }
                             
-                            Log.d("FORGOT_API", "OTP verify response: ${response.message}")
-                            
-                            if (response.status == "success") {
-                                alert = "انجام شد" to "رمز تازه ذخیره شد. حالا وارد شو."
-                                step = 3
-                            } else {
-                                alert = "بازیابی" to (response.message ?: "خطای نامشخص")
+                            // Update UI on main thread
+                            withContext(Dispatchers.Main) {
+                                Log.d("FORGOT_API", "OTP verify response: ${response.message}")
+                                
+                                if (response.status == "success") {
+                                    alert = "انجام شد" to "رمز تازه ذخیره شد. حالا وارد شو."
+                                    step = 3
+                                } else {
+                                    alert = "بازیابی" to (response.message ?: "خطای نامشخص")
+                                }
+                                loading = false
                             }
                         } catch (e: Exception) {
-                            Log.e("FORGOT_ERROR", "Password reset failed", e)
-                            alert = "بازیابی" to NetworkHelper.getErrorMessage(e)
+                            withContext(Dispatchers.Main) {
+                                Log.e("FORGOT_ERROR", "Password reset failed", e)
+                                alert = "بازیابی" to NetworkHelper.getErrorMessage(e)
+                                loading = false
+                            }
                         }
                     }
                 }
