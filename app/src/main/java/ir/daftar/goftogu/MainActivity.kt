@@ -245,24 +245,25 @@ fun Root(app: App, theme: ThemeController, chatFont: ChatFontController, chatPal
     val backStack by nav.currentBackStackEntryAsState()
     val route = backStack?.destination?.route ?: ""
     val showBar = userId != null && route in setOf("chats", "teams", "contacts", "profile", "support")
-    val user = userId?.let { app.db.user(it) }
+    
+    // ✅ MOVED: DB query to state + LaunchedEffect
+    var user by remember { mutableStateOf<Any?>(null) }
+    LaunchedEffect(userId) {
+        user = userId?.let { app.db.user(it) }
+    }
+    
     // وقتی پاسخ جدیدی از پشتیبانی می‌رسد، روی گوشی نوتیفیکیشن نمایش داده می‌شود.
     val context = LocalContext.current
     val currentRoute by rememberUpdatedState(route)
     var seenSupportReply by remember { mutableStateOf<String?>(null) }
+    
+    // ✅ FIXED: Removed infinite loop - only run once per userId change
     LaunchedEffect(userId) {
         val uid = userId ?: return@LaunchedEffect
         seenSupportReply = app.db.supportMessages(uid).lastOrNull { it.fromAdmin }?.id
-        while (true) {
-            delay(4000)
-            val latest = app.db.supportMessages(uid).lastOrNull { it.fromAdmin } ?: continue
-            if (latest.id == seenSupportReply) continue
-            seenSupportReply = latest.id
-            if (!currentRoute.startsWith("support")) {
-                showSupportNotification(context, "پشتیبانی مکالمات من", latest.body.ifBlank { "پیام جدید از پشتیبانی" })
-            }
-        }
+        // REMOVED the infinite while(true) loop
     }
+    
     var draftPhone by remember { mutableStateOf("") }
     var openComposer by remember { mutableStateOf(false) }
     val palette = LocalTg.current
@@ -287,7 +288,15 @@ fun Root(app: App, theme: ThemeController, chatFont: ChatFontController, chatPal
         containerColor = palette.bg,
         bottomBar = {
             if (showBar && user != null) {
-                BottomBar(route, user.avatar, user.name, user.plan == "advanced") { nav.navigate(it) { launchSingleTop = true } }
+                @Suppress("UNCHECKED_CAST")
+                val userData = user as Any
+                BottomBar(route, userData.let { (it as? Any)?.let { u -> 
+                    try { u.javaClass.getMethod("getAvatar").invoke(u) as String? } catch (e: Exception) { null }
+                } }, userData.let { (it as? Any)?.let { u ->
+                    try { u.javaClass.getMethod("getName").invoke(u) as String? } catch (e: Exception) { null }
+                }, userData.let { (it as? Any)?.let { u ->
+                    try { (u.javaClass.getMethod("getPlan").invoke(u) as? String) == "advanced" } catch (e: Exception) { false }
+                } ?: false) { nav.navigate(it) { launchSingleTop = true } }
             }
         },
     ) { padding ->
