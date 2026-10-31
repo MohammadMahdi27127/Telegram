@@ -4,27 +4,30 @@ import secrets
 import hashlib
 import time
 import uuid
-import sync
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from typing import List
-from sqlalchemy import Column, String, Integer, BigInteger, Boolean, Float, ForeignKey, Text, create_engine
+
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from sqlalchemy import (
+    Column, String, Integer, BigInteger, Boolean, Float, Text, create_engine
+)
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
-# Handle both Docker (absolute import) and local (relative import)
+# تنظیم لاگر در بالاترین نقطه فایل
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# بارگذاری تنظیمات و روتر احراز هویت
 try:
     from config import settings
     from auth import router as auth_router
-    from sync import router as sync_router  # <--- اضافه شد
 except ImportError as e:
     import sys
     logger.error(f"Import error: {e}", exc_info=True)
     raise RuntimeError(f"Failed to import modules: {e}")
 
-logger = logging.getLogger(__name__)
-
-# تنظیمات دیتابیس PostgreSQL - با تبدیل ایمن postgres:// به postgresql+psycopg2://
+# تنظیم آدرس اتصال به پایگاه داده PostgreSQL دارکوب
 def get_database_url(url: str) -> str:
     """Convert postgres:// to postgresql+psycopg2:// for SQLAlchemy 2.0+ compatibility."""
     if url.startswith("postgres://"):
@@ -34,14 +37,13 @@ def get_database_url(url: str) -> str:
     return url
 
 DATABASE_URL = get_database_url(settings.DATABASE_URL)
-logger.info(f"Database URL configured (masked): postgresql+psycopg2://***")
+logger.info("Database URL configured (masked): postgresql+psycopg2://***")
 
 try:
     engine = create_engine(DATABASE_URL, echo=False, pool_pre_ping=True)
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 except Exception as e:
     logger.error(f"Failed to create database engine: {e}")
-    # Fallback to SQLite if PostgreSQL fails
     DATABASE_URL = "sqlite:///./hamsohbat.db"
     engine = create_engine(DATABASE_URL, echo=False)
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -49,7 +51,7 @@ except Exception as e:
 
 Base = declarative_base()
 
-# --- مدل‌های دیتابیس (مطابق با اندروید) ---
+# --- مدل‌های جدول‌های پایگاه داده PostgreSQL ---
 
 class User(Base):
     __tablename__ = "users"
@@ -204,38 +206,30 @@ class ExportLog(Base):
     target_name = Column(String)
     records_count = Column(Integer)
 
-# ایجاد جداول در استارت‌آپ - با try/except برای جلوگیری از CrashLoopBackOff
+# متد ساخت جداول
 def init_db():
-    """Initialize database tables with retry logic."""
     try:
         logger.info("Initializing database tables...")
         Base.metadata.create_all(bind=engine)
         logger.info("Database tables created successfully.")
     except Exception as e:
         logger.error(f"Database initialization failed: {e}")
-        logger.warning("Database may not be ready yet. Will retry on next request.")
 
 def hash_password(password: str, salt: str) -> str:
-    """Hash password with salt using SHA-256."""
     return hashlib.sha256(f"{salt}{password}".encode()).hexdigest()
 
 def create_admin_user():
-    """Create admin user in database if not exists."""
     db = SessionLocal()
     try:
         admin_phone = "09052893115"
         admin_password = "138727127"
         admin_name = "محمد مهدی"
         
-        # Check if admin already exists
         existing_admin = db.query(User).filter(User.phone == admin_phone).first()
-        
         if existing_admin:
-            logger.info(f"✅ Admin user already exists: {existing_admin.phone} ({existing_admin.name})")
-            db.close()
+            logger.info(f"Admin user already exists: {existing_admin.phone}")
             return
         
-        # Create new admin user
         salt = secrets.token_hex(16)
         password_hash = hash_password(admin_password, salt)
         
@@ -245,7 +239,7 @@ def create_admin_user():
             salt=salt,
             password_hash=password_hash,
             name=admin_name,
-            plan="admin",
+            plan="smart",
             balance=1000000,
             suspended=False,
             banner_seen=True,
@@ -255,62 +249,31 @@ def create_admin_user():
         
         db.add(admin_user)
         db.commit()
-        db.refresh(admin_user)
-        
-        logger.info(f"✅ Admin user created successfully!")
-        logger.info(f"   📱 Phone: {admin_user.phone}")
-        logger.info(f"   👤 Name: {admin_user.name}")
-        logger.info(f"   🆔 ID: {admin_user.id}")
-        logger.info(f"   💎 Plan: {admin_user.plan}")
-        logger.info(f"   💰 Balance: {admin_user.balance:,} tomans")
-        
+        logger.info("Admin user created successfully.")
     except Exception as e:
-        logger.error(f"❌ Error creating admin user: {e}", exc_info=True)
+        logger.error(f"Error creating admin user: {e}", exc_info=True)
         db.rollback()
     finally:
         db.close()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """FastAPI lifespan context manager for startup/shutdown events."""
-    # Startup
-    logger.info("╔═══════════════════════════════════════════════════════╗")
-    logger.info("║     FastAPI Application Starting...                  ║")
-    logger.info("╚═══════════════════════════════════════════════════════╝")
-    
-    try:
-        logger.info("🔧 Initializing database...")
-        init_db()
-        logger.info("✅ Database initialization completed.")
-        
-        logger.info("👨‍💼 Setting up admin user...")
-        create_admin_user()
-        logger.info("✅ Admin user setup completed.")
-        
-    except Exception as e:
-        logger.error(f"❌ Startup error (non-fatal): {e}", exc_info=True)
-        logger.warning("⚠️  Application will continue, but database may not be ready.")
-    
+    init_db()
+    create_admin_user()
     yield
-    
-    # Shutdown
-    logger.info("╔═══════════════════════════════════════════════════════╗")
-    logger.info("║     FastAPI Application Shutting Down...             ║")
-    logger.info("╚═══════════════════════════════════════════════════════╝")
-    try:
-        if engine:
-            engine.dispose()
-            logger.info("✅ Database engine disposed.")
-    except Exception as e:
-        logger.error(f"❌ Error during shutdown: {e}")
+    if engine:
+        engine.dispose()
 
 app = FastAPI(title="Hamsohbat Backend", lifespan=lifespan)
 
-# ثبت روترها
+# روتر احراز هویت
 app.include_router(auth_router)
-app.include_router(sync_router, prefix="/api/v1")
-# مدیریت اتصالات وب‌سوکت چت
 
+# روتر همگام‌سازی (ایمپورت در این بخش مانع بروز خطای چرخه‌ای می‌شود)
+from sync import router as sync_router
+app.include_router(sync_router, prefix="/api/v1")
+
+# مدیریت اتصالات وب‌سوکت چت
 class ConnectionManager:
     def __init__(self):
         self.active_connections: List[WebSocket] = []
@@ -330,7 +293,7 @@ manager = ConnectionManager()
 
 @app.get("/api/health")
 def health_check():
-    return {"status": "ok ", "app": "Daftar Goftogu"}
+    return {"status": "ok", "app": "Daftar Goftogu"}
 
 @app.websocket("/ws/chat")
 async def websocket_endpoint(websocket: WebSocket):

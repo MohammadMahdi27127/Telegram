@@ -1,25 +1,24 @@
 import time
 import logging
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-
-# مدل‌ها و نشست دیتابیس از main.py
-from main import SessionLocal, Entry, Person, Slip
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/sync", tags=["Sync"])
 
+# گرفتن سشن بدون ایمپورت مستقیم در بالای فایل برای جلوگیری از Circular Import
 def get_db():
-    db = SessionLocal()
+    import main
+    db = main.SessionLocal()
     try:
         yield db
     finally:
         db.close()
 
-# مدل‌های ورودی برای پایتون
+# مدل‌های ورودی پیام‌ها
 class SyncEntryItem(BaseModel):
     id: str
     person_id: str
@@ -34,6 +33,7 @@ class SyncEntryItem(BaseModel):
 class SyncPayloadRequest(BaseModel):
     entries: List[SyncEntryItem]
 
+# مدل‌های مخاطبین و گروه‌ها
 class SyncPersonItem(BaseModel):
     id: str
     name: str
@@ -48,6 +48,7 @@ class SyncPersonItem(BaseModel):
 class SyncPeoplePayload(BaseModel):
     people: List[SyncPersonItem]
 
+# مدل‌های فیش‌های واریزی
 class SyncSlipItem(BaseModel):
     id: str
     kind: str
@@ -60,14 +61,30 @@ class SyncSlipItem(BaseModel):
 class SyncSlipPayload(BaseModel):
     slips: List[SyncSlipItem]
 
+# مدل‌های چت هوش مصنوعی
+class SyncAiMessageItem(BaseModel):
+    id: str
+    user_id: Optional[str] = None
+    person_id: Optional[str] = None
+    role: str
+    body: str
+    image_path: Optional[str] = None
+    created_at: int
+
+class SyncAiPayload(BaseModel):
+    messages: List[SyncAiMessageItem]
+
+# پاسخ استاندارد به اندروید
 class SyncResponse(BaseModel):
     status: str
     message: Optional[str] = None
     saved_count: int
 
-# اندپوینت ثبت پیام‌ها در دیتابیس دارکوب
+# ۱. اندپوینت ثبت پیام‌ها در سرور
 @router.post("/entries", response_model=SyncResponse)
 def sync_entries(payload: SyncPayloadRequest, db: Session = Depends(get_db)):
+    import main
+    Entry = main.Entry
     try:
         saved = 0
         now_ms = int(time.time() * 1000)
@@ -100,15 +117,17 @@ def sync_entries(payload: SyncPayloadRequest, db: Session = Depends(get_db)):
                 ))
             saved += 1
         db.commit()
-        return SyncResponse(status="success", message="پیام‌ها با موفقیت در دیتابیس سرور ثبت شدند", saved_count=saved)
+        return SyncResponse(status="success", message="پیام‌ها با موفقیت در سرور ثبت شدند", saved_count=saved)
     except Exception as e:
         db.rollback()
         logger.error(f"Error syncing entries: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
-# اندپوینت ثبت مخاطبین و گروه‌ها
+# ۲. اندپوینت ثبت مخاطبین و گروه‌ها
 @router.post("/people", response_model=SyncResponse)
 def sync_people(payload: SyncPeoplePayload, db: Session = Depends(get_db)):
+    import main
+    Person = main.Person
     try:
         saved = 0
         for item in payload.people:
@@ -138,11 +157,14 @@ def sync_people(payload: SyncPeoplePayload, db: Session = Depends(get_db)):
         return SyncResponse(status="success", message="مخاطبین و گروه‌ها با موفقیت ثبت شدند", saved_count=saved)
     except Exception as e:
         db.rollback()
+        logger.error(f"Error syncing people: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
-# اندپوینت ثبت فیش‌ها
+# ۳. اندپوینت ثبت فیش‌های واریزی
 @router.post("/slips", response_model=SyncResponse)
 def sync_slips(payload: SyncSlipPayload, db: Session = Depends(get_db)):
+    import main
+    Slip = main.Slip
     try:
         saved = 0
         for item in payload.slips:
@@ -163,25 +185,15 @@ def sync_slips(payload: SyncSlipPayload, db: Session = Depends(get_db)):
         return SyncResponse(status="success", message="فیش‌های واریزی با موفقیت ثبت شدند", saved_count=saved)
     except Exception as e:
         db.rollback()
+        logger.error(f"Error syncing slips: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
-    
-# مدل چت هوش مصنوعی مطابق جدول دیتابیس
-class SyncAiMessageItem(BaseModel):
-    id: str
-    user_id: Optional[str] = None
-    person_id: Optional[str] = None
-    role: str                      # 'user' یا 'assistant' یا 'model'
-    body: str                      # متن پیام
-    image_path: Optional[str] = None
-    created_at: int
 
-class SyncAiPayload(BaseModel):
-    messages: List[SyncAiMessageItem]
-
+# ۴. اندپوینت ثبت چت‌های هوش مصنوعی
 @router.post("/ai-messages", response_model=SyncResponse)
 def sync_ai_messages(payload: SyncAiPayload, db: Session = Depends(get_db)):
+    import main
+    AiMessage = main.AiMessage
     try:
-        from main import AiMessage
         saved = 0
         for item in payload.messages:
             existing = db.query(AiMessage).filter(AiMessage.id == item.id).first()
@@ -197,11 +209,7 @@ def sync_ai_messages(payload: SyncAiPayload, db: Session = Depends(get_db)):
                 ))
                 saved += 1
         db.commit()
-        return SyncResponse(
-            status="success", 
-            message="پیام‌های هوش مصنوعی با موفقیت ثبت شدند", 
-            saved_count=saved
-        )
+        return SyncResponse(status="success", message="پیام‌های هوش مصنوعی با موفقیت ثبت شدند", saved_count=saved)
     except Exception as e:
         db.rollback()
         logger.error(f"Error syncing AI messages: {e}", exc_info=True)
