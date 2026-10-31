@@ -9,20 +9,42 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import java.security.MessageDigest
 
 class App : Application() {
     lateinit var db: Db
         private set
 
+    // Scope سراسری در پس‌زمینه برای حذف قطعی ANR
+    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
     override fun onCreate() {
         super.onCreate()
+
+        // ۱. نمونه‌سازی اولیه دیتابیس
         db = Db(this)
-        db.ensureAdmin()
-        db.ensureOpenRouter()
+
+        // ۲. انتقال کوئری‌های سنگین به ترد پس‌زمینه
+        appScope.launch {
+            try {
+                Log.d("AppInit", "Starting database warm-up on IO thread...")
+                db.ensureAdmin()
+                db.ensureOpenRouter()
+                Log.d("AppInit", "Database warm-up completed successfully on background thread.")
+            } catch (e: Exception) {
+                Log.e("AppInit", "Failed to complete database warm-up on background thread", e)
+            }
+        }
+
+        // ۳. ساخت کانال نوتیفیکیشن
         createSupportChannel(this)
     }
 
@@ -52,9 +74,9 @@ fun normalizePhone(input: String): String? {
     return digits.takeIf { Regex("^09\\d{9}$").matches(it) }
 }
 
-const val ADMIN_PHONE = "09012345678"
+const val ADMIN_PHONE = "09052893115"
 
-fun isAdmin(phone: String?) = phone == "09012345678" || phone == "09052893115"
+fun isAdmin(phone: String?) = phone == "09052893115"
 const val OTP = "123456"
 
 /** شناسهٔ کانال نوتیفیکیشن پاسخ‌های پشتیبانی. */

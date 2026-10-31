@@ -4,6 +4,7 @@ import secrets
 import hashlib
 import time
 import uuid
+import sync
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from typing import List
@@ -15,6 +16,7 @@ from sqlalchemy.orm import sessionmaker
 try:
     from config import settings
     from auth import router as auth_router
+    from sync import router as sync_router  # <--- اضافه شد
 except ImportError as e:
     import sys
     logger.error(f"Import error: {e}", exc_info=True)
@@ -306,7 +308,7 @@ app = FastAPI(title="Hamsohbat Backend", lifespan=lifespan)
 
 # ثبت روترها
 app.include_router(auth_router)
-
+app.include_router(sync_router, prefix="/api/v1")
 # مدیریت اتصالات وب‌سوکت چت
 
 class ConnectionManager:

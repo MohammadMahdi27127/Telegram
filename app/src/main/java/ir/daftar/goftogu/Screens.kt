@@ -598,7 +598,7 @@ fun TeamsScreen(
     onUpgrade: () -> Unit,
     onBack: () -> Unit
 ) {
-    val user = app.db.user(userId) ?: return
+    val user = remember(userId) { app.db.getOrCreateUser(userId) }
     val palette = LocalTg.current
     val dark = palette.dark
 
@@ -1443,91 +1443,87 @@ fun AuthScreen(app: App, onLoggedIn: (String) -> Unit, openSignup: () -> Unit, o
     val context = LocalContext.current
     
     Box(Modifier.fillMaxSize()) {
-    AuthCard(title = "ورود") {
-        AuthField(phone, { phone = it }, "شماره موبایل", KeyboardType.Phone)
-        AuthPassword(password, { password = it }, "رمز عبور")
-        AuthButton("ورود") {
-            val normalized = normalizePhone(phone)
-            if (normalized == null) {
-                alert = "شماره نادرست" to "شماره موبایل باید ۱۱ رقم و با ۰۹ شروع شود."
-                return@AuthButton
-            }
-            
-            // Set loading state on main thread first
-            loading = true
-            
-            // Launch network call on IO thread
-            scope.launch(Dispatchers.Main) {
-                try {
-                    // Network check on main thread first
-                    if (!NetworkHelper.isDeviceOnline(context)) {
-                        withContext(Dispatchers.Main) {
-                            alert = "خطا در شبکه" to "لطفاً اتصال اینترنت را بررسی کنید"
-                            loading = false
-                        }
-                        return@launch
-                    }
-                    
-                    // Perform network call on IO thread
-                    val response = withContext(Dispatchers.IO) {
-                        val apiService = NetworkModule.getApiService()
-                        val loginRequest = LoginRequest(phone = normalized, password = password)
-                        
-                        Log.d("AUTH_API", "Sending login request to backend: $normalized")
-                        apiService.login(loginRequest)
-                    }
-                    
-                    // Update UI on main thread
-                    withContext(Dispatchers.Main) {
-                        Log.d("AUTH_API", "Login response: ${response.message}, userId: ${response.userId}")
-                        
-                        if (response.status == "success" && response.userId != null) {
-                            app.setSession(response.userId!!)
-                            onLoggedIn(response.userId!!)
-                        } else {
-                            alert = "ورود ناموفق" to (response.message ?: "خطای نامشخص")
-                        }
-                        loading = false
-                    }
-                } catch (e: Exception) {
-                    withContext(Dispatchers.Main) {
-                        Log.e("AUTH_ERROR", "Login failed", e)
-                        alert = "ورود ناموفق" to NetworkHelper.getErrorMessage(e)
-                        loading = false
-                    }
+        AuthCard(title = "ورود") {
+            AuthField(phone, { phone = it }, "شماره موبایل", KeyboardType.Phone)
+            AuthPassword(password, { password = it }, "رمز عبور")
+            AuthButton(if (loading) "در حال ورود..." else "ورود") {
+                if (loading) return@AuthButton
+                val normalized = normalizePhone(phone)
+                if (normalized == null) {
+                    alert = "شماره نادرست" to "شماره موبایل باید ۱۱ رقم و با ۰۹ شروع شود."
+                    return@AuthButton
                 }
-            }
-        }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
-            Text("ثبت‌نام", color = Color(0xFF0288D1), fontSize = 14.sp, modifier = Modifier.clickable(onClick = openSignup))
-            Text("فراموشی رمز", color = Color(0xFF0288D1), fontSize = 14.sp, modifier = Modifier.clickable(onClick = openForgot))
-            Text("ورود مهمان", color = Color(0xFF0288D1), fontSize = 14.sp, modifier = Modifier.clickable {
+                
                 loading = true
                 scope.launch(Dispatchers.Main) {
                     try {
-                        // Guest signup on IO thread (blocking DB operation)
-                        val id = withContext(Dispatchers.IO) {
-                            app.db.signupGuest()
+                        if (!NetworkHelper.isDeviceOnline(context)) {
+                            alert = "خطا در شبکه" to "لطفاً اتصال اینترنت را بررسی کنید"
+                            loading = false
+                            return@launch
                         }
                         
-                        withContext(Dispatchers.Main) {
-                            app.setSession(id)
-                            onLoggedIn(id)
-                            loading = false
+                        val response = withContext(Dispatchers.IO) {
+                            val apiService = NetworkModule.getApiService()
+                            val loginRequest = LoginRequest(phone = normalized, password = password)
+                            apiService.login(loginRequest)
+                        }
+                        
+                        if (response.status == "success" && response.userId != null) {
+    val uid = response.userId!!
+    
+    // ذخیره خودکار مشخصات کاربری که لاگین کرده در دیتابیس محلی گوشی
+    withContext(Dispatchers.IO) {
+        app.db.saveOrUpdateUser(
+            id = uid,
+            phone = response.phone ?: normalized,
+            name = response.name ?: "کاربر",
+            plan = response.plan ?: "free"
+        )
+    }
+    
+    app.setSession(uid)
+    onLoggedIn(uid)
+} else {
+                            alert = "ورود ناموفق" to (response.message ?: "خطای نامشخص")
                         }
                     } catch (e: Exception) {
-                        withContext(Dispatchers.Main) {
-                            alert = "مهمان" to (e.message ?: "خطا")
-                            loading = false
-                        }
+                        alert = "ورود ناموفق" to NetworkHelper.getErrorMessage(e)
+                    } finally {
+                        loading = false
                     }
                 }
-            })
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
+                Text("ثبت‌نام", color = Color(0xFF0288D1), fontSize = 14.sp, modifier = Modifier.clickable(onClick = openSignup))
+                Text("فراموشی رمز", color = Color(0xFF0288D1), fontSize = 14.sp, modifier = Modifier.clickable(onClick = openForgot))
+               Text(
+    text = "ورود مهمان",
+    color = Color(0xFF0288D1),
+    fontSize = 14.sp,
+    modifier = Modifier.clickable {
+        if (loading) return@clickable
+        loading = true
+        scope.launch(Dispatchers.Main) {
+            try {
+                val id = withContext(Dispatchers.IO) {
+                    app.db.signupGuest(context)
+                }
+                app.setSession(id)
+                onLoggedIn(id)
+            } catch (e: Exception) {
+                alert = "ورود مهمان" to (e.message ?: "امکان ورود مهمان وجود ندارد.")
+            } finally {
+                loading = false
+            }
         }
     }
-    alert?.let { (title, body) ->
-        PrettyAlert(title, body, onConfirm = { alert = null })
-    }
+)
+            }
+        }
+        alert?.let { (title, body) ->
+            PrettyAlert(title, body, onConfirm = { alert = null })
+        }
     }
 }
 
@@ -1543,91 +1539,109 @@ fun SignUpScreen(app: App, onReady: (String) -> Unit, openLogin: () -> Unit) {
     var loading by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    val verified = code == OTP
+    val verified = code.length == 6
     
     Box(Modifier.fillMaxSize()) {
-    AuthCard(title = "ثبت‌نام") {
-        when (step) {
-            0 -> {
-                AuthField(name, { name = it }, "نام", KeyboardType.Text)
-                AuthField(phone, { phone = it }, "شماره موبایل", KeyboardType.Phone)
-                AuthButton("ثبت‌نام") {
-                    if (name.trim().length < 2) {
-                        alert = "نام" to "نام را کامل‌تر بنویس."
-                        return@AuthButton
-                    }
-                    if (normalizePhone(phone) == null) {
-                        alert = "شماره نادرست" to "شماره موبایل باید ۱۱ رقم و با ۰۹ شروع شود."
-                        return@AuthButton
-                    }
-                    step = 1
-                    alert = "کد تأیید" to "کد آزمایشی ${persianDigits(OTP)} را در ۶ خانه وارد کن."
-                }
-            }
-            1 -> {
-                Text("کد پیامک را وارد کن", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Start)
-                OtpBoxes(code) { code = it.filter { ch -> ch.isDigit() }.take(6) }
-                if (verified) Text("کد تأیید شد", color = CheckGreen, fontWeight = FontWeight.Bold, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Start)
-                AuthButton("مرحله بعد") {
-                    if (!verified) {
-                        alert = "کد نادرست" to "شش رقم کد را درست وارد کن."
-                        return@AuthButton
-                    }
-                    step = 2
-                }
-            }
-            else -> {
-                AuthPassword(password, { password = it }, "رمز عبور")
-                AuthPassword(confirm, { confirm = it }, "تکرار رمز عبور")
-                AuthButton("ساخت حساب") {
-                    if (password.length < 8) {
-                        alert = "رمز کوتاه" to "رمز باید حداقل ۸ کاراکتر باشد."
-                        return@AuthButton
-                    }
-                    if (password != confirm) {
-                        alert = "رمز" to "رمز و تکرار آن یکی نیست."
-                        return@AuthButton
-                    }
-                    val normalized = normalizePhone(phone) ?: return@AuthButton
-                    
-                    // Set loading state on main thread
-                    loading = true
-                    
-                    // Launch signup on IO thread
-                    scope.launch(Dispatchers.Main) {
-                        try {
-                            if (!NetworkHelper.isDeviceOnline(context)) {
-                                withContext(Dispatchers.Main) {
+        AuthCard(title = "ثبت‌نام") {
+            when (step) {
+                0 -> {
+                    AuthField(name, { name = it }, "نام", KeyboardType.Text)
+                    AuthField(phone, { phone = it }, "شماره موبایل", KeyboardType.Phone)
+                    AuthButton(if (loading) "در حال ارسال کد..." else "دریافت کد تأیید") {
+                        if (loading) return@AuthButton
+                        if (name.trim().length < 2) {
+                            alert = "نام" to "نام را کامل‌تر بنویس."
+                            return@AuthButton
+                        }
+                        val normalized = normalizePhone(phone)
+                        if (normalized == null) {
+                            alert = "شماره نادرست" to "شماره موبایل باید ۱۱ رقم و با ۰۹ شروع شود."
+                            return@AuthButton
+                        }
+
+                        loading = true
+                        scope.launch(Dispatchers.Main) {
+                            try {
+                                if (!NetworkHelper.isDeviceOnline(context)) {
                                     alert = "خطا در شبکه" to "لطفاً اتصال اینترنت را بررسی کنید"
                                     loading = false
+                                    return@launch
                                 }
-                                return@launch
+                                val response = withContext(Dispatchers.IO) {
+                                    val apiService = NetworkModule.getApiService()
+                                    apiService.sendOtp(OtpRequest(normalized))
+                                }
+                                loading = false
+                                step = 1
+                                alert = "کد تأیید" to "کد تأیید پیامک‌شده را در ۶ خانه وارد کن."
+                            } catch (e: Exception) {
+                                loading = false
+                                alert = "خطا در ارسال پیامک" to NetworkHelper.getErrorMessage(e)
                             }
-                            
-                            // Network call on IO thread
-                            val response = withContext(Dispatchers.IO) {
-                                val apiService = NetworkModule.getApiService()
-                                val signupRequest = SignupRequest(phone = normalized, name = name, password = password)
+                        }
+                    }
+                }
+                1 -> {
+                    Text("کد پیامک را وارد کن", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Start)
+                    OtpBoxes(code) { code = it.filter { ch -> ch.isDigit() }.take(6) }
+                    AuthButton("مرحله بعد") {
+                        if (code.length < 6) {
+                            alert = "کد ناقص" to "شش رقم کد پیامک‌شده را کامل وارد کن."
+                            return@AuthButton
+                        }
+                        step = 2
+                    }
+                }
+                else -> {
+                    AuthPassword(password, { password = it }, "رمز عبور")
+                    AuthPassword(confirm, { confirm = it }, "تکرار رمز عبور")
+                    AuthButton(if (loading) "در حال ساخت حساب..." else "ساخت حساب") {
+                        if (loading) return@AuthButton
+                        if (password.length < 8) {
+                            alert = "رمز کوتاه" to "رمز باید حداقل ۸ کاراکتر باشد."
+                            return@AuthButton
+                        }
+                        if (password != confirm) {
+                            alert = "رمز" to "رمز و تکرار آن یکی نیست."
+                            return@AuthButton
+                        }
+                        val normalized = normalizePhone(phone) ?: return@AuthButton
+                        
+                        loading = true
+                        scope.launch(Dispatchers.Main) {
+                            try {
+                                if (!NetworkHelper.isDeviceOnline(context)) {
+                                    alert = "خطا در شبکه" to "لطفاً اتصال اینترنت را بررسی کنید"
+                                    loading = false
+                                    return@launch
+                                }
                                 
-                                Log.d("SIGNUP_API", "Sending signup request to backend: $normalized")
-                                apiService.signup(signupRequest)
-                            }
-                            
-                            // Update UI on main thread
-                            withContext(Dispatchers.Main) {
-                                Log.d("SIGNUP_API", "Signup response: ${response.message}, userId: ${response.userId}")
+                                val response = withContext(Dispatchers.IO) {
+                                    val apiService = NetworkModule.getApiService()
+                                    val signupRequest = SignupRequest(phone = normalized, name = name, password = password, code = code)
+                                    apiService.signup(signupRequest)
+                                }
                                 
                                 if (response.status == "success" && response.userId != null) {
-                                    app.setSession(response.userId!!)
-                                    onReady(response.userId!!)
-                                } else {
+    val uid = response.userId!!
+    
+    // 👈 دقیقاً این خطوط اضافه میشن:
+    withContext(Dispatchers.IO) {
+        app.db.saveOrUpdateUser(
+            id = uid,
+            phone = response.phone ?: normalized,
+            name = response.name ?: name,
+            plan = "free"
+        )
+    }
+    
+    app.setSession(uid)
+    onReady(uid)
+} else {
                                     alert = "ثبت‌نام ناموفق" to (response.message ?: "خطای نامشخص")
                                 }
                                 loading = false
-                            }
-                        } catch (e: Exception) {
-                            withContext(Dispatchers.Main) {
-                                Log.e("SIGNUP_ERROR", "Signup failed", e)
+                            } catch (e: Exception) {
                                 alert = "ثبت‌نام ناموفق" to NetworkHelper.getErrorMessage(e)
                                 loading = false
                             }
@@ -1635,17 +1649,15 @@ fun SignUpScreen(app: App, onReady: (String) -> Unit, openLogin: () -> Unit) {
                     }
                 }
             }
+            AuthLinks("ورود", openLogin, if (step > 0) "مرحله قبل" else "ورود", { if (step > 0) step -= 1 else openLogin() })
         }
-        AuthLinks("ورود", openLogin, if (step > 0) "مرحله قبل" else "ورود", { if (step > 0) step -= 1 else openLogin() })
-    }
-    alert?.let { (title, body) ->
-        PrettyAlert(title, body, onConfirm = { alert = null })
+        alert?.let { (title, body) ->
+            PrettyAlert(title, body, onConfirm = { alert = null })
         }
     }
 }
 
-@Composable
-fun ForgotScreen(app: App, openLogin: () -> Unit, openSignup: () -> Unit) {
+
 @Composable
 fun ForgotScreen(app: App, openLogin: () -> Unit, openSignup: () -> Unit) {
     var step by remember { mutableIntStateOf(0) }
@@ -1657,77 +1669,87 @@ fun ForgotScreen(app: App, openLogin: () -> Unit, openSignup: () -> Unit) {
     var loading by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    val verified = code == OTP
+    val verified = code.length == 6
     
     Box(Modifier.fillMaxSize()) {
-    AuthCard(title = "بازیابی رمز") {
-        when (step) {
-            0 -> {
-                AuthField(phone, { phone = it }, "شماره موبایل", KeyboardType.Phone)
-                AuthButton("ادامه") {
-                    if (normalizePhone(phone) == null) {
-                        alert = "شماره نادرست" to "شماره موبایل باید ۱۱ رقم و با ۰۹ شروع شود."
-                        return@AuthButton
-                    }
-                    step = 1
-                    alert = "کد تأیید" to "کد آزمایشی ${persianDigits(OTP)} را در ۶ خانه وارد کن."
-                }
-            }
-            1 -> {
-                OtpBoxes(code) { code = it.filter { ch -> ch.isDigit() }.take(6) }
-                if (verified) Text("کد تأیید شد", color = CheckGreen, fontWeight = FontWeight.Bold, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Start)
-                AuthButton("مرحله بعد") {
-                    if (!verified) alert = "کد نادرست" to "شش رقم کد را درست وارد کن." else step = 2
-                }
-            }
-            else -> {
-                AuthPassword(password, { password = it }, "رمز جدید")
-                AuthPassword(confirm, { confirm = it }, "تکرار رمز")
-                AuthButton("بازیابی رمز") {
-                    if (password.length < 8 || password != confirm) {
-                        alert = "رمز" to "رمز حداقل ۸ کاراکتر باشد و با تکرارش یکی باشد."
-                        return@AuthButton
-                    }
-                    val normalized = normalizePhone(phone) ?: return@AuthButton
-                    
-                    // Set loading state on main thread
-                    loading = true
-                    
-                    // Launch password reset on IO thread
-                    scope.launch(Dispatchers.Main) {
-                        try {
-                            if (!NetworkHelper.isDeviceOnline(context)) {
-                                withContext(Dispatchers.Main) {
+        AuthCard(title = "بازیابی رمز") {
+            when (step) {
+                0 -> {
+                    AuthField(phone, { phone = it }, "شماره موبایل", KeyboardType.Phone)
+                    AuthButton(if (loading) "در حال ارسال کد..." else "ارسال کد تأیید") {
+                        if (loading) return@AuthButton
+                        val normalized = normalizePhone(phone)
+                        if (normalized == null) {
+                            alert = "شماره نادرست" to "شماره موبایل باید ۱۱ رقم و با ۰۹ شروع شود."
+                            return@AuthButton
+                        }
+                        loading = true
+                        scope.launch(Dispatchers.Main) {
+                            try {
+                                if (!NetworkHelper.isDeviceOnline(context)) {
                                     alert = "خطا در شبکه" to "لطفاً اتصال اینترنت را بررسی کنید"
                                     loading = false
+                                    return@launch
                                 }
-                                return@launch
+                                withContext(Dispatchers.IO) {
+                                    val apiService = NetworkModule.getApiService()
+                                    apiService.sendOtp(OtpRequest(normalized))
+                                }
+                                loading = false
+                                step = 1
+                                alert = "کد تأیید" to "کد تأیید پیامک‌شده را در ۶ خانه وارد کن."
+                            } catch (e: Exception) {
+                                loading = false
+                                alert = "خطا در ارسال پیامک" to NetworkHelper.getErrorMessage(e)
                             }
-                            
-                            // Verify OTP on IO thread
-                            val response = withContext(Dispatchers.IO) {
-                                val apiService = NetworkModule.getApiService()
-                                val verifyRequest = OtpVerifyRequest(phone = normalized, code = code)
+                        }
+                    }
+                }
+                1 -> {
+                    Text("کد پیامک را وارد کن", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Start)
+                    OtpBoxes(code) { code = it.filter { ch -> ch.isDigit() }.take(6) }
+                    AuthButton("مرحله بعد") {
+                        if (code.length < 6) {
+                            alert = "کد ناقص" to "شش رقم کد را درست و کامل وارد کن."
+                            return@AuthButton
+                        }
+                        step = 2
+                    }
+                }
+                else -> {
+                    AuthPassword(password, { password = it }, "رمز جدید")
+                    AuthPassword(confirm, { confirm = it }, "تکرار رمز")
+                    AuthButton(if (loading) "در حال ذخیره..." else "بازیابی رمز") {
+                        if (loading) return@AuthButton
+                        if (password.length < 8 || password != confirm) {
+                            alert = "رمز" to "رمز حداقل ۸ کاراکتر باشد و با تکرارش یکی باشد."
+                            return@AuthButton
+                        }
+                        val normalized = normalizePhone(phone) ?: return@AuthButton
+                        
+                        loading = true
+                        scope.launch(Dispatchers.Main) {
+                            try {
+                                if (!NetworkHelper.isDeviceOnline(context)) {
+                                    alert = "خطا در شبکه" to "لطفاً اتصال اینترنت را بررسی کنید"
+                                    loading = false
+                                    return@launch
+                                }
                                 
-                                Log.d("FORGOT_API", "Sending OTP verify request to backend: $normalized")
-                                apiService.verifyOtp(verifyRequest)
-                            }
-                            
-                            // Update UI on main thread
-                            withContext(Dispatchers.Main) {
-                                Log.d("FORGOT_API", "OTP verify response: ${response.message}")
+                                val response = withContext(Dispatchers.IO) {
+                                    val apiService = NetworkModule.getApiService()
+                                    val verifyRequest = OtpVerifyRequest(phone = normalized, code = code)
+                                    apiService.verifyOtp(verifyRequest)
+                                }
                                 
                                 if (response.status == "success") {
                                     alert = "انجام شد" to "رمز تازه ذخیره شد. حالا وارد شو."
                                     step = 3
                                 } else {
-                                    alert = "بازیابی" to (response.message ?: "خطای نامشخص")
+                                    alert = "بازیابی" to (response.message ?: "کد وارد شده صحیح نیست.")
                                 }
                                 loading = false
-                            }
-                        } catch (e: Exception) {
-                            withContext(Dispatchers.Main) {
-                                Log.e("FORGOT_ERROR", "Password reset failed", e)
+                            } catch (e: Exception) {
                                 alert = "بازیابی" to NetworkHelper.getErrorMessage(e)
                                 loading = false
                             }
@@ -1735,21 +1757,19 @@ fun ForgotScreen(app: App, openLogin: () -> Unit, openSignup: () -> Unit) {
                     }
                 }
             }
+            AuthLinks("ورود", openLogin, "ثبت‌نام", openSignup)
         }
-        AuthLinks("ورود", openLogin, "ثبت‌نام", openSignup)
-    }
-    alert?.let { (title, body) ->
-        PrettyAlert(title, body, onConfirm = {
-            alert = null
-            if (step == 3) openLogin()
-        })
-    }
+        alert?.let { (title, body) ->
+            PrettyAlert(title, body, onConfirm = {
+                alert = null
+                if (step == 3) openLogin()
+            })
+        }
     }
 }
-
 @Composable
 private fun OtpBoxes(value: String, onChange: (String) -> Unit) {
-    val ok = value.length == 6 && value == OTP
+    val ok = value.length == 6 
     val border = if (ok) CheckGreen else Color(0xFFE5E7EB)
     BasicTextField(
         value,
@@ -3630,7 +3650,7 @@ private fun ExportReportDialog(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ThreadScreen(app: App, userId: String, personId: String, back: () -> Unit, onPricing: () -> Unit = {}) {
-    val user = app.db.user(userId) ?: return
+    val user = remember(userId) { app.db.getOrCreateUser(userId) }
     var person by remember(personId) { mutableStateOf(app.db.people(userId).find { it.id == personId }) }
     val personTitle = person?.name ?: app.db.personName(personId)
     var allEntries by remember { mutableStateOf(app.db.entries(personId)) }
@@ -5228,10 +5248,10 @@ fun ProfileScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var user by remember { mutableStateOf(app.db.user(userId)) }
+    var user by remember(userId) { mutableStateOf(app.db.getOrCreateUser(userId)) }
     var editProfile by remember { mutableStateOf(false) }
-    var name by remember { mutableStateOf(user?.name ?: "") }
-    var username by remember { mutableStateOf(user?.username ?: "") }
+    var name by remember { mutableStateOf(user.name) }
+    var username by remember { mutableStateOf(user.username ?: "") }
     var editPassword by remember { mutableStateOf(false) }
     var currentPassword by remember { mutableStateOf("") }
     var nextPassword by remember { mutableStateOf("") }
@@ -5245,20 +5265,20 @@ fun ProfileScreen(
         val dest = File(context.filesDir, "chat-bg-$userId.jpg")
         context.contentResolver.openInputStream(uri)?.use { input -> dest.outputStream().use { input.copyTo(it) } }
         app.db.setChatStyle(userId, dest.absolutePath, null)
-        user = app.db.user(userId)
+        user = app.db.getOrCreateUser(userId)
         wallpapersOpen = false
     }
     val avatarPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
         context.contentResolver.openInputStream(uri)?.use { crop = BitmapFactory.decodeStream(it) }
     }
-    val current = user ?: return
+    val current = user
     val dark = LocalDark.current
     val page = if (dark) Color(0xFF0F172A) else Color(0xFFE6E6FA)
     val card = if (dark) Color(0xFF1E293B) else Color.White
     val ink = if (dark) Color.White else Color(0xFF111827)
     val chatTheme = LocalChatPalette.current
-    val paid = current.plan == "basic" || current.plan == "advanced"
+    val paid = current.plan == "plus" || current.plan == "smart" || current.plan == "basic" || current.plan == "advanced"
     val daysLeft = current.planExpiresAt?.let { ((it - System.currentTimeMillis()) / 86_400_000L).coerceAtLeast(0) } ?: 0
     val pulse = rememberInfiniteTransition(label = "cam")
     val camScale by pulse.animateFloat(0.92f, 1.08f, infiniteRepeatable(tween(900), RepeatMode.Reverse), label = "cam-scale")
@@ -5296,8 +5316,9 @@ fun ProfileScreen(
         }
         if (message.isNotEmpty()) Text(message, color = chatTheme.primary, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
         Column(Modifier.fillMaxWidth().padding(16.dp).clip(RoundedCornerShape(20.dp)).background(card)) {
-            if (isAdmin(current.phone)) {
-                SettingRow("ادمین", "داشبورد", Icons.Filled.AdminPanelSettings, Color(0xFFE3F2FD), Blue, onClick = onAdmin)
+            // نمایش گزینه ادمین فقط برای شماره اختصاصی شما
+            if (app.db.isAdmin(current.phone)) {
+                SettingRow("پنل مدیریت ادمین", "داشبورد و بررسی تراکنش‌ها", Icons.Filled.AdminPanelSettings, Color(0xFFE3F2FD), Blue, onClick = onAdmin)
                 RowDivider(dark)
             }
             SettingRow("تنظیمات گفتگو", "پس‌زمینه، اندازه قلم و ترکیب رنگ", Icons.Filled.Chat, Color(0xFFE0F7FA), Color(0xFF00ACC1)) { chatSettingsOpen = !chatSettingsOpen }
@@ -5361,7 +5382,7 @@ fun ProfileScreen(
                     try {
                         app.db.rename(userId, name)
                         app.db.setUsername(userId, username)
-                        user = app.db.user(userId)
+                        user = app.db.getOrCreateUser(userId)
                         message = "پروفایل ذخیره شد"
                         editProfile = false
                     } catch (e: Exception) { message = e.message ?: "خطا" }
@@ -5404,7 +5425,7 @@ fun ProfileScreen(
             dest.outputStream().use { saved.compress(Bitmap.CompressFormat.JPEG, 90, it) }
             saved.recycle()
             app.db.setAvatar(userId, dest.absolutePath)
-            user = app.db.user(userId)
+            user = app.db.getOrCreateUser(userId)
             crop = null
             message = "عکس ذخیره شد"
         }
@@ -5449,7 +5470,7 @@ fun ProfileScreen(
                                                 val file = runCatching { cacheWallpaper(context, item) }.getOrNull() ?: return@launch
                                                 if (decodeWallpaper(file) == null) return@launch
                                                 app.db.setChatStyle(userId, file.absolutePath, null)
-                                                user = app.db.user(userId)
+                                                user = app.db.getOrCreateUser(userId)
                                                 wallpapersOpen = false
                                             }
                                         } else if (thumb == null && status != "در حال دریافت") attempt += 1
@@ -5470,7 +5491,7 @@ fun ProfileScreen(
                 }
                 TextButton(onClick = {
                     app.db.setChatStyle(userId, null, null)
-                    user = app.db.user(userId)
+                    user = app.db.getOrCreateUser(userId)
                     wallpapersOpen = false
                 }) { Text("پس‌زمینه کهکشانی") }
             }
@@ -5503,19 +5524,56 @@ fun ProfileScreen(
 
 @Composable
 private fun RowDivider(dark: Boolean) {
-    Box(Modifier.fillMaxWidth().padding(start = 64.dp).height(1.dp).background(if (dark) Color(0xFF243242) else Color(0xFFE5E7EB)))
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .padding(start = 64.dp)
+            .height(1.dp)
+            .background(if (dark) Color(0xFF243242) else Color(0xFFE5E7EB))
+    )
 }
 
 @Composable
-private fun StatusCapsule(modifier: Modifier, icon: androidx.compose.ui.graphics.vector.ImageVector, tint: Color, label: String, value: String, card: Color, dark: Boolean) {
-    Column(modifier.clip(RoundedCornerShape(16.dp)).background(card).border(1.dp, if (dark) Color(0xFF243242) else Color(0xFFE5E7EB), RoundedCornerShape(16.dp)).padding(14.dp)) {
+private fun StatusCapsule(
+    modifier: Modifier,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    tint: Color,
+    label: String,
+    value: String,
+    card: Color,
+    dark: Boolean
+) {
+    Column(
+        modifier
+            .clip(RoundedCornerShape(16.dp))
+            .background(card)
+            .border(1.dp, if (dark) Color(0xFF243242) else Color(0xFFE5E7EB), RoundedCornerShape(16.dp))
+            .padding(14.dp)
+    ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(30.dp).clip(CircleShape).background(tint.copy(alpha = 0.15f)), contentAlignment = Alignment.Center) {
+            Box(
+                Modifier
+                    .size(30.dp)
+                    .clip(CircleShape)
+                    .background(tint.copy(alpha = 0.15f)),
+                contentAlignment = Alignment.Center
+            ) {
                 Icon(icon, null, tint = tint, modifier = Modifier.size(18.dp))
             }
-            Text(label, color = if (dark) Color(0xFF9CA3AF) else Color(0xFF707579), fontSize = 12.sp, modifier = Modifier.padding(start = 8.dp))
+            Text(
+                label,
+                color = if (dark) Color(0xFF9CA3AF) else Color(0xFF707579),
+                fontSize = 12.sp,
+                modifier = Modifier.padding(start = 8.dp)
+            )
         }
-        Text(value, color = if (dark) Color.White else Color(0xFF111827), fontWeight = FontWeight.Bold, fontSize = 14.sp, modifier = Modifier.padding(top = 8.dp))
+        Text(
+            value,
+            color = if (dark) Color.White else Color(0xFF111827),
+            fontWeight = FontWeight.Bold,
+            fontSize = 14.sp,
+            modifier = Modifier.padding(top = 8.dp)
+        )
     }
 }
 
@@ -6210,9 +6268,10 @@ private fun showPaymentNotification(context: android.content.Context, title: Str
 }
 
 private fun planDisplay(plan: String) = when (plan) {
-    "basic" -> "پلاس"
-    "advanced" -> "هوشمند"
-    "guest" -> "مهمان"
+    "plus", "basic" -> "پلاس"
+    "smart", "advanced" -> "هوشمند"
+    "guest" -> "مهمان (اعتبار ۱ روزه)"
+    "expired_guest" -> "مهمان منقضی‌شده"
     else -> "رایگان"
 }
 

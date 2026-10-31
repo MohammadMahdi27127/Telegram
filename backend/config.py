@@ -10,15 +10,12 @@ class Settings(BaseSettings):
 
     # Admin Credentials
     ADMIN_PHONE: str = "09052893115"
-    ADMIN_PASSWORD: str = "138727127138727127"
+    ADMIN_PASSWORD: str = "138727127"
 
-    # SMS Settings (Faraz SMS / IPPanel)
-    SMS_USERNAME: str = "your_username"
-    SMS_PASSWORD: str = "your_password"
-    SMS_API_KEY: str = "wbprpwbxQg"
-    SMS_ORIGINATOR: str = "3000xxxxxx"
-    SMS_PATTERN_CODE: str = "your_pattern_code"
-    SMS_API_URL: str = "https://ippanel.com/patterns/pattern"
+    # SMS Settings (Faraz SMS / IPPanel REST API)
+    SMS_API_KEY: str = ""
+    SMS_ORIGINATOR: str = "9000836"
+    SMS_PATTERN_CODE: str = ""
 
     # App Settings
     OTP_EXPIRY_SECONDS: int = 120  # 2 minutes
@@ -27,8 +24,7 @@ class Settings(BaseSettings):
 
 try:
     settings = Settings()
-    logger.info(f"Settings loaded successfully from environment")
+    logger.info("Settings loaded successfully from environment")
 except Exception as e:
     logger.error(f"Error loading settings: {e}")
-    # Create a default settings object for development
     settings = Settings()

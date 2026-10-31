@@ -119,7 +119,7 @@ data class AiMessage(val id: String, val personId: String, val role: String, val
 data class Member(val id: String, val name: String)
 data class Banner(val id: String, val title: String, val body: String, val image: String? = null)
 
-class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 17) {
+class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 17) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
             """CREATE TABLE users (
@@ -229,6 +229,10 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 17) {
             put("payload", payload)
             put("created_at", System.currentTimeMillis())
         })
+        try {
+            val immediateSync = androidx.work.OneTimeWorkRequestBuilder<SyncWorker>().build()
+            androidx.work.WorkManager.getInstance(context).enqueue(immediateSync)
+        } catch (_: Exception) {}
     }
 
     fun outboxCount(): Int = readableDatabase.rawQuery("SELECT COUNT(*) FROM outbox", null).use { if (it.moveToFirst()) it.getInt(0) else 0 }
@@ -318,6 +322,46 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 17) {
         return list
     }
 
+    fun addSlip(
+    userId: String,
+    kind: String,
+    plan: String,
+    amount: Int,
+    receipt: String? = null,
+    refCode: String? = null
+): String {
+    val id = java.util.UUID.randomUUID().toString()
+    val now = System.currentTimeMillis()
+
+    // ۱. درج در دیتابیس لوکال SQLite گوشی
+    val values = android.content.ContentValues().apply {
+        put("id", id)
+        put("user_id", userId)
+        put("kind", kind)
+        put("plan", plan)
+        put("amount", amount)
+        put("status", "pending")
+        if (receipt != null) put("receipt", receipt) else putNull("receipt")
+        if (refCode != null) put("ref_code", refCode) else putNull("ref_code")
+        put("created_at", now)
+    }
+    writableDatabase.insert("slips", null, values)
+
+    // ۲. قراردادن در صف outbox برای ارسال خودکار به دارکوب
+    val slipJson = org.json.JSONObject().apply {
+        put("id", id)
+        put("kind", kind)
+        put("plan", plan)
+        put("amount", amount)
+        put("receipt", receipt)
+        put("ref_code", refCode)
+        put("created_at", now)
+    }.toString()
+    enqueue("slip", slipJson)
+
+    return id
+}
+
     fun supportUnreadForAdmin(): Int = readableDatabase.rawQuery(
         "SELECT COUNT(*) FROM support_messages WHERE from_admin=0 AND read_admin=0",
         null,
@@ -336,21 +380,115 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 17) {
         writableDatabase.update("support_messages", ContentValues().apply { put("read_user", 1) }, "user_id=? AND from_admin=1", arrayOf(userId))
     }
 
+    fun getOrCreateUser(id: String): User {
+        val existing = user(id)
+        if (existing != null) return existing
+
+        val db = writableDatabase
+        val cv = ContentValues().apply {
+            put("id", id)
+            put("phone", "")
+            put("name", "کاربر")
+            put("plan", "free")
+            put("balance", 0)
+            put("created_at", System.currentTimeMillis())
+            put("suspended", 0)
+            put("banner_seen", 0)
+        }
+        db.insertWithOnConflict("users", null, cv, SQLiteDatabase.CONFLICT_IGNORE)
+
+        return user(id) ?: User(
+            id = id,
+            phone = "",
+            name = "کاربر",
+            plan = "free",
+            balance = 0,
+            planExpiresAt = null,
+            suspended = false,
+            bannerSeen = false
+        )
+    }
+
+
+    fun isAdmin(phone: String?): Boolean {
+    if (phone.isNullOrBlank()) return false
+    val normalized = normalizePhone(phone) ?: phone.trim()
+    return normalized == "09052893115"
+}
+
+    fun saveOrUpdateUser(id: String, phone: String, name: String, plan: String = "free") {
+    val db = writableDatabase
+    val cleanPhone = normalizePhone(phone) ?: phone.trim()
+
+    // ۱. پاکسازی رکوردهای تکراری قدیمی با همین شماره تلفن که شناسه‌شان با شناسه سرور فرق دارد
+    db.delete("users", "phone = ? AND id != ?", arrayOf(cleanPhone, id))
+
+    val cv = ContentValues().apply {
+        put("id", id)
+        put("phone", cleanPhone)
+        put("name", name)
+        put("plan", plan)
+    }
+
+    // ۲. به‌روزرسانی یا درج با شناسه معتبر سرور
+    val updated = db.update("users", cv, "id = ?", arrayOf(id))
+    if (updated == 0) {
+        cv.put("balance", 0)
+        cv.put("created_at", System.currentTimeMillis())
+        cv.put("suspended", 0)
+        cv.put("banner_seen", 0)
+        db.insertWithOnConflict("users", null, cv, SQLiteDatabase.CONFLICT_REPLACE)
+    }
+}
+
+    fun ensureUserExists(id: String, phone: String, name: String, plan: String = "free") {
+    saveOrUpdateUser(id, phone, name, plan)
+}
+
     fun ensureAdmin() {
-        val phone = "09012345678"
-        val password = "11111111"
+        val phone = "09052893115"
+        val password = "138727127"
         if (findUser(phone) == null) signup(phone, "ادمین", password) else reset(phone, password)
     }
 
-    fun signupGuest(): String {
-        var phone: String
-        do {
-            phone = "09" + (100_000_000..999_999_999).random()
-        } while (findUser(phone) != null)
-        val id = signup(phone, "مهمان", "guest-" + UUID.randomUUID().toString().replace("-", "").take(12))
-        writableDatabase.update("users", ContentValues().apply { put("plan", "guest") }, "id=?", arrayOf(id))
-        return id
+    fun signupGuest(context: Context): String {
+    val prefs = context.getSharedPreferences("app_device_meta", Context.MODE_PRIVATE)
+    val hasUsedGuest = prefs.getBoolean("guest_used_once", false)
+    
+    if (hasUsedGuest) {
+        error("امکان ورود مجدد به عنوان مهمان روی این دستگاه وجود ندارد. لطفاً حساب کاربری بسازید.")
     }
+
+    var phone: String
+    do {
+        phone = "09" + (100_000_000..999_999_999).random()
+    } while (findUser(phone) != null)
+
+    val id = UUID.randomUUID().toString()
+    val salt = UUID.randomUUID().toString()
+    val now = System.currentTimeMillis()
+    val oneDayLater = now + (24 * 60 * 60 * 1000L) // اعتبار ۱ روزه
+
+    val values = ContentValues().apply {
+        put("id", id)
+        put("phone", phone)
+        put("salt", salt)
+        put("password_hash", hashPassword("guest-" + UUID.randomUUID().toString().take(8), salt))
+        put("name", "کاربر مهمان")
+        put("plan", "guest")
+        put("balance", 0)
+        put("plan_expires_at", oneDayLater)
+        put("suspended", 0)
+        put("created_at", now)
+    }
+    writableDatabase.insert("users", null, values)
+
+    // قفل کردن ورود مجدد مهمان روی این گوشی
+    prefs.edit().putBoolean("guest_used_once", true).apply()
+
+    addNotice(id, "ورود آزمایشی", "حساب مهمان شما به مدت ۲۴ ساعت فعال است و پس از آن منقضی می‌شود.")
+    return id
+}
 
     fun signup(phone: String, name: String, password: String): String {
         if (findUser(phone) != null) error("این شماره قبلاً ثبت شده")
@@ -406,8 +544,16 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 17) {
         )
         cursor.use {
             if (!it.moveToFirst()) return null
+            val rawPlan = it.getString(3)
             val expires = if (it.isNull(5)) null else it.getLong(5)
-            val plan = if (expires != null && expires < System.currentTimeMillis()) "free" else it.getString(3)
+            val isExpired = expires != null && expires < System.currentTimeMillis()
+
+            val plan = when {
+                isExpired && rawPlan == "guest" -> "expired_guest"
+                isExpired -> "free"
+                else -> rawPlan
+            }
+
             val user = User(
                 it.getString(0),
                 it.getString(1),
@@ -536,7 +682,11 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 17) {
             val taken = readableDatabase.rawQuery("SELECT 1 FROM people WHERE user_id=? AND phone=? LIMIT 1", arrayOf(userId, mobile)).use { it.moveToFirst() }
             if (taken) error("این شماره قبلاً ثبت شده")
         }
+
         val id = UUID.randomUUID().toString()
+        val now = System.currentTimeMillis()
+        val isGroup = members.any { it.isNotBlank() }
+
         writableDatabase.insert("people", null, ContentValues().apply {
             put("id", id)
             put("user_id", userId)
@@ -544,11 +694,26 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 17) {
             put("phone", mobile)
             put("role", role.trim())
             put("pinned", 0)
-            put("created_at", System.currentTimeMillis())
+            put("created_at", now)
             if (avatar == null) putNull("avatar") else put("avatar", avatar)
-            put("is_group", if (members.any { it.isNotBlank() }) 1 else 0)
+            put("is_group", if (isGroup) 1 else 0)
             put("saved", if (saved) 1 else 0)
         })
+
+        // افزودن به صف outbox برای ارسال به سرور دارکوب
+        val personJson = org.json.JSONObject().apply {
+            put("id", id)
+            put("name", name.trim())
+            put("phone", mobile)
+            put("role", role.trim())
+            put("pinned", false)
+            if (avatar != null) put("avatar", avatar)
+            put("is_group", isGroup)
+            put("saved", saved)
+            put("created_at", now)
+        }.toString()
+        enqueue("person", personJson)
+
         members.map { it.trim() }.filter { it.isNotEmpty() }.distinct().forEach { addMember(id, it) }
         return id
     }
@@ -561,7 +726,6 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 17) {
         while (it.moveToNext()) {
             val id = it.getString(0)
             var name = it.getString(1)
-            // If name is a UUID, it's likely a user ID from old data
             if (isUuid(name)) {
                 user(name)?.let { u ->
                     name = if (!u.name.isNullOrBlank() && !u.username.isNullOrBlank()) {
@@ -571,7 +735,6 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 17) {
                     } else {
                         u.name.ifBlank { "کاربر ${u.phone.takeLast(4)}" }
                     }
-                    // Optionally update the database to fix it permanently
                     writableDatabase.execSQL("UPDATE members SET name=? WHERE id=?", arrayOf(name, id))
                 }
             }
@@ -593,12 +756,11 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 17) {
     fun addMember(personId: String, contact: String): String {
         if (contact.isBlank()) error("شماره تماس یا نام کاربری را بنویسید")
         val user = findUserByContact(contact) ?: error("کاربری با این مشخصات یافت نشد")
-        
-        // Check for Plus Subscription
+
         if (user.plan != "advanced") {
             error("تنها کاربران دارای اشتراک پلاس امکان عضویت در تیم را دارند")
         }
-        
+
         val nameToSave = if (!user.name.isNullOrBlank() && !user.username.isNullOrBlank()) {
             "${user.name} (@${user.username})"
         } else if (!user.username.isNullOrBlank()) {
@@ -606,7 +768,7 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 17) {
         } else {
             user.name.ifBlank { "کاربر ${user.phone.takeLast(4)}" }
         }
-        
+
         val id = UUID.randomUUID().toString()
         writableDatabase.insert("members", null, ContentValues().apply {
             put("id", id)
@@ -718,6 +880,7 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 17) {
     }
 
     fun quota(user: User): Pair<Int, Int> {
+        if (user.plan == "expired_guest") return 5 to 0 // سقف صفر می‌شود و مسدود می‌گردد
         if (user.plan == "guest") {
             val used = readableDatabase.rawQuery("SELECT COUNT(*) FROM entries WHERE user_id=?", arrayOf(user.id)).use { if (it.moveToFirst()) it.getInt(0) else 0 }
             return used to 5
@@ -744,30 +907,48 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 17) {
             if (user.plan == "guest") error("در حالت مهمان فقط ۵ پیام آزمایشی می‌توانید بفرستید")
             error("سقف پلن شما به اتمام رسیده، لطفا پلن خود را تغییر دهید")
         }
-        val now = System.currentTimeMillis()
-        writableDatabase.insert("entries", null, ContentValues().apply {
-            put("id", UUID.randomUUID().toString())
-            put("user_id", user.id)
-            put("person_id", personId)
-            put("body", body.trim())
-            put("kind", kind)
-            put("channel", channel)
-            put("occurred_at", occurredAt)
-            put("created_at", now)
-            put("updated_at", now)
-            put("pinned", 0)
-            if (voicePath == null) putNull("voice_path") else put("voice_path", voicePath)
-            if (mediaPath == null) putNull("media_path") else put("media_path", mediaPath)
-            if (memberId == null) putNull("member_id") else put("member_id", memberId)
-            if (targetRecipientId == null) putNull("target_recipient_id") else put("target_recipient_id", targetRecipientId)
-        })
+
+        val entryId = UUID.randomUUID().toString()
+val now = System.currentTimeMillis()
+
+val payloadJson = org.json.JSONObject().apply {
+    put("id", entryId)
+    put("person_id", personId)
+    put("body", body.trim())
+    put("kind", kind)
+    put("channel", channel)
+    put("occurred_at", occurredAt)
+}.toString()
+
+enqueue("entry", payloadJson)
+
+writableDatabase.insert("entries", null, ContentValues().apply {
+    put("id", entryId)
+    put("user_id", user.id)
+    put("person_id", personId)
+    put("body", body.trim())
+    put("kind", kind)
+    put("channel", channel)
+    put("occurred_at", occurredAt)
+    put("created_at", now)
+    put("updated_at", now)
+    put("pinned", 0)
+    if (voicePath == null) putNull("voice_path") else put("voice_path", voicePath)
+    if (mediaPath == null) putNull("media_path") else put("media_path", mediaPath)
+    if (memberId == null) putNull("member_id") else put("member_id", memberId)
+    if (targetRecipientId == null) putNull("target_recipient_id") else put("target_recipient_id", targetRecipientId)
+})
     }
 
     fun submitSlip(userId: String, kind: String, plan: String?, amount: Int, receipt: String?, refCode: String?) {
         if (amount < 1) error("مبلغ را بنویس")
         if (receipt.isNullOrBlank() && refCode.isNullOrBlank()) error("عکس رسید یا شناسه واریز لازم است")
+        
+        val id = UUID.randomUUID().toString()
+        val now = System.currentTimeMillis()
+
         writableDatabase.insert("slips", null, ContentValues().apply {
-            put("id", UUID.randomUUID().toString())
+            put("id", id)
             put("user_id", userId)
             put("kind", kind)
             put("plan", plan)
@@ -775,8 +956,20 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 17) {
             put("status", "pending")
             if (receipt == null) putNull("receipt") else put("receipt", receipt)
             if (refCode == null) putNull("ref_code") else put("ref_code", refCode)
-            put("created_at", System.currentTimeMillis())
+            put("created_at", now)
         })
+
+        // قرار دادن فیش در صف outbox برای ارسال به دارکوب
+        val slipJson = org.json.JSONObject().apply {
+            put("id", id)
+            put("kind", kind)
+            put("plan", plan ?: "plus")
+            put("amount", amount)
+            if (receipt != null) put("receipt", receipt)
+            if (refCode != null) put("ref_code", refCode)
+            put("created_at", now)
+        }.toString()
+        enqueue("slip", slipJson)
     }
 
     fun slips(): List<Slip> = readableDatabase.rawQuery("SELECT id, user_id, kind, plan, amount, status, receipt, ref_code, created_at FROM slips ORDER BY created_at DESC", null).use {
@@ -822,14 +1015,12 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 17) {
         writableDatabase.update("slips", ContentValues().apply { put("status", status) }, "id=?", arrayOf(id))
         if (status == "approved") {
             topUp(slip.userId, slip.amount)
-            // If the slip is for a plan, activate it immediately and deduct price
             if (!slip.plan.isNullOrBlank()) {
                 val isSeasonal = slip.plan.contains("فصلی")
-                val planType = if (isSeasonal) "advanced" else "advanced" // Plus is advanced
                 val price = if (isSeasonal) 2_500_000 else 1_000_000
                 val durationDays = if (isSeasonal) 90L else 30L
                 val expires = System.currentTimeMillis() + durationDays * 24 * 60 * 60 * 1000
-                
+
                 writableDatabase.execSQL(
                     "UPDATE users SET balance = balance - ?, plan=?, plan_expires_at=? WHERE id=?",
                     arrayOf<Any>(price.toLong(), "advanced", expires, slip.userId),
@@ -931,7 +1122,7 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 17) {
         val isSeasonal = plan.contains("فصلی")
         val price = if (isSeasonal) 2_500_000 else 1_000_000
         val durationDays = if (isSeasonal) 90L else 30L
-        
+
         if (user.balance < price) error("موجودی کیف پول کافی نیست")
         val expires = System.currentTimeMillis() + durationDays * 24 * 60 * 60 * 1000
         writableDatabase.execSQL(
@@ -984,6 +1175,20 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 17) {
             if (image == null) putNull("image_path") else put("image_path", image)
             put("created_at", createdAt)
         })
+
+        // افزودن به صف outbox جهت همگام‌سازی با سرور دارکوب
+        val aiJson = org.json.JSONObject().apply {
+            put("id", id)
+            put("user_id", userId)
+            put("person_id", personId)
+            put("role", role)
+            put("body", body)
+            if (image != null) put("image_path", image)
+            put("created_at", createdAt)
+        }.toString()
+
+        enqueue("ai_message", aiJson)
+
         return AiMessage(id, personId, role, body, image, createdAt)
     }
 
@@ -1077,3 +1282,4 @@ class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 17) {
         return calendar.timeInMillis
     }
 }
+

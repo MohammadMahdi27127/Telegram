@@ -1,5 +1,5 @@
-import httpx
 import logging
+import httpx
 
 try:
     from config import settings
@@ -12,30 +12,41 @@ class SMSService:
     @staticmethod
     async def send_otp(phone: str, code: str) -> bool:
         """
-        Sends an OTP code using the IPPanel/Faraz SMS API.
-        Uses SMS_API_KEY token for authentication.
+        ارسال کد اعتبارسنجی با استفاده از وب‌سرویس مدرن پترن فراز اس‌ام‌اس (IPPANEL REST API)
         """
+        # آدرس استاندارد و نوین پترن در فراز اس‌ام‌اس
+        url = "https://api2.ippanel.com/api/v1/sms/pattern/normal/send"
+        
+        headers = {
+            "apikey": settings.SMS_API_KEY,
+            "Content-Type": "application/json"
+        }
+        
         payload = {
-            "user": settings.SMS_USERNAME,
-            "pass": settings.SMS_PASSWORD,
-            "from": settings.SMS_ORIGINATOR,
-            "to": phone,
-            "pattern_code": settings.SMS_PATTERN_CODE,
-            "input_data": {"code": code},
-            "api_key": settings.SMS_API_KEY
+            "code": settings.SMS_PATTERN_CODE,
+            "sender": settings.SMS_ORIGINATOR,
+            "recipient": phone,
+            "variable": {
+                "code": str(code)  # متغیری که در متن پترن پنل مشخص کردی (%code%)
+            }
         }
 
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=10.0) as client:
             try:
-                response = await client.post(settings.SMS_API_URL, json=payload)
-                response.raise_for_status()
-                result = response.text
-                # IPPanel usually returns a message ID on success (numeric string)
-                logger.info(f"SMS sent to {phone}. Result: {result}")
-                return True
-            except httpx.HTTPStatusError as e:
-                logger.error(f"HTTP error occurred while sending SMS: {e.response.text}")
+                response = await client.post(url, json=payload, headers=headers)
+                
+                # بررسی موفقیت‌آمیز بودن پاسخ (کد وضعیت ۲۰۰)
+                if response.status_code == 200:
+                    data = response.json()
+                    logger.info(f"SMS successfully sent to {phone}. Response: {data}")
+                    return True
+                else:
+                    logger.error(f"Failed to send SMS to {phone}. Status: {response.status_code}, Body: {response.text}")
+                    return False
+                    
+            except httpx.RequestError as exc:
+                logger.error(f"Network error while requesting Faraz SMS: {exc}")
                 return False
             except Exception as e:
-                logger.error(f"An error occurred while sending SMS: {str(e)}")
+                logger.error(f"Unexpected error in SMSService: {str(e)}")
                 return False

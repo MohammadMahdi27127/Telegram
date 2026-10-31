@@ -51,7 +51,8 @@ import androidx.navigation.navArgument
 import androidx.navigation.NavBackStackEntry
 import ir.daftar.goftogu.ui.theme.AppThemeState
 import ir.daftar.goftogu.ui.theme.LocalAppTheme
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 private val Vazir = FontFamily(
     Font(R.font.vazirmatn_regular, FontWeight.Normal),
@@ -192,9 +193,25 @@ class MainActivity : ComponentActivity() {
         super.attachBaseContext(newBase.createConfigurationContext(config))
     }
 
-    override fun onCreate(savedInstanceState: Bundle?) {
+        override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val app = application as App
+
+        // راه‌اندازی همگام‌سازی پس‌زمینه با سرور هنگام اتصال به اینترنت
+        val syncConstraints = androidx.work.Constraints.Builder()
+            .setRequiredNetworkType(androidx.work.NetworkType.CONNECTED)
+            .build()
+
+        val syncRequest = androidx.work.PeriodicWorkRequestBuilder<SyncWorker>(15, java.util.concurrent.TimeUnit.MINUTES)
+            .setConstraints(syncConstraints)
+            .build()
+
+        androidx.work.WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+            "DataSyncWork",
+            androidx.work.ExistingPeriodicWorkPolicy.KEEP,
+            syncRequest
+        )
+
         setContent {
             val context = LocalContext.current
             val theme = remember {
@@ -223,11 +240,32 @@ class MainActivity : ComponentActivity() {
             val palette = (if (dark) tgDark() else tgLight()).copy(blue = activeAppTheme.buttonColor)
             val background by animateColorAsState(palette.bg, tween(200), label = "bg")
             val scheme = if (dark) {
-                darkColorScheme(primary = activeAppTheme.buttonColor, onPrimary = activeAppTheme.onButtonColor, background = palette.bg, surface = palette.surface, onBackground = palette.text, onSurface = palette.text)
+                darkColorScheme(
+                    primary = activeAppTheme.buttonColor,
+                    onPrimary = activeAppTheme.onButtonColor,
+                    background = palette.bg,
+                    surface = palette.surface,
+                    onBackground = palette.text,
+                    onSurface = palette.text
+                )
             } else {
-                lightColorScheme(primary = activeAppTheme.buttonColor, onPrimary = activeAppTheme.onButtonColor, background = palette.bg, surface = palette.surface, onBackground = palette.text, onSurface = palette.text)
+                lightColorScheme(
+                    primary = activeAppTheme.buttonColor,
+                    onPrimary = activeAppTheme.onButtonColor,
+                    background = palette.bg,
+                    surface = palette.surface,
+                    onBackground = palette.text,
+                    onSurface = palette.text
+                )
             }
-            CompositionLocalProvider(LocalAppTheme provides activeAppTheme, LocalLayoutDirection provides LayoutDirection.Rtl, LocalDark provides dark, LocalTg provides palette, LocalChatFont provides chatFont.size, LocalChatPalette provides chatPaletteById(chatPalette.id)) {
+            CompositionLocalProvider(
+                LocalAppTheme provides activeAppTheme,
+                LocalLayoutDirection provides LayoutDirection.Rtl,
+                LocalDark provides dark,
+                LocalTg provides palette,
+                LocalChatFont provides chatFont.size,
+                LocalChatPalette provides chatPaletteById(chatPalette.id)
+            ) {
                 MaterialTheme(colorScheme = scheme, typography = vazirTypography()) {
                     Surface(Modifier.fillMaxSize(), color = background) {
                         Root(app, theme, chatFont, chatPalette)
@@ -237,7 +275,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
-
 @Composable
 fun Root(app: App, theme: ThemeController, chatFont: ChatFontController, chatPalette: ChatPaletteController) {
     val nav = rememberNavController()
@@ -245,29 +282,34 @@ fun Root(app: App, theme: ThemeController, chatFont: ChatFontController, chatPal
     val backStack by nav.currentBackStackEntryAsState()
     val route = backStack?.destination?.route ?: ""
     val showBar = userId != null && route in setOf("chats", "teams", "contacts", "profile", "support")
-    
-    // ✅ MOVED: DB query to state + LaunchedEffect
-    var user by remember { mutableStateOf<Any?>(null) }
-    LaunchedEffect(userId) {
-        user = userId?.let { app.db.user(it) }
+
+    var currentUser by remember { mutableStateOf<User?>(null) }
+
+LaunchedEffect(userId) {
+    val uid = userId
+    currentUser = if (uid != null) {
+        withContext(Dispatchers.IO) {
+            app.db.user(uid)
+        }
+    } else {
+        null
     }
-    
-    // وقتی پاسخ جدیدی از پشتیبانی می‌رسد، روی گوشی نوتیفیکیشن نمایش داده می‌شود.
+}
+
     val context = LocalContext.current
     val currentRoute by rememberUpdatedState(route)
     var seenSupportReply by remember { mutableStateOf<String?>(null) }
-    
-    // ✅ FIXED: Removed infinite loop - only run once per userId change
+
     LaunchedEffect(userId) {
         val uid = userId ?: return@LaunchedEffect
         seenSupportReply = app.db.supportMessages(uid).lastOrNull { it.fromAdmin }?.id
-        // REMOVED the infinite while(true) loop
     }
-    
+
     var draftPhone by remember { mutableStateOf("") }
     var openComposer by remember { mutableStateOf(false) }
     val palette = LocalTg.current
     val shift = with(LocalDensity.current) { 24.dp.roundToPx() }
+
     fun NavGraphBuilder.screen(
         route: String,
         arguments: List<androidx.navigation.NamedNavArgument> = emptyList(),
@@ -284,30 +326,35 @@ fun Root(app: App, theme: ThemeController, chatFont: ChatFontController, chatPal
             popExitTransition = { fadeOut(fade) + slideOutHorizontally(motion) { shift } },
         ) { entry -> content(entry) }
     }
+
     Scaffold(
         containerColor = palette.bg,
         bottomBar = {
-            if (showBar && user != null) {
-                @Suppress("UNCHECKED_CAST")
-                val userData = user as Any
-                BottomBar(route, userData.let { (it as? Any)?.let { u -> 
-                    try { u.javaClass.getMethod("getAvatar").invoke(u) as String? } catch (e: Exception) { null }
-                } }, userData.let { (it as? Any)?.let { u ->
-                    try { u.javaClass.getMethod("getName").invoke(u) as String? } catch (e: Exception) { null }
-                }, userData.let { (it as? Any)?.let { u ->
-                    try { (u.javaClass.getMethod("getPlan").invoke(u) as? String) == "advanced" } catch (e: Exception) { false }
-                } ?: false) { nav.navigate(it) { launchSingleTop = true } }
+    if (showBar) {
+        val u = currentUser
+        BottomBar(
+            route = route,
+            avatar = u?.avatar,
+            name = u?.name ?: "",
+            hasStar = (u?.plan == "advanced" || u?.plan == "basic")
+        ) { targetRoute ->
+            nav.navigate(targetRoute) {
+                popUpTo("chats") { saveState = true }
+                launchSingleTop = true
+                restoreState = true
             }
-        },
+        }
+    }
+},
     ) { padding ->
         Box(Modifier.padding(padding)) {
             NavHost(nav, startDestination = if (userId == null) "login" else "chats") {
                 screen("pricing") {
                     PricingScreen(
-                        onPay = { plan -> 
+                        onPay = { plan ->
                             if (userId == null) nav.navigate("signup")
-                            else nav.navigate("pay") // Or pass the plan to pay screen
-                        }, 
+                            else nav.navigate("pay")
+                        },
                         onBack = { nav.popBackStack() }
                     )
                 }

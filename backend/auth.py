@@ -33,6 +33,7 @@ class SignupRequest(BaseModel):
     phone: str = Field(..., pattern=r"^09\d{9}$")
     name: str = Field(..., min_length=2)
     password: str = Field(..., min_length=8)
+    code: str = Field(..., min_length=6, max_length=6, description="کد ۶ رقمی پیامک‌شده")
 
 def generate_otp_code() -> str:
     """تولید کد ۶ رقمی امن"""
@@ -163,14 +164,15 @@ async def login(request: LoginRequest):
 @router.post("/signup")
 async def signup(request: SignupRequest):
     """
-    ثبت نام کاربر جدید
+    ثبت نام کاربر جدید همراه با اعتبارسنجی کد پیامک
     POST /api/v1/auth/signup
     
     Body:
     {
         "phone": "09123456789",
         "name": "محمد",
-        "password": "رمزعبور"
+        "password": "رمزعبور",
+        "code": "123456"
     }
     """
     from main import SessionLocal, User
@@ -180,7 +182,30 @@ async def signup(request: SignupRequest):
     phone = request.phone
     name = request.name
     password = request.password
+    code = request.code
     
+    # ۱. بررسی صحت و انقضای کد تایید پیامک‌شده
+    stored_data = otp_storage.get(phone)
+    if not stored_data:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="کد تایید یافت نشد. لطفاً مجدداً درخواست ارسال کد پیامکی بدهید."
+        )
+    
+    if time.time() > stored_data["expires_at"]:
+        del otp_storage[phone]
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="کد تایید منقضی شده است. لطفاً کد جدید دریافت کنید."
+        )
+    
+    if stored_data["code"] != code:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="کد تایید وارد شده اشتباه است."
+        )
+    
+    # ۲. بررسی و ثبت در دیتابیس PostgreSQL
     db = SessionLocal()
     try:
         # تایید اینکه شماره قبلا ثبت نشده
@@ -190,6 +215,9 @@ async def signup(request: SignupRequest):
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="این شماره تلفن قبلا ثبت شده است."
             )
+        
+        # حذف کد استفاده‌شده از حافظه پس از تایید قطعی
+        del otp_storage[phone]
         
         # ایجاد کاربر جدید
         salt = secrets.token_hex(16)

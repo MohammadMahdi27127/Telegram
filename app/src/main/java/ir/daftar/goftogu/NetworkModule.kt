@@ -21,7 +21,7 @@ object NetworkModule {
     
     // Base URL pointing to Darkube backend
     // باید https باشد و با / ختم شود
-    private const val BASE_URL = "https://recamender.darkube.ir/api/v1/"
+    private const val BASE_URL = "https://recamender-backending.darkube.ir/api/v1/"
     
     // Lazy initialization of Retrofit instance
     private var retrofitInstance: Retrofit? = null
@@ -91,34 +91,3 @@ object NetworkModule {
         return getRetrofit().create(ApiService::class.java)
     }
 }
-
-/**
- * API models for request/response
- */
-data class OtpRequest(val phone: String)
-data class OtpVerifyRequest(val phone: String, val code: String)
-data class SignupRequest(val phone: String, val name: String, val password: String)
-data class LoginRequest(val phone: String, val password: String)
-
-data class OtpResponse(
-    val message: String,
-    val expires_in: Int? = null
-)
-
-data class VerifyResponse(
-    val message: String,
-    val status: String,
-    val user_id: String? = null
-)
-
-data class AuthResponse(
-    val message: String,
-    val user_id: String? = null,
-    val status: String
-)
-
-data class ErrorResponse(
-    val detail: String? = null,
-    val message: String? = null,
-    val error: String? = null
-)
