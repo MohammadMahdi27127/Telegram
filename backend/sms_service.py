@@ -11,43 +11,48 @@ logger = logging.getLogger(__name__)
 class SMSService:
     @staticmethod
     async def send_otp(phone: str, code: str) -> bool:
-        url = "https://rest.iranpayamak.com/v1/Messages/SendByBaseNumber"
+        """
+        ارسال پیامک با وب‌سرویس مدرن پترن فراز اس‌ام‌اس (IPPanel REST API)
+        """
+        url = "https://api2.ippanel.com/api/v1/sms/pattern/normal/send"
+
+        # پاکسازی ورودی‌ها
+        clean_phone = phone.strip()
+        api_key = str(settings.SMS_API_KEY).strip()
+        pattern_code = str(settings.SMS_PATTERN_CODE).strip()
+        sender_number = str(getattr(settings, "SMS_ORIGINATOR", "+983000505")).strip()
 
         headers = {
+            "apikey": api_key,
             "Content-Type": "application/json"
         }
 
-        # پاکسازی شماره تلفن
-        clean_phone = phone.strip()
-
         payload = {
-            "apikey": str(settings.SMS_API_KEY).strip(),
+            "code": pattern_code,
+            "sender": sender_number,
             "recipient": clean_phone,
-            "pattern_code": str(settings.SMS_PATTERN_CODE).strip(),
-            "input_data": [
-                {"code": str(code)}  # در صورتی که متغیر پترن شما در پنل %code% است
-            ]
+            "variable": {
+                "code": str(code)  # نام متغیر در متن پترن پنل فراز (مثلاً: کد شما: %code%)
+            }
         }
 
-        logger.info(f"Sending OTP to {clean_phone} with pattern {settings.SMS_PATTERN_CODE}")
+        logger.info(f"Sending OTP via FarazSMS to {clean_phone} using pattern {pattern_code}")
 
         async with httpx.AsyncClient(timeout=10.0) as client:
             try:
                 response = await client.post(url, json=payload, headers=headers)
-                logger.info(f"IranPayamak Response [{response.status_code}]: {response.text}")
+                logger.info(f"FarazSMS Response [{response.status_code}]: {response.text}")
 
-                if response.status_code in (200, 201):
-                    try:
-                        data = response.json()
-                        # در وب‌سرویس ایران‌پیامک status ممکن است 200 عددی یا success رشته‌ای باشد
-                        if data.get("status") in ("success", 200, "200") or data.get("code") in (200, "200") or "bulk_id" in data or "data" in data:
-                            return True
-                    except Exception:
+                if response.status_code == 200:
+                    data = response.json()
+                    # بررسی خروجی IPPanel/FarazSMS
+                    if data.get("status") == "OK" or "data" in data or data.get("code") == 200:
+                        logger.info(f"FarazSMS: OTP sent successfully to {clean_phone}")
                         return True
 
-                logger.error(f"IranPayamak Error Body: {response.text}")
+                logger.error(f"FarazSMS error status {response.status_code}: {response.text}")
                 return False
 
             except Exception as e:
-                logger.error(f"Network or Exception in SMSService: {e}", exc_info=True)
+                logger.error(f"Network error in FarazSMS: {e}", exc_info=True)
                 return False
