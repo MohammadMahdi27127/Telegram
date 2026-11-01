@@ -11,42 +11,43 @@ logger = logging.getLogger(__name__)
 class SMSService:
     @staticmethod
     async def send_otp(phone: str, code: str) -> bool:
-        """
-        ارسال کد اعتبارسنجی با استفاده از وب‌سرویس مدرن پترن فراز اس‌ام‌اس (IPPANEL REST API)
-        """
-        # آدرس استاندارد و نوین پترن در فراز اس‌ام‌اس
-        url = "https://api2.ippanel.com/api/v1/sms/pattern/normal/send"
-        
+        url = "https://rest.iranpayamak.com/v1/Messages/SendByBaseNumber"
+
         headers = {
-            "apikey": settings.SMS_API_KEY,
             "Content-Type": "application/json"
         }
-        
+
+        # پاکسازی شماره تلفن
+        clean_phone = phone.strip()
+
         payload = {
-            "code": settings.SMS_PATTERN_CODE,
-            "sender": settings.SMS_ORIGINATOR,
-            "recipient": phone,
-            "variable": {
-                "code": str(code)  # متغیری که در متن پترن پنل مشخص کردی (%code%)
-            }
+            "apikey": str(settings.SMS_API_KEY).strip(),
+            "recipient": clean_phone,
+            "pattern_code": str(settings.SMS_PATTERN_CODE).strip(),
+            "input_data": [
+                {"code": str(code)}  # در صورتی که متغیر پترن شما در پنل %code% است
+            ]
         }
+
+        logger.info(f"Sending OTP to {clean_phone} with pattern {settings.SMS_PATTERN_CODE}")
 
         async with httpx.AsyncClient(timeout=10.0) as client:
             try:
                 response = await client.post(url, json=payload, headers=headers)
-                
-                # بررسی موفقیت‌آمیز بودن پاسخ (کد وضعیت ۲۰۰)
-                if response.status_code == 200:
-                    data = response.json()
-                    logger.info(f"SMS successfully sent to {phone}. Response: {data}")
-                    return True
-                else:
-                    logger.error(f"Failed to send SMS to {phone}. Status: {response.status_code}, Body: {response.text}")
-                    return False
-                    
-            except httpx.RequestError as exc:
-                logger.error(f"Network error while requesting Faraz SMS: {exc}")
+                logger.info(f"IranPayamak Response [{response.status_code}]: {response.text}")
+
+                if response.status_code in (200, 201):
+                    try:
+                        data = response.json()
+                        # در وب‌سرویس ایران‌پیامک status ممکن است 200 عددی یا success رشته‌ای باشد
+                        if data.get("status") in ("success", 200, "200") or data.get("code") in (200, "200") or "bulk_id" in data or "data" in data:
+                            return True
+                    except Exception:
+                        return True
+
+                logger.error(f"IranPayamak Error Body: {response.text}")
                 return False
+
             except Exception as e:
-                logger.error(f"Unexpected error in SMSService: {str(e)}")
+                logger.error(f"Network or Exception in SMSService: {e}", exc_info=True)
                 return False

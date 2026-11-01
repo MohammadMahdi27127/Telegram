@@ -3,6 +3,9 @@ import logging
 import secrets
 import hashlib
 import time
+from typing import List, Optional
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends
+from sqlalchemy.orm import Session
 import uuid
 from contextlib import asynccontextmanager
 from typing import List
@@ -13,6 +16,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
+from pydantic import BaseModel
 
 # تنظیم لاگر در بالاترین نقطه فایل
 logging.basicConfig(level=logging.INFO)
@@ -73,6 +77,7 @@ class User(Base):
     monthly_download_count = Column(Integer, default=0)
     monthly_ai_usage_count = Column(Integer, default=0)
     last_quota_reset_month = Column(String)
+    tokens_used = Column(BigInteger, default=0)
 
 class Person(Base):
     __tablename__ = "people"
@@ -206,11 +211,42 @@ class ExportLog(Base):
     target_name = Column(String)
     records_count = Column(Integer)
 
+class Team(Base):
+    __tablename__ = "teams"
+    id = Column(String, primary_key=True)
+    name = Column(String, nullable=False)
+    description = Column(Text)
+    creator_id = Column(String, index=True)
+    created_at = Column(BigInteger, nullable=False)
+
+class TeamMember(Base):
+    __tablename__ = "team_members"
+    id = Column(String, primary_key=True)
+    team_id = Column(String, index=True)
+    user_id = Column(String, index=True)
+    role = Column(String, default="member")
+    joined_at = Column(BigInteger, nullable=False)
+
 # متد ساخت جداول
 def init_db():
     try:
         logger.info("Initializing database tables...")
         Base.metadata.create_all(bind=engine)
+        
+        # Ensure tokens_used column exists (PostgreSQL migration)
+        db = SessionLocal()
+        try:
+            db.execute("""
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS tokens_used BIGINT DEFAULT 0;
+            """)
+            db.commit()
+            logger.info("tokens_used column ensured in users table")
+        except Exception as e:
+            logger.warning(f"Could not add tokens_used column: {e}")
+            db.rollback()
+        finally:
+            db.close()
+        
         logger.info("Database tables created successfully.")
     except Exception as e:
         logger.error(f"Database initialization failed: {e}")
@@ -273,6 +309,14 @@ app.include_router(auth_router)
 from sync import router as sync_router
 app.include_router(sync_router, prefix="/api/v1")
 
+# روتر تیم‌ها
+from teams import router as teams_router
+app.include_router(teams_router, prefix="/api/v1")
+
+# روتر ادمین
+from admin import router as admin_router
+app.include_router(admin_router, prefix="/api/v1")
+
 # مدیریت اتصالات وب‌سوکت چت
 class ConnectionManager:
     def __init__(self):
@@ -304,3 +348,25 @@ async def websocket_endpoint(websocket: WebSocket):
             await manager.broadcast(data)
     except WebSocketDisconnect:
         manager.disconnect(websocket)
+
+class UserCheckRequest(BaseModel):
+    phone: str
+
+class UserCheckResponse(BaseModel):
+    exists: bool
+    user_id: Optional[str] = None
+    name: Optional[str] = None
+    username: Optional[str] = None
+
+@app.post("/api/v1/users/check", response_model=UserCheckResponse)
+def check_user_exists(payload: UserCheckRequest, db: Session = Depends(lambda: SessionLocal())):
+    clean_phone = payload.phone.strip().replace(" ", "")
+    user = db.query(User).filter(User.phone == clean_phone).first()
+    if user:
+        return UserCheckResponse(
+            exists=True,
+            user_id=user.id,
+            name=user.name,
+            username=user.username
+        )
+    return UserCheckResponse(exists=False)

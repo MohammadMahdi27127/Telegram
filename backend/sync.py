@@ -48,6 +48,15 @@ class SyncPersonItem(BaseModel):
 class SyncPeoplePayload(BaseModel):
     people: List[SyncPersonItem]
 
+# --- مدل‌های توکن‌ها ---
+class TokenUsageSyncItem(BaseModel):
+    user_id: str
+    tokens: int
+    occurred_at: int
+
+class TokenUsageSyncPayload(BaseModel):
+    usages: List[TokenUsageSyncItem]
+
 # مدل‌های فیش‌های واریزی
 class SyncSlipItem(BaseModel):
     id: str
@@ -214,3 +223,264 @@ def sync_ai_messages(payload: SyncAiPayload, db: Session = Depends(get_db)):
         db.rollback()
         logger.error(f"Error syncing AI messages: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+# ───────────────────────────────────────────────────────
+# ۵ بخش جدید: مدل‌های هوش مصنوعی، پشتیبانی، بنرها، اطلاعیه‌ها، خروجی‌ها
+# ───────────────────────────────────────────────────────
+
+# مدل‌های مربوط به AI Models
+class SyncAiModelItem(BaseModel):
+    id: str
+    name: str
+    endpoint: str
+    model_id: str
+    api_key: str
+    input_cost: float
+    output_cost: float
+    active: bool
+
+class SyncAiModelsPayload(BaseModel):
+    ai_models: List[SyncAiModelItem]
+
+# مدل‌های مربوط به Support Messages
+class SyncSupportMessageItem(BaseModel):
+    id: str
+    user_id: str
+    from_admin: bool
+    body: str
+    kind: str
+    path: Optional[str] = None
+    read_admin: bool = False
+    read_user: bool = False
+    created_at: int
+
+class SyncSupportMessagesPayload(BaseModel):
+    support_messages: List[SyncSupportMessageItem]
+
+# مدل‌های مربوط به Banners
+class SyncBannerItem(BaseModel):
+    id: str
+    title: str
+    body: str
+    image: Optional[str] = None
+    active: bool
+    created_at: int
+
+class SyncBannersPayload(BaseModel):
+    banners: List[SyncBannerItem]
+
+# مدل‌های مربوط به Announcements
+class SyncAnnouncementItem(BaseModel):
+    id: str
+    title: str
+    body: str
+    created_at: int
+
+class SyncAnnouncementsPayload(BaseModel):
+    announcements: List[SyncAnnouncementItem]
+
+# مدل‌های مربوط به Export Logs
+class SyncExportLogItem(BaseModel):
+    id: str
+    user_id: str
+    timestamp: int
+    file_type: str
+    target_name: str
+    records_count: int
+
+class SyncExportLogsPayload(BaseModel):
+    export_logs: List[SyncExportLogItem]
+
+# ۵. اندپوینت ثبت مدل‌های هوش مصنوعی
+@router.post("/ai-models", response_model=SyncResponse)
+def sync_ai_models(payload: SyncAiModelsPayload, db: Session = Depends(get_db)):
+    import main
+    AiModel = main.AiModel
+    try:
+        saved = 0
+        now_ms = int(time.time() * 1000)
+        for item in payload.ai_models:
+            existing = db.query(AiModel).filter(AiModel.id == item.id).first()
+            if existing:
+                existing.name = item.name
+                existing.endpoint = item.endpoint
+                existing.model_id = item.model_id
+                existing.api_key = item.api_key
+                existing.input_cost = item.input_cost
+                existing.output_cost = item.output_cost
+                existing.active = item.active
+            else:
+                db.add(AiModel(
+                    id=item.id,
+                    name=item.name,
+                    endpoint=item.endpoint,
+                    model_id=item.model_id,
+                    api_key=item.api_key,
+                    input_cost=item.input_cost,
+                    output_cost=item.output_cost,
+                    active=item.active,
+                    created_at=now_ms
+                ))
+            saved += 1
+        db.commit()
+        return SyncResponse(status="success", message="مدل‌های هوش مصنوعی با موفقیت ثبت شدند", saved_count=saved)
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error syncing AI models: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ۶. اندپوینت ثبت پیام‌های پشتیبانی
+@router.post("/support-messages", response_model=SyncResponse)
+def sync_support_messages(payload: SyncSupportMessagesPayload, db: Session = Depends(get_db)):
+    import main
+    SupportMessage = main.SupportMessage
+    try:
+        saved = 0
+        for item in payload.support_messages:
+            existing = db.query(SupportMessage).filter(SupportMessage.id == item.id).first()
+            if existing:
+                existing.body = item.body
+                existing.kind = item.kind
+                existing.path = item.path
+                existing.read_admin = item.read_admin
+                existing.read_user = item.read_user
+            else:
+                db.add(SupportMessage(
+                    id=item.id,
+                    user_id=item.user_id,
+                    from_admin=item.from_admin,
+                    body=item.body,
+                    kind=item.kind,
+                    path=item.path,
+                    read_admin=item.read_admin,
+                    read_user=item.read_user,
+                    created_at=item.created_at
+                ))
+            saved += 1
+        db.commit()
+        return SyncResponse(status="success", message="پیام‌های پشتیبانی با موفقیت ثبت شدند", saved_count=saved)
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error syncing support messages: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ۷. اندپوینت ثبت بنرها
+@router.post("/banners", response_model=SyncResponse)
+def sync_banners(payload: SyncBannersPayload, db: Session = Depends(get_db)):
+    import main
+    Banner = main.Banner
+    try:
+        saved = 0
+        for item in payload.banners:
+            existing = db.query(Banner).filter(Banner.id == item.id).first()
+            if existing:
+                existing.title = item.title
+                existing.body = item.body
+                existing.image = item.image
+                existing.active = item.active
+            else:
+                db.add(Banner(
+                    id=item.id,
+                    title=item.title,
+                    body=item.body,
+                    image=item.image,
+                    active=item.active,
+                    created_at=item.created_at
+                ))
+            saved += 1
+        db.commit()
+        return SyncResponse(status="success", message="بنرها با موفقیت ثبت شدند", saved_count=saved)
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error syncing banners: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ۸. اندپوینت ثبت اطلاعیه‌ها
+@router.post("/announcements", response_model=SyncResponse)
+def sync_announcements(payload: SyncAnnouncementsPayload, db: Session = Depends(get_db)):
+    import main
+    Announcement = main.Announcement
+    try:
+        saved = 0
+        for item in payload.announcements:
+            existing = db.query(Announcement).filter(Announcement.id == item.id).first()
+            if existing:
+                existing.title = item.title
+                existing.body = item.body
+            else:
+                db.add(Announcement(
+                    id=item.id,
+                    title=item.title,
+                    body=item.body,
+                    created_at=item.created_at
+                ))
+            saved += 1
+        db.commit()
+        return SyncResponse(status="success", message="اطلاعیه‌ها با موفقیت ثبت شدند", saved_count=saved)
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error syncing announcements: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ۹. اندپوینت ثبت لاگ‌های خروجی
+@router.post("/export-logs", response_model=SyncResponse)
+def sync_export_logs(payload: SyncExportLogsPayload, db: Session = Depends(get_db)):
+    import main
+    ExportLog = main.ExportLog
+    try:
+        saved = 0
+        for item in payload.export_logs:
+            existing = db.query(ExportLog).filter(ExportLog.id == item.id).first()
+            if not existing:
+                db.add(ExportLog(
+                    id=item.id,
+                    user_id=item.user_id,
+                    timestamp=item.timestamp,
+                    file_type=item.file_type,
+                    target_name=item.target_name,
+                    records_count=item.records_count
+                ))
+                saved += 1
+        db.commit()
+        return SyncResponse(status="success", message="لاگ‌های خروجی با موفقیت ثبت شدند", saved_count=saved)
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error syncing export logs: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ۹. اندپوینت ثبت مصرف توکن‌ها
+@router.post("/tokens", response_model=SyncResponse)
+def sync_tokens(payload: TokenUsageSyncPayload, db: Session = Depends(get_db)):
+    """
+    دریافت لیست مصرف توکن‌های کاربران و بروزرسانی مقدار tokens_used در جدول users
+    
+    ورودی:
+    {
+        "usages": [
+            {"user_id": "...", "tokens": 100, "occurred_at": 1698765432000},
+            ...
+        ]
+    }
+    """
+    import main
+    User = main.User
+    try:
+        saved = 0
+        for item in payload.usages:
+            user = db.query(User).filter(User.id == item.user_id).first()
+            if user:
+                # جمع مقدار توکن مصرفی
+                user.tokens_used = (user.tokens_used or 0) + item.tokens
+                saved += 1
+            else:
+                logger.warning(f"User {item.user_id} not found for token sync")
+        
+        db.commit()
+        logger.info(f"Successfully synced {saved} token usages")
+        return SyncResponse(status="success", message=f"مصرف {saved} کاربر با موفقیت ثبت شد", saved_count=saved)
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error syncing tokens: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+

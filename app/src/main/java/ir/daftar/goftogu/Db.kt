@@ -26,6 +26,7 @@ data class User(
     val monthlyDownloadCount: Int = 0,
     val monthlyAiUsageCount: Int = 0,
     val lastQuotaResetMonth: String? = null,
+    val tokensUsed: Long = 0L,
 )
 
 data class Person(
@@ -56,7 +57,24 @@ data class Team(
     val lastAt: Long,
 )
 
+data class TeamInfo(
+    val id: String,
+    val name: String,
+    val description: String? = null,
+    val creatorId: String,
+    val createdAt: Long,
+    val memberCount: Int = 0,
+)
+
 data class TeamMember(val id: String, val name: String, val contactId: String?, val isMe: Boolean)
+
+data class TeamMemberInfo(
+    val id: String,
+    val teamId: String,
+    val userId: String,
+    val role: String,
+    val joinedAt: Long,
+)
 
 data class Entry(
     val id: String,
@@ -119,7 +137,7 @@ data class AiMessage(val id: String, val personId: String, val role: String, val
 data class Member(val id: String, val name: String)
 data class Banner(val id: String, val title: String, val body: String, val image: String? = null)
 
-class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 17) {
+class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 18) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
             """CREATE TABLE users (
@@ -129,7 +147,7 @@ class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", 
                 username TEXT, created_at INTEGER,
                 monthly_download_count INTEGER NOT NULL DEFAULT 0,
                 monthly_ai_usage_count INTEGER NOT NULL DEFAULT 0,
-                last_quota_reset_month TEXT
+                last_quota_reset_month TEXT, tokens_used INTEGER NOT NULL DEFAULT 0
             )""",
         )
         db.execSQL(
@@ -162,6 +180,8 @@ class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", 
         db.execSQL("CREATE TABLE ai_messages (id TEXT PRIMARY KEY, user_id TEXT, person_id TEXT, role TEXT, body TEXT, image_path TEXT, created_at INTEGER)")
         db.execSQL("CREATE TABLE support_messages (id TEXT PRIMARY KEY, user_id TEXT, from_admin INTEGER NOT NULL DEFAULT 0, body TEXT, kind TEXT, path TEXT, read_admin INTEGER NOT NULL DEFAULT 0, read_user INTEGER NOT NULL DEFAULT 0, created_at INTEGER)")
         db.execSQL("CREATE TABLE IF NOT EXISTS export_logs (id TEXT PRIMARY KEY, user_id TEXT, timestamp INTEGER, file_type TEXT, target_name TEXT, records_count INTEGER)")
+        db.execSQL("CREATE TABLE IF NOT EXISTS teams (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, creator_id TEXT, created_at INTEGER NOT NULL)")
+        db.execSQL("CREATE TABLE IF NOT EXISTS team_members (id TEXT PRIMARY KEY, team_id TEXT, user_id TEXT, role TEXT DEFAULT 'member', joined_at INTEGER NOT NULL)")
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -186,6 +206,7 @@ class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", 
         if ("monthly_download_count" !in columns) db.execSQL("ALTER TABLE users ADD COLUMN monthly_download_count INTEGER NOT NULL DEFAULT 0")
         if ("monthly_ai_usage_count" !in columns) db.execSQL("ALTER TABLE users ADD COLUMN monthly_ai_usage_count INTEGER NOT NULL DEFAULT 0")
         if ("last_quota_reset_month" !in columns) db.execSQL("ALTER TABLE users ADD COLUMN last_quota_reset_month TEXT")
+        if ("tokens_used" !in columns) db.execSQL("ALTER TABLE users ADD COLUMN tokens_used INTEGER NOT NULL DEFAULT 0")
         db.execSQL("CREATE TABLE IF NOT EXISTS ai_models (id TEXT PRIMARY KEY, name TEXT, endpoint TEXT, model_id TEXT, api_key TEXT, input_cost REAL, output_cost REAL, active INTEGER NOT NULL DEFAULT 0, created_at INTEGER)")
         val modelColumns = db.rawQuery("PRAGMA table_info(ai_models)", null).use {
             val names = mutableListOf<String>()
@@ -220,6 +241,23 @@ class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", 
         db.execSQL("CREATE TABLE IF NOT EXISTS outbox (id TEXT PRIMARY KEY, kind TEXT, payload TEXT, created_at INTEGER)")
         db.execSQL("CREATE TABLE IF NOT EXISTS ai_messages (id TEXT PRIMARY KEY, user_id TEXT, person_id TEXT, role TEXT, body TEXT, image_path TEXT, created_at INTEGER)")
         db.execSQL("CREATE TABLE IF NOT EXISTS support_messages (id TEXT PRIMARY KEY, user_id TEXT, from_admin INTEGER NOT NULL DEFAULT 0, body TEXT, kind TEXT, path TEXT, read_admin INTEGER NOT NULL DEFAULT 0, read_user INTEGER NOT NULL DEFAULT 0, created_at INTEGER)")
+        db.execSQL("CREATE TABLE IF NOT EXISTS teams (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, creator_id TEXT, created_at INTEGER NOT NULL)")
+        db.execSQL("CREATE TABLE IF NOT EXISTS team_members (id TEXT PRIMARY KEY, team_id TEXT, user_id TEXT, role TEXT DEFAULT 'member', joined_at INTEGER NOT NULL)")
+    }
+
+    override fun onOpen(db: SQLiteDatabase) {
+        super.onOpen(db)
+        // اطمینان از وجود ستون tokens_used در جدول users
+        try {
+            val columns = db.rawQuery("PRAGMA table_info(users)", null).use { cursor ->
+                val list = mutableListOf<String>()
+                while (cursor.moveToNext()) list.add(cursor.getString(1))
+                list
+            }
+            if ("tokens_used" !in columns) {
+                db.execSQL("ALTER TABLE users ADD COLUMN tokens_used INTEGER NOT NULL DEFAULT 0")
+            }
+        } catch (_: Exception) {}
     }
 
     fun enqueue(kind: String, payload: String) {
@@ -257,8 +295,11 @@ class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", 
     }
 
     fun sendSupport(userId: String, fromAdmin: Boolean, body: String, kind: String = "text", path: String? = null) {
+        val messageId = UUID.randomUUID().toString()
+        val now = System.currentTimeMillis()
+        
         writableDatabase.insert("support_messages", null, ContentValues().apply {
-            put("id", UUID.randomUUID().toString())
+            put("id", messageId)
             put("user_id", userId)
             put("from_admin", if (fromAdmin) 1 else 0)
             put("body", body)
@@ -266,8 +307,22 @@ class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", 
             if (path == null) putNull("path") else put("path", path)
             put("read_admin", if (fromAdmin) 1 else 0)
             put("read_user", if (fromAdmin) 0 else 1)
-            put("created_at", System.currentTimeMillis())
+            put("created_at", now)
         })
+        
+        // افزودن به صف outbox جهت همگام‌سازی با سرور
+        val supportJson = org.json.JSONObject().apply {
+            put("id", messageId)
+            put("user_id", userId)
+            put("from_admin", fromAdmin)
+            put("body", body)
+            put("kind", kind)
+            if (path != null) put("path", path)
+            put("read_admin", fromAdmin)
+            put("read_user", !fromAdmin)
+            put("created_at", now)
+        }.toString()
+        enqueue("support_message", supportJson)
     }
 
     fun supportMessages(userId: String): List<SupportMessage> {
@@ -539,7 +594,7 @@ class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", 
 
     fun user(id: String): User? {
         val cursor = readableDatabase.rawQuery(
-            "SELECT id, phone, name, plan, balance, plan_expires_at, suspended, banner_seen, chat_bg, chat_color, avatar, username, monthly_download_count, monthly_ai_usage_count, last_quota_reset_month FROM users WHERE id=?",
+            "SELECT id, phone, name, plan, balance, plan_expires_at, suspended, banner_seen, chat_bg, chat_color, avatar, username, monthly_download_count, monthly_ai_usage_count, last_quota_reset_month, tokens_used FROM users WHERE id=?",
             arrayOf(id),
         )
         cursor.use {
@@ -570,6 +625,7 @@ class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", 
                 it.getInt(12),
                 it.getInt(13),
                 if (it.isNull(14)) null else it.getString(14),
+                if (it.isNull(15)) 0L else it.getLong(15),
             )
             return ensureQuotaReset(user)
         }
@@ -642,7 +698,10 @@ class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", 
     }
 
     fun people(userId: String): List<Person> {
-        val cursor = readableDatabase.rawQuery("SELECT id, name, phone, role, pinned, created_at, avatar, is_group, saved FROM people WHERE user_id=? ORDER BY pinned DESC, created_at DESC", arrayOf(userId))
+        val cursor = readableDatabase.rawQuery(
+            "SELECT id, name, phone, role, pinned, created_at, avatar, is_group, saved, archived FROM people WHERE user_id=? ORDER BY pinned DESC, created_at DESC",
+            arrayOf(userId)
+        )
         val list = mutableListOf<Person>()
         val day = startOfDay()
         cursor.use {
@@ -666,8 +725,28 @@ class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", 
                 }
                 val notes = readableDatabase.rawQuery("SELECT 1 FROM entries WHERE person_id=? AND kind='note' LIMIT 1", arrayOf(id))
                 val hasNote = notes.use { n -> n.moveToFirst() }
-                val unread = readableDatabase.rawQuery("SELECT COUNT(*) FROM entries WHERE person_id=? AND occurred_at>=?", arrayOf(id, day.toString())).use { row -> if (row.moveToFirst()) row.getInt(0) else 0 }
-                list += Person(id, it.getString(1), it.getString(2) ?: "", it.getString(3) ?: "", it.getInt(4) == 1, body, at, kind, channel, hasNote, if (it.isNull(6)) null else it.getString(6), unread, it.getInt(7) == 1, it.getInt(8) == 1)
+                val unread = readableDatabase.rawQuery(
+                    "SELECT COUNT(*) FROM entries WHERE person_id=? AND occurred_at>=?",
+                    arrayOf(id, day.toString())
+                ).use { row -> if (row.moveToFirst()) row.getInt(0) else 0 }
+
+                list += Person(
+                    id = id,
+                    name = it.getString(1),
+                    phone = it.getString(2) ?: "",
+                    role = it.getString(3) ?: "",
+                    pinned = it.getInt(4) == 1,
+                    lastBody = body,
+                    lastAt = at,
+                    lastKind = kind,
+                    lastChannel = channel,
+                    hasNote = hasNote,
+                    avatar = if (it.isNull(6)) null else it.getString(6),
+                    unread = unread,
+                    isGroup = it.getInt(7) == 1,
+                    saved = it.getInt(8) == 1,
+                    archived = it.getInt(9) == 1 // خواندن مقدار واقعی بایگانی
+                )
             }
         }
         return list.sortedWith(compareByDescending<Person> { it.pinned }.thenByDescending { it.lastAt })
@@ -814,6 +893,15 @@ class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", 
 
     fun updatePersonArchived(personId: String, archived: Boolean) {
         writableDatabase.update("people", ContentValues().apply { put("archived", if (archived) 1 else 0) }, "id=?", arrayOf(personId))
+        
+        // اضافه کردن تغییر بایگانی به صف outbox برای همگام‌سازی با سرور
+        val archiveJson = org.json.JSONObject().apply {
+            put("id", personId)
+            put("action", "archive")
+            put("archived", archived)
+            put("created_at", System.currentTimeMillis())
+        }.toString()
+        enqueue("person", archiveJson)
     }
 
     fun entries(personId: String): List<Entry> {
@@ -873,10 +961,6 @@ class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", 
             }
         }
         return list
-    }
-
-    fun addTeam(userId: String, name: String, description: String, members: List<String>) {
-        addPerson(userId, name, "", description, members = members)
     }
 
     fun quota(user: User): Pair<Int, Int> {
@@ -991,14 +1075,28 @@ writableDatabase.insert("entries", null, ContentValues().apply {
     }
 
     fun addExportLog(userId: String, fileType: String, targetName: String, count: Int) {
+        val id = UUID.randomUUID().toString()
+        val now = System.currentTimeMillis()
+        
         writableDatabase.insert("export_logs", null, ContentValues().apply {
-            put("id", UUID.randomUUID().toString())
+            put("id", id)
             put("user_id", userId)
-            put("timestamp", System.currentTimeMillis())
+            put("timestamp", now)
             put("file_type", fileType)
             put("target_name", targetName)
             put("records_count", count)
         })
+        
+        // افزودن به صف outbox جهت همگام‌سازی با سرور
+        val exportLogJson = org.json.JSONObject().apply {
+            put("id", id)
+            put("user_id", userId)
+            put("timestamp", now)
+            put("file_type", fileType)
+            put("target_name", targetName)
+            put("records_count", count)
+        }.toString()
+        enqueue("export_log", exportLogJson)
     }
 
     fun exportLogs(userId: String): List<ExportLog> = readableDatabase.rawQuery("SELECT id, user_id, timestamp, file_type, target_name, records_count FROM export_logs WHERE user_id=? ORDER BY timestamp DESC", arrayOf(userId)).use {
@@ -1020,10 +1118,17 @@ writableDatabase.insert("entries", null, ContentValues().apply {
                 val price = if (isSeasonal) 2_500_000 else 1_000_000
                 val durationDays = if (isSeasonal) 90L else 30L
                 val expires = System.currentTimeMillis() + durationDays * 24 * 60 * 60 * 1000
+                
+                // تحدید نوع پلن بر اساس شناسه فیش
+                val planName = when {
+                    slip.plan.contains("monthly") -> "plus"
+                    slip.plan.contains("seasonal") -> "smart"
+                    else -> "advanced"
+                }
 
                 writableDatabase.execSQL(
                     "UPDATE users SET balance = balance - ?, plan=?, plan_expires_at=? WHERE id=?",
-                    arrayOf<Any>(price.toLong(), "advanced", expires, slip.userId),
+                    arrayOf<Any>(price.toLong(), planName, expires, slip.userId),
                 )
                 addNotice(slip.userId, "اشتراک فعال شد", "اشتراک ${slip.plan} با موفقیت فعال شد و قابلیت تیم‌ها باز گردید.")
             }
@@ -1050,10 +1155,20 @@ writableDatabase.insert("entries", null, ContentValues().apply {
 
     fun deletePerson(personId: String) {
         val db = writableDatabase
+        
+        // حذف تمام داده‌های مرتبط
         db.delete("entries", "person_id=?", arrayOf(personId))
         db.delete("members", "person_id=?", arrayOf(personId))
         db.delete("ai_messages", "person_id=?", arrayOf(personId))
         db.delete("people", "id=?", arrayOf(personId))
+        
+        // اضافه کردن حذف به صف outbox برای همگام‌سازی با سرور
+        val deleteJson = org.json.JSONObject().apply {
+            put("id", personId)
+            put("action", "delete")
+            put("created_at", System.currentTimeMillis())
+        }.toString()
+        enqueue("person", deleteJson)
     }
 
     fun notices(userId: String): List<Notice> {
@@ -1071,16 +1186,31 @@ writableDatabase.insert("entries", null, ContentValues().apply {
 
     fun saveBanner(title: String, body: String, image: String? = null) {
         if (title.isBlank() || body.isBlank()) error("عنوان و متن بنر لازم است")
+        
+        val bannerId = UUID.randomUUID().toString()
+        val now = System.currentTimeMillis()
+        
         writableDatabase.delete("banners", null, null)
         writableDatabase.insert("banners", null, ContentValues().apply {
-            put("id", UUID.randomUUID().toString())
+            put("id", bannerId)
             put("title", title.trim())
             put("body", body.trim())
             if (image == null) putNull("image") else put("image", image)
             put("active", 1)
-            put("created_at", System.currentTimeMillis())
+            put("created_at", now)
         })
         writableDatabase.execSQL("UPDATE users SET banner_seen = 0")
+        
+        // افزودن به صف outbox جهت همگام‌سازی با سرور
+        val bannerJson = org.json.JSONObject().apply {
+            put("id", bannerId)
+            put("title", title.trim())
+            put("body", body.trim())
+            if (image != null) put("image", image)
+            put("active", 1)
+            put("created_at", now)
+        }.toString()
+        enqueue("banner", bannerJson)
     }
 
     fun activeBanner(): Banner? {
@@ -1217,7 +1347,9 @@ writableDatabase.insert("entries", null, ContentValues().apply {
     fun addModel(name: String, endpoint: String, modelId: String, apiKey: String, inputCost: Double, outputCost: Double) {
         if (name.isBlank() || modelId.isBlank()) error("نام و شناسه مدل لازم است")
         val id = UUID.randomUUID().toString()
+        val now = System.currentTimeMillis()
         val makeActive = models().none { it.active }
+        
         writableDatabase.insert("ai_models", null, ContentValues().apply {
             put("id", id)
             put("name", name.trim())
@@ -1227,8 +1359,22 @@ writableDatabase.insert("entries", null, ContentValues().apply {
             put("input_cost", inputCost)
             put("output_cost", outputCost)
             put("active", if (makeActive) 1 else 0)
-            put("created_at", System.currentTimeMillis())
+            put("created_at", now)
         })
+        
+        // افزودن به صف outbox جهت همگام‌سازی با سرور
+        val modelJson = org.json.JSONObject().apply {
+            put("id", id)
+            put("name", name.trim())
+            put("endpoint", endpoint.trim().ifBlank { "https://api.openai.com/v1" })
+            put("model_id", modelId.trim())
+            put("api_key", apiKey.trim())
+            put("input_cost", inputCost)
+            put("output_cost", outputCost)
+            put("active", if (makeActive) 1 else 0)
+            put("created_at", now)
+        }.toString()
+        enqueue("ai_model", modelJson)
     }
 
     fun activateModel(id: String) {
@@ -1260,17 +1406,172 @@ writableDatabase.insert("entries", null, ContentValues().apply {
 
     fun publishAnnouncement(title: String, body: String) {
         if (title.isBlank() || body.isBlank()) error("عنوان و متن لازم است")
+        
+        val announcementId = UUID.randomUUID().toString()
+        val now = System.currentTimeMillis()
+        
         writableDatabase.insert("announcements", null, ContentValues().apply {
-            put("id", UUID.randomUUID().toString())
+            put("id", announcementId)
             put("title", title.trim())
             put("body", body.trim())
-            put("created_at", System.currentTimeMillis())
+            put("created_at", now)
         })
         users().forEach { addNotice(it.id, title.trim(), body.trim()) }
+        
+        // افزودن به صف outbox جهت همگام‌سازی با سرور
+        val announcementJson = org.json.JSONObject().apply {
+            put("id", announcementId)
+            put("title", title.trim())
+            put("body", body.trim())
+            put("created_at", now)
+        }.toString()
+        enqueue("announcement", announcementJson)
     }
 
     fun deleteAnnouncement(id: String) {
         writableDatabase.delete("announcements", "id=?", arrayOf(id))
+    }
+
+    // --- تیم‌ها و گفتگوهای گروهی ---
+    
+    fun addTeam(name: String, description: String? = null, creatorId: String, memberIds: List<String>): String {
+        val teamId = UUID.randomUUID().toString()
+        val now = System.currentTimeMillis()
+        
+        // درج تیم
+        writableDatabase.insert("teams", null, ContentValues().apply {
+            put("id", teamId)
+            put("name", name.trim())
+            put("description", description?.trim())
+            put("creator_id", creatorId)
+            put("created_at", now)
+        })
+        
+        // افزودن سازنده به عنوان عضو
+        writableDatabase.insert("team_members", null, ContentValues().apply {
+            put("id", UUID.randomUUID().toString())
+            put("team_id", teamId)
+            put("user_id", creatorId)
+            put("role", "creator")
+            put("joined_at", now)
+        })
+        
+        // افزودن سایر اعضا
+        for (userId in memberIds) {
+            if (userId != creatorId) {  // جلوگیری از تکرار سازنده
+                writableDatabase.insert("team_members", null, ContentValues().apply {
+                    put("id", UUID.randomUUID().toString())
+                    put("team_id", teamId)
+                    put("user_id", userId)
+                    put("role", "member")
+                    put("joined_at", now)
+                })
+            }
+        }
+        
+        return teamId
+    }
+    
+    fun getTeams(userId: String): List<TeamInfo> {
+        val query = """
+            SELECT t.id, t.name, t.description, t.creator_id, t.created_at,
+                   (SELECT COUNT(*) FROM team_members WHERE team_id = t.id) as member_count
+            FROM teams t
+            INNER JOIN team_members tm ON t.id = tm.team_id
+            WHERE tm.user_id = ?
+            ORDER BY t.created_at DESC
+        """
+        val cursor = readableDatabase.rawQuery(query, arrayOf(userId))
+        val teams = mutableListOf<TeamInfo>()
+        
+        cursor.use {
+            while (it.moveToNext()) {
+                teams.add(TeamInfo(
+                    id = it.getString(0),
+                    name = it.getString(1),
+                    description = if (it.isNull(2)) null else it.getString(2),
+                    creatorId = it.getString(3),
+                    createdAt = it.getLong(4),
+                    memberCount = it.getInt(5)
+                ))
+            }
+        }
+        
+        return teams
+    }
+    
+    fun getTeamInfo(teamId: String): TeamInfo? {
+        val cursor = readableDatabase.rawQuery(
+            """
+            SELECT t.id, t.name, t.description, t.creator_id, t.created_at,
+                   COUNT(tm.id) as member_count
+            FROM teams t
+            LEFT JOIN team_members tm ON t.id = tm.team_id
+            WHERE t.id = ?
+            GROUP BY t.id
+            """,
+            arrayOf(teamId)
+        )
+        
+        return cursor.use {
+            if (it.moveToFirst()) {
+                TeamInfo(
+                    id = it.getString(0),
+                    name = it.getString(1),
+                    description = if (it.isNull(2)) null else it.getString(2),
+                    creatorId = it.getString(3),
+                    createdAt = it.getLong(4),
+                    memberCount = it.getInt(5)
+                )
+            } else null
+        }
+    }
+    
+    fun getTeamMembers(teamId: String): List<TeamMemberInfo> {
+        val cursor = readableDatabase.rawQuery(
+            "SELECT id, team_id, user_id, role, joined_at FROM team_members WHERE team_id = ? ORDER BY joined_at",
+            arrayOf(teamId)
+        )
+        val members = mutableListOf<TeamMemberInfo>()
+        
+        cursor.use {
+            while (it.moveToNext()) {
+                members.add(TeamMemberInfo(
+                    id = it.getString(0),
+                    teamId = it.getString(1),
+                    userId = it.getString(2),
+                    role = it.getString(3),
+                    joinedAt = it.getLong(4)
+                ))
+            }
+        }
+        
+        return members
+    }
+    
+    fun addTeamMember(teamId: String, userId: String, role: String = "member") {
+        writableDatabase.insert("team_members", null, ContentValues().apply {
+            put("id", UUID.randomUUID().toString())
+            put("team_id", teamId)
+            put("user_id", userId)
+            put("role", role)
+            put("joined_at", System.currentTimeMillis())
+        })
+    }
+    
+    fun deleteTeam(teamId: String) {
+        writableDatabase.beginTransaction()
+        try {
+            writableDatabase.delete("team_members", "team_id = ?", arrayOf(teamId))
+            writableDatabase.delete("teams", "id = ?", arrayOf(teamId))
+            writableDatabase.setTransactionSuccessful()
+        } finally {
+            writableDatabase.endTransaction()
+        }
+    }
+    
+    fun removeTeamMember(teamId: String, userId: String) {
+        writableDatabase.delete("team_members", "team_id = ? AND user_id = ?", arrayOf(teamId, userId))
     }
 
     private fun startOfDay(): Long {
@@ -1281,5 +1582,96 @@ writableDatabase.insert("entries", null, ContentValues().apply {
         calendar.set(Calendar.MILLISECOND, 0)
         return calendar.timeInMillis
     }
-}
 
+    // --- توکن‌ها و داشبورد مدیریت ---
+
+    fun getTotalTokensUsed(): Long {
+        val cursor = readableDatabase.rawQuery("SELECT COALESCE(SUM(tokens_used), 0) FROM users", null)
+        return cursor.use {
+            if (it.moveToFirst()) it.getLong(0) else 0L
+        }
+    }
+
+    fun incrementUserTokens(userId: String, tokens: Long) {
+        // ۱. بروزرسانی در دیتابیس لوکال
+        writableDatabase.execSQL(
+            "UPDATE users SET tokens_used = tokens_used + ? WHERE id = ?",
+            arrayOf<Any>(tokens, userId)
+        )
+
+        // ۲. افزودن به صف outbox جهت ارسال به سرور
+        val payloadJson = org.json.JSONObject().apply {
+            put("user_id", userId)
+            put("tokens", tokens)
+            put("occurred_at", System.currentTimeMillis())
+        }.toString()
+
+        enqueue("token_usage", payloadJson)
+    }
+
+    fun getUsersAdminList(query: String = "", sortBy: String = "highest_usage", planFilter: String = "all"): List<User> {
+        var sqlQuery = "SELECT id, phone, name, plan, balance, plan_expires_at, suspended, banner_seen, chat_bg, chat_color, avatar, username, monthly_download_count, monthly_ai_usage_count, last_quota_reset_month, tokens_used FROM users WHERE 1=1"
+        val args = mutableListOf<String>()
+
+        // فیلتر جستجو
+        if (query.isNotBlank()) {
+            sqlQuery += " AND (name LIKE ? OR phone LIKE ? OR id LIKE ?)"
+            val searchPattern = "%${query.trim()}%"
+            args.add(searchPattern)
+            args.add(searchPattern)
+            args.add(searchPattern)
+        }
+
+        // فیلتر پلن
+        if (planFilter != "all") {
+            sqlQuery += " AND plan = ?"
+            args.add(planFilter)
+        }
+
+        // مرتب‌سازی
+        sqlQuery += when (sortBy) {
+            "lowest_usage" -> " ORDER BY tokens_used ASC"
+            "newest" -> " ORDER BY created_at DESC"
+            else -> " ORDER BY tokens_used DESC"  // highest_usage (پیش‌فرض)
+        }
+
+        val cursor = readableDatabase.rawQuery(sqlQuery, if (args.isEmpty()) null else args.toTypedArray())
+        val users = mutableListOf<User>()
+
+        cursor.use {
+            while (it.moveToNext()) {
+                val rawPlan = it.getString(3) ?: "free"
+                val expires = if (it.isNull(5)) null else it.getLong(5)
+                val isExpired = expires != null && expires < System.currentTimeMillis()
+
+                val plan = when {
+                    isExpired && rawPlan == "guest" -> "expired_guest"
+                    isExpired -> "free"
+                    else -> rawPlan
+                }
+
+                val user = User(
+                    id = it.getString(0),
+                    phone = it.getString(1) ?: "",
+                    name = it.getString(2) ?: "",
+                    plan = plan,
+                    balance = it.getInt(4),
+                    planExpiresAt = expires,
+                    suspended = it.getInt(6) == 1,
+                    bannerSeen = it.getInt(7) == 1,
+                    chatBg = if (it.isNull(8)) null else it.getString(8),
+                    chatColor = if (it.isNull(9)) null else it.getString(9),
+                    avatar = if (it.isNull(10)) null else it.getString(10),
+                    username = if (it.isNull(11)) null else it.getString(11),
+                    monthlyDownloadCount = it.getInt(12),
+                    monthlyAiUsageCount = it.getInt(13),
+                    lastQuotaResetMonth = if (it.isNull(14)) null else it.getString(14),
+                    tokensUsed = if (it.isNull(15)) 0L else it.getLong(15),
+                )
+                users.add(user)
+            }
+        }
+
+        return users
+    }
+}

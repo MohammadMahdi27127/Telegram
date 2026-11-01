@@ -152,7 +152,9 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Divider
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FabPosition
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -718,45 +720,283 @@ fun TeamsScreen(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddTeamSheet(app: App, userId: String, onClose: () -> Unit, onSaved: () -> Unit) {
-    var name by remember { mutableStateOf("") }
-    var desc by remember { mutableStateOf("") }
-    var selectedContacts by remember { mutableStateOf(setOf<String>()) }
-    val contacts = remember { app.db.people(userId).filter { !it.isGroup } }
-    val palette = LocalTg.current
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    
+    var teamName by remember { mutableStateOf("") }
+    var teamDesc by remember { mutableStateOf("") }
+    var phoneInput by remember { mutableStateOf("") }
+    var selectedMembers by remember { mutableStateOf<Set<UserCheckResponse>>(setOf()) }
     var error by remember { mutableStateOf("") }
+    var loading by remember { mutableStateOf(false) }
+    var checkingUser by remember { mutableStateOf(false) }
+    var lastCheckedPhone by remember { mutableStateOf("") }
+    var lastCheckResult by remember { mutableStateOf<UserCheckResponse?>(null) }
+    
+    val palette = LocalTg.current
+    val dark = palette.dark
+    val card = if (dark) Color(0xFF1E293B) else Color.White
+    val ink = if (dark) Color.White else Color(0xFF111827)
+    
+    val api = NetworkModule.getApiService()
+    
+    fun checkUserExists() {
+        if (phoneInput.isBlank()) {
+            error = "شماره تلفن یا نام کاربری را وارد کنید"
+            return
+        }
+        
+        if (phoneInput == lastCheckedPhone && lastCheckResult != null) {
+            return
+        }
+        
+        checkingUser = true
+        error = ""
+        
+        scope.launch {
+            try {
+                val response = api.checkUserExists(UserCheckRequest(phone = phoneInput.trim()))
+                if (response.isSuccessful) {
+                    val result = response.body()
+                    if (result != null) {
+                        lastCheckResult = result
+                        lastCheckedPhone = phoneInput
+                        if (!result.exists) {
+                            error = "این کاربر در دفتر گفتگو ثبت‌نام نکرده است"
+                        }
+                    }
+                } else {
+                    error = "خطا در بررسی کاربر"
+                }
+            } catch (e: Exception) {
+                error = "خطا در اتصال: ${e.message}"
+            } finally {
+                checkingUser = false
+            }
+        }
+    }
+    
+    fun addUserToTeam() {
+        val result = lastCheckResult
+        if (result != null && result.exists && result.userId != null) {
+            if (selectedMembers.any { it.userId == result.userId }) {
+                error = "این کاربر قبلاً انتخاب شده است"
+                return
+            }
+            selectedMembers = selectedMembers + result
+            phoneInput = ""
+            lastCheckedPhone = ""
+            lastCheckResult = null
+            error = ""
+        } else {
+            error = "ابتدا کاربر را تایید کنید"
+        }
+    }
+    
+    fun sendInvitationSms() {
+        val phone = phoneInput.trim()
+        if (phone.isBlank()) {
+            error = "شماره تلفن را وارد کنید"
+            return
+        }
+        
+        val smsBody = "سلام! من در اپلیکیشن دفتر گفتگو منتظر شما هستم. برای نصب و شروع گفتگو از لینک زیر اقدام کنید:\n\nhttps://recamender.darkube.ir/"
+        val intent = Intent(Intent.ACTION_SENDTO).apply {
+            data = Uri.parse("smsto:$phone")
+            putExtra("sms_body", smsBody)
+        }
+        try {
+            context.startActivity(intent)
+            phoneInput = ""
+            lastCheckedPhone = ""
+            lastCheckResult = null
+        } catch (e: Exception) {
+            error = "اپلیکیشن SMS موجود نیست"
+        }
+    }
+    
+    fun createTeam() {
+        if (teamName.isBlank()) {
+            error = "نام تیم را وارد کنید"
+            return
+        }
+        
+        if (selectedMembers.isEmpty()) {
+            error = "حداقل یک عضو را انتخاب کنید"
+            return
+        }
+        
+        loading = true
+        error = ""
+        
+        scope.launch {
+            try {
+                val memberIds = selectedMembers.mapNotNull { it.userId }
+                val createReq = CreateTeamRequest(
+                    name = teamName.trim(),
+                    description = teamDesc.trim().ifBlank { null },
+                    creatorId = userId,
+                    memberUserIds = memberIds
+                )
+                
+                val response = api.createTeam(createReq)
+                
+                if (response.isSuccessful && response.body() != null) {
+                    // ذخیره در دیتابیس لوکال
+                    val team = response.body()!!
+                    app.db.addTeam(
+                        name = team.name,
+                        description = team.description,
+                        creatorId = team.creatorId,
+                        memberIds = memberIds
+                    )
+                    
+                    onSaved()
+                } else {
+                    error = "خطا در ساخت تیم"
+                }
+            } catch (e: Exception) {
+                error = "خطا: ${e.message ?: "نامشخص"}"
+            } finally {
+                loading = false
+            }
+        }
+    }
 
-    ModalBottomSheet(onDismissRequest = onClose, containerColor = palette.surface) {
-        Column(Modifier.padding(24.dp).fillMaxWidth()) {
-            Text("ایجاد تیم جدید", color = palette.text, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+    ModalBottomSheet(onDismissRequest = onClose, containerColor = card, scrimColor = Color.Black.copy(alpha = 0.32f)) {
+        Column(Modifier.fillMaxWidth().padding(24.dp).padding(bottom = 24.dp)) {
+            Text("ایجاد تیم جدید", color = ink, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+            
+            // نام تیم
             OutlinedTextField(
-                value = name,
-                onValueChange = { name = it },
+                value = teamName,
+                onValueChange = { teamName = it },
                 label = { Text("نام تیم") },
                 modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
-                shape = RoundedCornerShape(12.dp)
+                shape = RoundedCornerShape(12.dp),
+                enabled = !loading
             )
+            
+            // توضیحات
             OutlinedTextField(
-                value = desc,
-                onValueChange = { desc = it },
+                value = teamDesc,
+                onValueChange = { teamDesc = it },
                 label = { Text("توضیحات (اختیاری)") },
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                shape = RoundedCornerShape(12.dp)
+                shape = RoundedCornerShape(12.dp),
+                enabled = !loading
             )
-            Text("انتخاب اعضا", color = palette.text, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 16.dp))
-            Text("تنها کاربران دارای اشتراک پلاس می‌تواند عضو تیم شوند", color = Color(0xFF64748B), fontSize = 12.sp, modifier = Modifier.padding(bottom = 8.dp))
-            LazyColumn(Modifier.heightIn(max = 200.dp).padding(top = 8.dp)) {
-                items(contacts) { contact ->
-                    Row(
-                        Modifier.fillMaxWidth().clickable {
-                            selectedContacts = if (contact.id in selectedContacts) selectedContacts - contact.id else selectedContacts + contact.id
-                        }.padding(vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Checkbox(checked = contact.id in selectedContacts, onCheckedChange = null)
-                        Text(contact.name, modifier = Modifier.padding(start = 12.dp), color = palette.text)
+            
+            // بخش انتخاب اعضا
+            Text("انتخاب اعضا", color = ink, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 16.dp))
+            Text("تنها کاربران ثبت‌شده می‌توانند اضافه شوند", color = Color(0xFF64748B), fontSize = 12.sp, modifier = Modifier.padding(bottom = 8.dp))
+            
+            // جستجو و بررسی کاربر
+            Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(
+                    value = phoneInput,
+                    onValueChange = { phoneInput = it },
+                    label = { Text("شماره یا نام کاربری") },
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(12.dp),
+                    enabled = !checkingUser && !loading
+                )
+                
+                Button(
+                    onClick = { checkUserExists() },
+                    modifier = Modifier.height(56.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    enabled = phoneInput.isNotBlank() && !checkingUser && !loading
+                ) {
+                    if (checkingUser) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = Color.White)
+                    } else {
+                        Text("بررسی")
                     }
                 }
             }
+            
+            // نتیجه بررسی
+            if (lastCheckResult != null) {
+                if (lastCheckResult!!.exists) {
+                    // کاربر موجود است
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color(0xFFECFDF5))
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Filled.Check, null, tint = Color(0xFF059669), modifier = Modifier.size(24.dp))
+                        Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                            Text(lastCheckResult!!.name ?: "کاربر", color = Color(0xFF111827), fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            Text("کاربر ثبت‌شده است", color = Color(0xFF059669), fontSize = 12.sp)
+                        }
+                        Button(
+                            onClick = { addUserToTeam() },
+                            modifier = Modifier.height(40.dp),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("افزودن", fontSize = 12.sp)
+                        }
+                    }
+                } else {
+                    // کاربر موجود نیست
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color(0xFFFEF2F2))
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Filled.Email, null, tint = Color(0xFFDC2626), modifier = Modifier.size(24.dp))
+                        Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                            Text("کاربری ثبت‌نام نکرده", color = Color(0xFF111827), fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            Text("می‌توانید دعوت‌نامه SMS بفرستید", color = Color(0xFFDC2626), fontSize = 12.sp)
+                        }
+                        Button(
+                            onClick = { sendInvitationSms() },
+                            modifier = Modifier.height(40.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626))
+                        ) {
+                            Text("دعوت", fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
+            
+            // اعضای انتخاب‌شده
+            if (selectedMembers.isNotEmpty()) {
+                Text("اعضای انتخاب‌شده (${selectedMembers.size})", color = ink, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 16.dp))
+                LazyColumn(Modifier.heightIn(max = 150.dp).padding(top = 8.dp)) {
+                    items(selectedMembers.toList()) { member ->
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 8.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Color(0xFFF1F5F9))
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(member.name ?: "کاربر", color = ink, fontSize = 14.sp, modifier = Modifier.weight(1f))
+                            IconButton(
+                                onClick = { selectedMembers = selectedMembers.filter { it.userId != member.userId }.toSet() },
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(Icons.Filled.Close, null, tint = Color(0xFF6B7280), modifier = Modifier.size(18.dp))
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // پیام خطا
             if (error.isNotEmpty()) {
                 Text(
                     error,
@@ -765,22 +1005,20 @@ fun AddTeamSheet(app: App, userId: String, onClose: () -> Unit, onSaved: () -> U
                     modifier = Modifier.padding(top = 12.dp).fillMaxWidth()
                 )
             }
+            
+            // دکمه ایجاد
             Button(
-                onClick = {
-                    if (name.isNotBlank()) {
-                        try {
-                            app.db.addTeam(userId, name, desc, selectedContacts.toList())
-                            onSaved()
-                        } catch (e: Exception) {
-                            error = e.message ?: "خطای نامشخص"
-                        }
-                    }
-                },
-                modifier = Modifier.fillMaxWidth().padding(top = 24.dp, bottom = 16.dp),
+                onClick = { createTeam() },
+                modifier = Modifier.fillMaxWidth().padding(top = 24.dp).height(52.dp),
                 shape = RoundedCornerShape(16.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Blue)
+                colors = ButtonDefaults.buttonColors(containerColor = Blue),
+                enabled = !loading && teamName.isNotBlank() && selectedMembers.isNotEmpty()
             ) {
-                Text("ایجاد تیم", fontWeight = FontWeight.Bold)
+                if (loading) {
+                    CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = Color.White)
+                } else {
+                    Text("ایجاد تیم", fontWeight = FontWeight.Bold)
+                }
             }
         }
     }
@@ -2273,6 +2511,18 @@ fun ChatsScreen(
     var filter by remember { mutableStateOf("all") }
     var menu by remember { mutableStateOf(false) }
     var alert by remember { mutableStateOf<Pair<String, String>?>(null) }
+
+    // فیلتر بر اساس تب فعال و مخفی‌سازی چت‌های بایگانی‌شده در تب‌های عادی
+    val filteredPeople = remember(people, filter) {
+        when (filter) {
+            "archived", "بایگانی" -> people.filter { it.archived }
+            "chats", "گفتگوها" -> people.filter { !it.archived && !it.isGroup && !it.saved }
+            "notes", "یادداشت‌ها" -> people.filter { !it.archived && it.hasNote }
+            "saved", "پرونده‌ها" -> people.filter { !it.archived && it.saved }
+            else -> people.filter { !it.archived } // تب «همه»
+        }
+    }
+
     val account = app.db.user(userId)
     LaunchedEffect(openComposer, draftPhone) {
         if (openComposer) {
@@ -2729,15 +2979,18 @@ fun ChatsScreen(
                             
                             when (result) {
                                 SnackbarResult.ActionPerformed -> {
-                                    // Undo delete - restore the person
-                                    // No need to restore since we haven't deleted yet
+                                    // Undo delete - restoration would require additional logic
                                     snackbarVisible = false
                                     deletedPersonId = null
                                 }
                                 SnackbarResult.Dismissed -> {
                                     // Actually delete after snackbar timeout
-                                    app.db.deletePerson(person.id)
-                                    people = app.db.people(userId)
+                                    try {
+                                        app.db.deletePerson(person.id)
+                                        people = app.db.people(userId)
+                                    } catch (e: Exception) {
+                                        snackbarMessage = "خطا در حذف: ${e.message ?: "نامشخص"}"
+                                    }
                                     snackbarVisible = false
                                     deletedPersonId = null
                                 }
@@ -3842,11 +4095,15 @@ fun ThreadScreen(app: App, userId: String, personId: String, back: () -> Unit, o
                             app.db.setEntryPinned(entry.id, !entry.pinned)
                             allEntries = app.db.entries(personId)
                         }, onDelete = {
+                            // بستن منو بلافاصله
+                            // حذف از لیست محلی بلافاصله برای ری‌رندر فوری
+                            allEntries = allEntries.filter { it.id != entry.id }
+                            entries = entries.filter { it.id != entry.id }
                             hidden = hidden + entry.id
                             scope.launch {
                                 delay(260)
+                                // حذف از دیتابیس
                                 app.db.deleteEntry(entry.id)
-                                entries = entries.filter { it.id != entry.id }
                                 hidden = hidden - entry.id
                             }
                         }, onEdit = {
@@ -6268,8 +6525,10 @@ private fun showPaymentNotification(context: android.content.Context, title: Str
 }
 
 private fun planDisplay(plan: String) = when (plan) {
-    "plus", "basic" -> "پلاس"
-    "smart", "advanced" -> "هوشمند"
+    "plus" -> "پلاس"
+    "smart" -> "هوشمند"
+    "basic" -> "پایه"
+    "advanced" -> "پیشرفته"
     "guest" -> "مهمان (اعتبار ۱ روزه)"
     "expired_guest" -> "مهمان منقضی‌شده"
     else -> "رایگان"
@@ -6279,4 +6538,324 @@ private fun planTitle(plan: String) = when (plan) {
     "basic" -> "پایه"
     "advanced" -> "پیشرفته"
     else -> "رایگان"
+}
+
+
+@Composable
+fun AdminDashboard(app: App, userId: String, onBack: () -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val palette = LocalTg.current
+    val dark = palette.dark
+    
+    var searchQuery by remember { mutableStateOf("") }
+    var sortBy by remember { mutableStateOf("highest_usage") }
+    var planFilter by remember { mutableStateOf("all") }
+    var stats by remember { mutableStateOf<AdminStatsResponse?>(null) }
+    var loading by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf("") }
+    
+    val api = NetworkModule.getApiService()
+    
+    fun loadStats() {
+        loading = true
+        error = ""
+        scope.launch {
+            try {
+                val response = api.getAdminStats(
+                    query = searchQuery,
+                    sortBy = sortBy,
+                    plan = planFilter
+                )
+                if (response.isSuccessful) {
+                    stats = response.body()
+                } else {
+                    error = "خطا در بارگذاری آمار"
+                }
+            } catch (e: Exception) {
+                error = "خطا در اتصال: ${e.message}"
+            } finally {
+                loading = false
+            }
+        }
+    }
+    
+    // بارگذاری اولیه
+    LaunchedEffect(searchQuery, sortBy, planFilter) {
+        loadStats()
+    }
+    
+    val card = if (dark) Color(0xFF1E293B) else Color.White
+    val ink = if (dark) Color.White else Color(0xFF111827)
+    val muted = if (dark) Color(0xFF9CA3AF) else Color(0xFF6B7280)
+    
+    Scaffold(
+        containerColor = palette.bg,
+        topBar = {
+            Row(
+                Modifier.fillMaxWidth().padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = onBack) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = ink)
+                }
+                Text("پنل مدیریت", color = ink, fontWeight = FontWeight.Bold, fontSize = 20.sp, modifier = Modifier.padding(start = 8.dp))
+            }
+        }
+    ) { padding ->
+        LazyColumn(Modifier.fillMaxSize().padding(padding)) {
+            // Header Stats Card
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                    shape = RoundedCornerShape(24.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1E40AF)),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+                ) {
+                    Column(
+                        Modifier.padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(
+                            Icons.Filled.TableChart,
+                            null,
+                            tint = Color(0xFF60A5FA),
+                            modifier = Modifier.size(40.dp)
+                        )
+                        Text(
+                            "مجموع توکن‌های مصرفی",
+                            color = Color(0xFFBFDBFE),
+                            fontSize = 14.sp,
+                            modifier = Modifier.padding(top = 12.dp)
+                        )
+                        Text(
+                            persianDigits((stats?.totalTokensUsed ?: 0).toString()),
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 32.sp,
+                            modifier = Modifier.padding(top = 8.dp)
+                        )
+                        Text(
+                            "کاربر فعال: ${persianDigits((stats?.totalUsers ?: 0).toString())}",
+                            color = Color(0xFFBFDBFE),
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(top = 12.dp)
+                        )
+                    }
+                }
+            }
+            
+            // Search Bar
+            item {
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    label = { Text("جستجو (نام، شماره، آیدی)") },
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    leadingIcon = {
+                        Icon(Icons.Filled.Search, null, tint = muted)
+                    }
+                )
+            }
+            
+            // Filter Chips Row
+            item {
+                Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                    Text("مرتب‌سازی:", color = ink, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                    Row(
+                        Modifier.fillMaxWidth().padding(top = 8.dp).horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf(
+                            "highest_usage" to "بیشترین مصرف",
+                            "lowest_usage" to "کمترین مصرف",
+                            "newest" to "جدیدترین"
+                        ).forEach { (value, label) ->
+                            FilterChip(
+                                selected = sortBy == value,
+                                onClick = { sortBy = value },
+                                label = { Text(label, fontSize = 12.sp) },
+                                shape = RoundedCornerShape(8.dp)
+                            )
+                        }
+                    }
+                    
+                    Text("فیلتر پلن:", color = ink, fontWeight = FontWeight.SemiBold, fontSize = 12.sp, modifier = Modifier.padding(top = 12.dp))
+                    Row(
+                        Modifier.fillMaxWidth().padding(top = 8.dp).horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf(
+                            "all" to "همه",
+                            "free" to "رایگان",
+                            "plus" to "پلاس",
+                            "smart" to "هوشمند",
+                            "guest" to "مهمان"
+                        ).forEach { (value, label) ->
+                            FilterChip(
+                                selected = planFilter == value,
+                                onClick = { planFilter = value },
+                                label = { Text(label, fontSize = 12.sp) },
+                                shape = RoundedCornerShape(8.dp)
+                            )
+                        }
+                    }
+                }
+            }
+            
+            // Error Message
+            if (error.isNotEmpty()) {
+                item {
+                    Text(
+                        error,
+                        color = Color(0xFFDC2626),
+                        fontSize = 12.sp,
+                        modifier = Modifier.fillMaxWidth().padding(16.dp)
+                    )
+                }
+            }
+            
+            // Loading
+            if (loading) {
+                item {
+                    Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
+                    }
+                }
+            }
+            
+            // User Cards
+            stats?.users?.let { users ->
+                items(users) { user ->
+                    UserAdminCard(
+                        user = user,
+                        onChatClick = {
+                            // Navigate to support chat
+                            // Will be connected to navigation logic
+                        },
+                        palette = palette
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun UserAdminCard(
+    user: UserStatsResponse,
+    onChatClick: () -> Unit,
+    palette: TgPalette
+) {
+    val dark = palette.dark
+    val card = if (dark) Color(0xFF111827) else Color.White
+    val ink = if (dark) Color.White else Color(0xFF111827)
+    val muted = if (dark) Color(0xFF9CA3AF) else Color(0xFF6B7280)
+    val badgeBg = when (user.plan) {
+        "smart" -> Color(0xFFA855F7)
+        "plus" -> Color(0xFF3B82F6)
+        "free" -> Color(0xFF6B7280)
+        else -> Color(0xFFEF4444)
+    }
+    
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = card),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // Avatar
+            Box(
+                Modifier.size(48.dp).clip(CircleShape).background(Color(0xFF3B82F6).copy(alpha = 0.1f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Filled.AccountCircle, null, tint = Color(0xFF3B82F6), modifier = Modifier.size(32.dp))
+            }
+            
+            // User Info
+            Column(Modifier.weight(1f)) {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(user.name ?: "کاربر", color = ink, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(user.phone, color = muted, fontSize = 11.sp)
+                            Text("•", color = muted, fontSize = 10.sp)
+                            Text(
+                                user.id.take(8),
+                                color = muted,
+                                fontSize = 11.sp,
+                                modifier = Modifier.clickable {
+                                    // Copy to clipboard
+                                }
+                            )
+                        }
+                    }
+                    
+                    // Plan Badge
+                    Box(
+                        Modifier.clip(RoundedCornerShape(6.dp)).background(badgeBg).padding(4.dp, 2.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            user.plan,
+                            color = Color.White,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+                
+                // Token Usage
+                Row(
+                    Modifier.fillMaxWidth().padding(top = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(
+                        Icons.Filled.TableChart,
+                        null,
+                        tint = Color(0xFF8B5CF6),
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Text(
+                        "توکن‌های مصرفی: ${persianDigits(user.tokensUsed.toString())}",
+                        color = Color(0xFF8B5CF6),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+                
+                // Join Date
+                Text(
+                    "عضویت: ${jalaliShort(user.createdAt)}",
+                    color = muted,
+                    fontSize = 10.sp,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+            }
+            
+            // Chat Button
+            Button(
+                onClick = onChatClick,
+                modifier = Modifier.height(40.dp),
+                shape = RoundedCornerShape(8.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3B82F6))
+            ) {
+                Icon(Icons.Filled.Chat, null, tint = Color.White, modifier = Modifier.size(16.dp))
+            }
+        }
+    }
 }

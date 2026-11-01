@@ -3,7 +3,10 @@ package ir.daftar.goftogu
 import com.google.gson.annotations.SerializedName
 import retrofit2.Response
 import retrofit2.http.Body
+import retrofit2.http.GET
 import retrofit2.http.POST
+import retrofit2.http.Path
+import retrofit2.http.Query
 
 interface ApiService {
     @POST("auth/send-otp")
@@ -37,6 +40,58 @@ interface ApiService {
     suspend fun syncAiMessages(
         @Body payload: SyncAiMessagesRequest
     ): Response<SyncResponse>
+
+    @POST("sync/ai-models")
+    suspend fun syncAiModels(
+        @Body payload: SyncAiModelsRequest
+    ): Response<SyncResponse>
+
+    @POST("sync/support-messages")
+    suspend fun syncSupportMessages(
+        @Body payload: SyncSupportMessagesRequest
+    ): Response<SyncResponse>
+
+    @POST("sync/banners")
+    suspend fun syncBanners(
+        @Body payload: SyncBannersRequest
+    ): Response<SyncResponse>
+
+    @POST("sync/announcements")
+    suspend fun syncAnnouncements(
+        @Body payload: SyncAnnouncementsRequest
+    ): Response<SyncResponse>
+
+    @POST("sync/export-logs")
+    suspend fun syncExportLogs(
+        @Body payload: SyncExportLogsRequest
+    ): Response<SyncResponse>
+
+    @POST("users/check")
+    suspend fun checkUserExists(
+        @Body request: UserCheckRequest
+    ): Response<UserCheckResponse>
+
+    @POST("teams")
+    suspend fun createTeam(
+        @Body request: CreateTeamRequest
+    ): Response<TeamDto>
+
+    @GET("teams/user/{user_id}")
+    suspend fun getUserTeams(
+        @Path("user_id") userId: String
+    ): Response<List<TeamDto>>
+
+    @POST("sync/tokens")
+    suspend fun syncTokens(
+        @Body payload: TokenUsageSyncPayload
+    ): Response<SyncResponse>
+
+    @GET("admin/users-stats")
+    suspend fun getAdminStats(
+        @Query("query") query: String = "",
+        @Query("sort_by") sortBy: String = "highest_usage",
+        @Query("plan") plan: String = "all"
+    ): Response<AdminStatsResponse>
 }
 
 // --- مدل‌های احراز هویت ---
@@ -163,4 +218,138 @@ data class SyncAiMessageItem(
 
 data class SyncAiMessagesRequest(
     @SerializedName("messages") val messages: List<SyncAiMessageItem>
+)
+
+// --- مدل‌های مدل‌های هوش مصنوعی ثبت‌شده ادمین ---
+data class SyncAiModelItem(
+    @SerializedName("id") val id: String,
+    @SerializedName("name") val name: String,
+    @SerializedName("endpoint") val endpoint: String,
+    @SerializedName("model_id") val modelId: String,
+    @SerializedName("api_key") val apiKey: String,
+    @SerializedName("input_cost") val inputCost: Float,
+    @SerializedName("output_cost") val outputCost: Float,
+    @SerializedName("active") val active: Boolean
+)
+
+data class SyncAiModelsRequest(
+    @SerializedName("ai_models") val aiModels: List<SyncAiModelItem>
+)
+
+// --- مدل‌های پیام‌های پشتیبانی ---
+data class SyncSupportMessageItem(
+    @SerializedName("id") val id: String,
+    @SerializedName("user_id") val userId: String,
+    @SerializedName("from_admin") val fromAdmin: Boolean,
+    @SerializedName("body") val body: String,
+    @SerializedName("kind") val kind: String,
+    @SerializedName("path") val path: String? = null,
+    @SerializedName("read_admin") val readAdmin: Boolean = false,
+    @SerializedName("read_user") val readUser: Boolean = false,
+    @SerializedName("created_at") val createdAt: Long
+)
+
+data class SyncSupportMessagesRequest(
+    @SerializedName("support_messages") val supportMessages: List<SyncSupportMessageItem>
+)
+
+// --- مدل‌های بنرها ---
+data class SyncBannerItem(
+    @SerializedName("id") val id: String,
+    @SerializedName("title") val title: String,
+    @SerializedName("body") val body: String,
+    @SerializedName("image") val image: String? = null,
+    @SerializedName("active") val active: Boolean,
+    @SerializedName("created_at") val createdAt: Long
+)
+
+data class SyncBannersRequest(
+    @SerializedName("banners") val banners: List<SyncBannerItem>
+)
+
+// --- مدل‌های اطلاعیه‌ها ---
+data class SyncAnnouncementItem(
+    @SerializedName("id") val id: String,
+    @SerializedName("title") val title: String,
+    @SerializedName("body") val body: String,
+    @SerializedName("created_at") val createdAt: Long
+)
+
+data class SyncAnnouncementsRequest(
+    @SerializedName("announcements") val announcements: List<SyncAnnouncementItem>
+)
+
+// --- مدل‌های لاگ‌های خروجی ---
+data class SyncExportLogItem(
+    @SerializedName("id") val id: String,
+    @SerializedName("user_id") val userId: String,
+    @SerializedName("timestamp") val timestamp: Long,
+    @SerializedName("file_type") val fileType: String,
+    @SerializedName("target_name") val targetName: String,
+    @SerializedName("records_count") val recordsCount: Int
+)
+
+data class SyncExportLogsRequest(
+    @SerializedName("export_logs") val exportLogs: List<SyncExportLogItem>
+)
+
+// --- مدل‌های تیم‌ها و گفتگوهای گروهی ---
+data class UserCheckRequest(
+    @SerializedName("phone") val phone: String
+)
+
+data class UserCheckResponse(
+    @SerializedName("exists") val exists: Boolean,
+    @SerializedName("user_id") val userId: String? = null,
+    @SerializedName("name") val name: String? = null
+)
+
+data class TeamMemberDto(
+    @SerializedName("user_id") val userId: String,
+    @SerializedName("role") val role: String,
+    @SerializedName("joined_at") val joinedAt: Long
+)
+
+data class TeamDto(
+    @SerializedName("id") val id: String,
+    @SerializedName("name") val name: String,
+    @SerializedName("description") val description: String? = null,
+    @SerializedName("creator_id") val creatorId: String,
+    @SerializedName("created_at") val createdAt: Long,
+    @SerializedName("member_count") val memberCount: Int,
+    @SerializedName("members") val members: List<TeamMemberDto>
+)
+
+data class CreateTeamRequest(
+    @SerializedName("name") val name: String,
+    @SerializedName("description") val description: String? = null,
+    @SerializedName("creator_id") val creatorId: String,
+    @SerializedName("member_user_ids") val memberUserIds: List<String>
+)
+
+
+// --- مدل‌های توکن‌ها ---
+data class TokenUsageSyncItem(
+    @SerializedName("user_id") val userId: String,
+    @SerializedName("tokens") val tokens: Int,
+    @SerializedName("occurred_at") val occurredAt: Long
+)
+
+data class TokenUsageSyncPayload(
+    @SerializedName("usages") val usages: List<TokenUsageSyncItem>
+)
+
+data class UserStatsResponse(
+    @SerializedName("id") val id: String,
+    @SerializedName("phone") val phone: String,
+    @SerializedName("name") val name: String? = null,
+    @SerializedName("plan") val plan: String,
+    @SerializedName("tokens_used") val tokensUsed: Long,
+    @SerializedName("created_at") val createdAt: Long
+)
+
+data class AdminStatsResponse(
+    @SerializedName("total_tokens_used") val totalTokensUsed: Long,
+    @SerializedName("total_users") val totalUsers: Int,
+    @SerializedName("users") val users: List<UserStatsResponse>
 )
