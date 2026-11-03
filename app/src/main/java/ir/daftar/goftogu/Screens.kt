@@ -234,6 +234,7 @@ import ir.daftar.goftogu.ui.theme.APP_THEMES
 import ir.daftar.goftogu.ui.theme.AppColorTheme
 import ir.daftar.goftogu.ui.theme.LocalAppTheme
 import ir.daftar.goftogu.ui.theme.updateAppTheme
+import androidx.compose.material.icons.filled.Send
 
 /**
  * رنگ اکشن سراسری برنامه؛ به‌صورت واکنشی از تم دوگانه انتخاب‌شده کاربر خوانده می‌شود
@@ -603,8 +604,13 @@ fun TeamsScreen(
     val user = remember(userId) { app.db.getOrCreateUser(userId) }
     val palette = LocalTg.current
     val dark = palette.dark
+    
+    // بررسی دسترسی بر اساس plan
+    val allowedTeamPlans = AppConstants.TEAM_ALLOWED_PLANS
+    val isAdmin = user.phone == AppConstants.ADMIN_PHONE
+    val hasTeamAccess = user.plan in allowedTeamPlans || isAdmin
 
-    if (user.plan != "advanced") {
+    if (!hasTeamAccess) {
         Box(Modifier.fillMaxSize().background(palette.bg), contentAlignment = Alignment.Center) {
             Card(
                 shape = RoundedCornerShape(28.dp),
@@ -1327,11 +1333,12 @@ private fun SupportBubble(message: SupportMessage, mine: Boolean) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start) {
         Column(
             Modifier
-                .fillMaxWidth(0.80f)
+                .widthIn(max = 360.dp)
+                .fillMaxWidth(0.85f)
                 .shadow(1.dp, shape)
                 .clip(shape)
                 .background(bubble)
-                .padding(horizontal = 10.dp, vertical = 7.dp),
+                .padding(horizontal = 14.dp, vertical = 10.dp),
         ) {
             if (message.kind == "voice" && message.path != null) {
                 VoiceMessage(message.path)
@@ -1345,14 +1352,14 @@ private fun SupportBubble(message: SupportMessage, mine: Boolean) {
                     color = ink,
                     fontSize = chatFont.sp,
                     lineHeight = (chatFont * 1.5f).sp,
-                    modifier = Modifier.padding(top = if (message.kind == "text") 0.dp else 4.dp),
+                    modifier = Modifier.padding(top = if (message.kind == "text") 0.dp else 6.dp),
                 )
             }
             Text(
                 supportClock(message.createdAt),
                 fontSize = 10.sp,
                 color = if (message.kind == "voice") Color.White.copy(alpha = 0.85f) else palette.subtext,
-                modifier = Modifier.align(Alignment.End).padding(top = 2.dp),
+                modifier = Modifier.align(Alignment.End).padding(top = 4.dp),
             )
         }
     }
@@ -4955,7 +4962,14 @@ private fun JournalBubble(entry: Entry, title: String, onPin: () -> Unit, onDele
     val bodyLine = (chatFont * 1.5f).sp
     val ink = if (entry.kind == "voice") Color.White else if (palette.dark && !note) Color.White else palette.text
     val shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomEnd = 16.dp, bottomStart = 4.dp)
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start, verticalAlignment = Alignment.CenterVertically) {
+    
+    Row(
+        Modifier.fillMaxWidth(),
+        // Note messages: align to START (left)
+        // Regular messages: align to END (right)
+        horizontalArrangement = if (note) Arrangement.Start else Arrangement.End,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
         AnimatedVisibility(open, enter = fadeIn(tween(160)) + scaleIn(tween(160), initialScale = 0.9f), exit = fadeOut(tween(120))) {
             Column(Modifier.padding(horizontal = 6.dp).clip(RoundedCornerShape(16.dp)).background(Color(0xFF2B2B2F)).padding(vertical = 4.dp)) {
                 MenuAction(Icons.Filled.PushPin, "سنجاق") { open = false; onPin() }
@@ -4967,31 +4981,32 @@ private fun JournalBubble(entry: Entry, title: String, onPin: () -> Unit, onDele
                 MenuAction(Icons.Filled.Delete, "حذف") { open = false; onDelete() }
             }
         }
-    Column(
-        Modifier
-                .widthIn(max = 280.dp)
-                .fillMaxWidth(0.78f)
-                .shadow(1.dp, shape)
-                .clip(shape)
-                .background(bubble)
-                .then(
-                    if (note) {
-                        Modifier.drawBehind {
-                            drawRoundRect(
-                                color = Color(0xFFD4A373),
-                                style = Stroke(
-                                    width = 2.dp.toPx(),
-                                    pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(12f, 8f), 0f),
-                                ),
-                                cornerRadius = CornerRadius(16.dp.toPx()),
-                            )
-                        }
-                    } else {
-                        Modifier
-                    },
-                )
-                .combinedClickable(onClick = {}, onLongClick = { open = !open })
-                .padding(horizontal = 12.dp, vertical = 8.dp),
+        
+        Column(
+            Modifier
+                    .widthIn(max = 360.dp)
+                    .fillMaxWidth(0.85f)
+                    .shadow(1.dp, shape)
+                    .clip(shape)
+                    .background(bubble)
+                    .then(
+                        if (note) {
+                            Modifier.drawBehind {
+                                drawRoundRect(
+                                    color = Color(0xFFD4A373),
+                                    style = Stroke(
+                                        width = 2.dp.toPx(),
+                                        pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(12f, 8f), 0f),
+                                    ),
+                                    cornerRadius = CornerRadius(16.dp.toPx()),
+                                )
+                            }
+                        } else {
+                            Modifier
+                        },
+                    )
+                    .combinedClickable(onClick = {}, onLongClick = { open = !open })
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
         ) {
             if (entry.pinned) Text("سنجاق", color = Blue, fontSize = 11.sp)
             entry.memberName?.let { Text(it, color = Blue, fontSize = 12.sp, fontWeight = FontWeight.Bold) }
@@ -5002,14 +5017,14 @@ private fun JournalBubble(entry: Entry, title: String, onPin: () -> Unit, onDele
             } else if (entry.kind == "photo" && entry.mediaPath != null) {
                 Box {
                     MediaPreview(entry.mediaPath, entry.kind) { viewer = true }
-                Text(
+                    Text(
                         persianDigits(SimpleDateFormat("HH:mm", Locale.US).format(Date(entry.occurredAt))),
                         color = Color.White,
-                    fontSize = 11.sp,
+                        fontSize = 11.sp,
                         modifier = Modifier.align(Alignment.BottomEnd).padding(6.dp).clip(RoundedCornerShape(8.dp)).background(Color(0x99000000)).padding(horizontal = 6.dp, vertical = 2.dp),
                     )
                 }
-                if (entry.body.isNotBlank() && entry.body != "عکس") Text(entry.body, color = ink, fontSize = bodySize, lineHeight = bodyLine, modifier = Modifier.padding(top = 4.dp))
+                if (entry.body.isNotBlank() && entry.body != "عکس") Text(entry.body, color = ink, fontSize = bodySize, lineHeight = bodyLine, modifier = Modifier.padding(top = 6.dp))
             } else {
                 entry.mediaPath?.let { path -> MediaPreview(path, entry.kind) }
                 if (entry.kind != "photo" && entry.kind != "video") {
@@ -5019,9 +5034,9 @@ private fun JournalBubble(entry: Entry, title: String, onPin: () -> Unit, onDele
                         style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, fontWeight = FontWeight.Bold),
                     )
                 }
-                if (entry.body.isNotBlank() && entry.body != "عکس") Text(entry.body, color = ink, fontSize = bodySize, lineHeight = bodyLine, modifier = Modifier.padding(top = 2.dp))
+                if (entry.body.isNotBlank() && entry.body != "عکس") Text(entry.body, color = ink, fontSize = bodySize, lineHeight = bodyLine, modifier = Modifier.padding(top = 4.dp))
             }
-            if (entry.kind != "photo") Text(persianDigits(SimpleDateFormat("HH:mm", Locale.US).format(Date(entry.occurredAt))), fontSize = 11.sp, color = if (entry.kind == "voice") Color.White.copy(alpha = 0.8f) else palette.subtext, modifier = Modifier.align(Alignment.End).padding(top = 2.dp))
+            if (entry.kind != "photo") Text(persianDigits(SimpleDateFormat("HH:mm", Locale.US).format(Date(entry.occurredAt))), fontSize = 11.sp, color = if (entry.kind == "voice") Color.White.copy(alpha = 0.8f) else palette.subtext, modifier = Modifier.align(Alignment.End).padding(top = 4.dp))
         }
     }
     if (viewer && entry.mediaPath != null) {
@@ -5509,6 +5524,8 @@ fun ProfileScreen(
     var editProfile by remember { mutableStateOf(false) }
     var name by remember { mutableStateOf(user.name) }
     var username by remember { mutableStateOf(user.username ?: "") }
+    var usernameError by remember { mutableStateOf("") }
+    var usernameLoading by remember { mutableStateOf(false) }
     var editPassword by remember { mutableStateOf(false) }
     var currentPassword by remember { mutableStateOf("") }
     var nextPassword by remember { mutableStateOf("") }
@@ -5564,7 +5581,25 @@ fun ProfileScreen(
                     Text(current.phone, color = Color(0xFF707579), fontSize = 13.sp, modifier = Modifier.padding(top = 2.dp))
                     Text("@" + (current.username ?: "—"), color = chatTheme.primary, fontSize = 13.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 2.dp))
                 }
-                IconButton(onClick = { name = current.name; username = current.username ?: ""; editProfile = true }) { Icon(Icons.Filled.Edit, "ویرایش پروفایل", tint = Blue) }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    IconButton(onClick = { 
+                        // سرور سے پروفائل ریفریش کریں
+                        scope.launch {
+                            try {
+                                app.syncUserProfile(userId)
+                                user = app.db.getOrCreateUser(userId)
+                                message = "پروفائل نیا شد"
+                            } catch (e: Exception) {
+                                message = "خطا: ${e.message}"
+                            }
+                        }
+                    }) { 
+                        Icon(Icons.Filled.Refresh, "ریفریش پروفائل", tint = Color(0xFF6B7280))
+                    }
+                    IconButton(onClick = { name = current.name; username = current.username ?: ""; editProfile = true }) { 
+                        Icon(Icons.Filled.Edit, "ویرایش پروفایل", tint = Blue) 
+                    }
+                }
             }
         }
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -5624,28 +5659,105 @@ fun ProfileScreen(
     }
     if (editProfile) {
         AlertDialog(
-            onDismissRequest = { editProfile = false },
+            onDismissRequest = { editProfile = false; usernameError = "" },
             shape = RoundedCornerShape(24.dp),
             containerColor = themeDialogContainer(),
             title = { Text("ویرایش پروفایل") },
             text = {
                 Column {
-                    OutlinedTextField(name, { name = it }, Modifier.fillMaxWidth(), label = { Text("نام نمایشی") })
-                    OutlinedTextField(username, { username = it }, Modifier.fillMaxWidth().padding(top = 8.dp), label = { Text("نام کاربری (بدون @)") })
+                    OutlinedTextField(
+                        name,
+                        { name = it },
+                        Modifier.fillMaxWidth(),
+                        label = { Text("نام نمایشی") }
+                    )
+                    OutlinedTextField(
+                        username,
+                        { username = it },
+                        Modifier.fillMaxWidth().padding(top = 8.dp),
+                        label = { Text("نام کاربری (بدون @)") },
+                        isError = usernameError.isNotEmpty(),
+                        enabled = !usernameLoading
+                    )
+                    if (usernameError.isNotEmpty()) {
+                        Text(
+                            usernameError,
+                            color = Color(0xFFEF4444),
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
                 }
             },
             confirmButton = {
-                TextButton(onClick = {
-                    try {
-                        app.db.rename(userId, name)
-                        app.db.setUsername(userId, username)
-                        user = app.db.getOrCreateUser(userId)
-                        message = "پروفایل ذخیره شد"
-                        editProfile = false
-                    } catch (e: Exception) { message = e.message ?: "خطا" }
-                }) { Text("ذخیره") }
+                TextButton(
+                    onClick = {
+                        try {
+                            // محقق کردن نام کاربری
+                            val cleanUsername = username.trim().lowercase()
+                            usernameError = ""
+                            
+                            if (cleanUsername.isNotEmpty() && cleanUsername != (user.username ?: "")) {
+                                // اگر username تبدیل ہوا تو validation کریں
+                                if (cleanUsername.length < 3 || cleanUsername.length > 30) {
+                                    usernameError = "نام کاربری باید ۳ تا ۳۰ کاراکتر باشد"
+                                    return@TextButton
+                                }
+                                if (!Regex("^[a-z0-9_]+$").matches(cleanUsername)) {
+                                    usernameError = "فقط حروف کوچک انگلیسی، اعداد و خط زیرین مجاز است"
+                                    return@TextButton
+                                }
+                                
+                                // سرور سے API call کریں
+                                usernameLoading = true
+                                scope.launch {
+                                    try {
+                                        val api = NetworkModule.getApiService()
+                                        val response = api.updateUsername(userId, UpdateUsernameReq(cleanUsername))
+                                        if (response.isSuccessful) {
+                                            app.db.setUsername(userId, cleanUsername)
+                                            user = app.db.getOrCreateUser(userId)
+                                            username = cleanUsername
+                                            message = "نام کاربری ذخیره شد"
+                                            editProfile = false
+                                        } else {
+                                            val errorBody = response.errorBody()?.string()
+                                            usernameError = if (errorBody?.contains("قبلاً انتخاب شده") == true) {
+                                                "این نام کاربری قبلاً انتخاب شده است"
+                                            } else {
+                                                "خطا در ذخیره: ${response.code()}"
+                                            }
+                                        }
+                                    } catch (e: Exception) {
+                                        usernameError = "خطا در اتصال: ${e.message}"
+                                    } finally {
+                                        usernameLoading = false
+                                    }
+                                }
+                            } else {
+                                // فقط نام تغییر کردہ ہے
+                                app.db.rename(userId, name)
+                                user = app.db.getOrCreateUser(userId)
+                                message = "پروفایل ذخیره شد"
+                                editProfile = false
+                            }
+                        } catch (e: Exception) {
+                            message = e.message ?: "خطا"
+                        }
+                    },
+                    enabled = !usernameLoading
+                ) {
+                    Text(if (usernameLoading) "درحال ذخیره..." else "ذخیره")
+                }
             },
-            dismissButton = { TextButton(onClick = { editProfile = false }) { Text("بستن") } },
+            dismissButton = {
+                TextButton(
+                    onClick = { editProfile = false; usernameError = "" },
+                    enabled = !usernameLoading
+                ) {
+                    Text("بستن")
+                }
+            },
         )
     }
     if (donation) PrettyAlert("حمایت مالی", "از حمایت شما سپاسگزاریم. برای هماهنگی حمایت با پشتیبانی در ارتباط باشید.", onConfirm = { donation = false })
@@ -6541,22 +6653,37 @@ private fun planTitle(plan: String) = when (plan) {
 }
 
 
+
+/**
+ * AdminScreen - ادمین پنل کا مرکزی صفحہ
+ * یہ AdminDashboard کو براہ راست کال کرتا ہے
+ */
+@Composable
+fun AdminScreen(
+    app: App,
+    userId: String,
+    onBack: () -> Unit
+) {
+    AdminDashboard(app = app, userId = userId, onBack = onBack)
+}
+
 @Composable
 fun AdminDashboard(app: App, userId: String, onBack: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val palette = LocalTg.current
     val dark = palette.dark
-    
+
     var searchQuery by remember { mutableStateOf("") }
     var sortBy by remember { mutableStateOf("highest_usage") }
     var planFilter by remember { mutableStateOf("all") }
     var stats by remember { mutableStateOf<AdminStatsResponse?>(null) }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
-    
+    var activeTab by remember { mutableStateOf("users") }  // "users" یا "ai_chat"
+
     val api = NetworkModule.getApiService()
-    
+
     fun loadStats() {
         loading = true
         error = ""
@@ -6579,16 +6706,16 @@ fun AdminDashboard(app: App, userId: String, onBack: () -> Unit) {
             }
         }
     }
-    
+
     // بارگذاری اولیه
     LaunchedEffect(searchQuery, sortBy, planFilter) {
         loadStats()
     }
-    
+
     val card = if (dark) Color(0xFF1E293B) else Color.White
     val ink = if (dark) Color.White else Color(0xFF111827)
     val muted = if (dark) Color(0xFF9CA3AF) else Color(0xFF6B7280)
-    
+
     Scaffold(
         containerColor = palette.bg,
         topBar = {
@@ -6603,139 +6730,175 @@ fun AdminDashboard(app: App, userId: String, onBack: () -> Unit) {
             }
         }
     ) { padding ->
-        LazyColumn(Modifier.fillMaxSize().padding(padding)) {
-            // Header Stats Card
-            item {
-                Card(
-                    modifier = Modifier.fillMaxWidth().padding(16.dp),
-                    shape = RoundedCornerShape(24.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1E40AF)),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+        Column(Modifier.fillMaxSize().padding(padding)) {
+            // Tab Navigation
+            Row(
+                Modifier.fillMaxWidth().background(card).padding(horizontal = 16.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                TextButton(
+                    onClick = { activeTab = "users" },
+                    modifier = Modifier.weight(1f)
                 ) {
-                    Column(
-                        Modifier.padding(24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Icon(
-                            Icons.Filled.TableChart,
-                            null,
-                            tint = Color(0xFF60A5FA),
-                            modifier = Modifier.size(40.dp)
-                        )
-                        Text(
-                            "مجموع توکن‌های مصرفی",
-                            color = Color(0xFFBFDBFE),
-                            fontSize = 14.sp,
-                            modifier = Modifier.padding(top = 12.dp)
-                        )
-                        Text(
-                            persianDigits((stats?.totalTokensUsed ?: 0).toString()),
-                            color = Color.White,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 32.sp,
-                            modifier = Modifier.padding(top = 8.dp)
-                        )
-                        Text(
-                            "کاربر فعال: ${persianDigits((stats?.totalUsers ?: 0).toString())}",
-                            color = Color(0xFFBFDBFE),
-                            fontSize = 12.sp,
-                            modifier = Modifier.padding(top = 12.dp)
-                        )
-                    }
-                }
-            }
-            
-            // Search Bar
-            item {
-                OutlinedTextField(
-                    value = searchQuery,
-                    onValueChange = { searchQuery = it },
-                    label = { Text("جستجو (نام، شماره، آیدی)") },
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    leadingIcon = {
-                        Icon(Icons.Filled.Search, null, tint = muted)
-                    }
-                )
-            }
-            
-            // Filter Chips Row
-            item {
-                Column(Modifier.fillMaxWidth().padding(16.dp)) {
-                    Text("مرتب‌سازی:", color = ink, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
-                    Row(
-                        Modifier.fillMaxWidth().padding(top = 8.dp).horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        listOf(
-                            "highest_usage" to "بیشترین مصرف",
-                            "lowest_usage" to "کمترین مصرف",
-                            "newest" to "جدیدترین"
-                        ).forEach { (value, label) ->
-                            FilterChip(
-                                selected = sortBy == value,
-                                onClick = { sortBy = value },
-                                label = { Text(label, fontSize = 12.sp) },
-                                shape = RoundedCornerShape(8.dp)
-                            )
-                        }
-                    }
-                    
-                    Text("فیلتر پلن:", color = ink, fontWeight = FontWeight.SemiBold, fontSize = 12.sp, modifier = Modifier.padding(top = 12.dp))
-                    Row(
-                        Modifier.fillMaxWidth().padding(top = 8.dp).horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        listOf(
-                            "all" to "همه",
-                            "free" to "رایگان",
-                            "plus" to "پلاس",
-                            "smart" to "هوشمند",
-                            "guest" to "مهمان"
-                        ).forEach { (value, label) ->
-                            FilterChip(
-                                selected = planFilter == value,
-                                onClick = { planFilter = value },
-                                label = { Text(label, fontSize = 12.sp) },
-                                shape = RoundedCornerShape(8.dp)
-                            )
-                        }
-                    }
-                }
-            }
-            
-            // Error Message
-            if (error.isNotEmpty()) {
-                item {
                     Text(
-                        error,
-                        color = Color(0xFFDC2626),
-                        fontSize = 12.sp,
-                        modifier = Modifier.fillMaxWidth().padding(16.dp)
+                        "کاربران",
+                        color = if (activeTab == "users") Color(0xFF3B82F6) else muted,
+                        fontWeight = if (activeTab == "users") FontWeight.Bold else FontWeight.Normal
+                    )
+                }
+                TextButton(
+                    onClick = { activeTab = "ai_chat" },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(
+                        "دستیار",
+                        color = if (activeTab == "ai_chat") Color(0xFF3B82F6) else muted,
+                        fontWeight = if (activeTab == "ai_chat") FontWeight.Bold else FontWeight.Normal
                     )
                 }
             }
-            
-            // Loading
-            if (loading) {
-                item {
-                    Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator()
+
+            // Content
+            if (activeTab == "users") {
+                LazyColumn(Modifier.fillMaxSize()) {
+                    // Header Stats Card
+                    item {
+                        Card(
+                            modifier = Modifier.fillMaxWidth().padding(16.dp),
+                            shape = RoundedCornerShape(24.dp),
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFF1E40AF)),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+                        ) {
+                            Column(
+                                Modifier.padding(24.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Icon(
+                                    Icons.Filled.TableChart,
+                                    null,
+                                    tint = Color(0xFF60A5FA),
+                                    modifier = Modifier.size(40.dp)
+                                )
+                                Text(
+                                    "مجموع توکن‌های مصرفی",
+                                    color = Color(0xFFBFDBFE),
+                                    fontSize = 14.sp,
+                                    modifier = Modifier.padding(top = 12.dp)
+                                )
+                                Text(
+                                    persianDigits((stats?.totalTokensUsed ?: 0).toString()),
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 32.sp,
+                                    modifier = Modifier.padding(top = 8.dp)
+                                )
+                                Text(
+                                    "کاربر فعال: ${persianDigits((stats?.totalUsers ?: 0).toString())}",
+                                    color = Color(0xFFBFDBFE),
+                                    fontSize = 12.sp,
+                                    modifier = Modifier.padding(top = 12.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    // Search Bar
+                    item {
+                        OutlinedTextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            label = { Text("جستجو (نام، شماره، آیدی)") },
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            leadingIcon = {
+                                Icon(Icons.Filled.Search, null, tint = muted)
+                            }
+                        )
+                    }
+
+                    // Filter Chips Row
+                    item {
+                        Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                            Text("مرتب‌سازی:", color = ink, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                            Row(
+                                Modifier.fillMaxWidth().padding(top = 8.dp).horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                listOf(
+                                    "highest_usage" to "بیشترین مصرف",
+                                    "lowest_usage" to "کمترین مصرف",
+                                    "newest" to "جدیدترین"
+                                ).forEach { (value, label) ->
+                                    FilterChip(
+                                        selected = sortBy == value,
+                                        onClick = { sortBy = value },
+                                        label = { Text(label, fontSize = 12.sp) },
+                                        shape = RoundedCornerShape(8.dp)
+                                    )
+                                }
+                            }
+
+                            Text("فیلتر پلن:", color = ink, fontWeight = FontWeight.SemiBold, fontSize = 12.sp, modifier = Modifier.padding(top = 12.dp))
+                            Row(
+                                Modifier.fillMaxWidth().padding(top = 8.dp).horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                listOf(
+                                    "all" to "همه",
+                                    "free" to "رایگان",
+                                    "plus" to "پلاس",
+                                    "smart" to "هوشمند",
+                                    "guest" to "مهمان"
+                                ).forEach { (value, label) ->
+                                    FilterChip(
+                                        selected = planFilter == value,
+                                        onClick = { planFilter = value },
+                                        label = { Text(label, fontSize = 12.sp) },
+                                        shape = RoundedCornerShape(8.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // Error Message
+                    if (error.isNotEmpty()) {
+                        item {
+                            Text(
+                                error,
+                                color = Color(0xFFDC2626),
+                                fontSize = 12.sp,
+                                modifier = Modifier.fillMaxWidth().padding(16.dp)
+                            )
+                        }
+                    }
+
+                    // Loading
+                    if (loading) {
+                        item {
+                            Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
+                                CircularProgressIndicator()
+                            }
+                        }
+                    }
+
+                    // User Cards
+                    stats?.users?.let { users ->
+                        items(users) { user ->
+                            UserAdminCard(
+                                user = user,
+                                onChatClick = {
+                                    // Navigate to support chat
+                                },
+                                palette = palette
+                            )
+                        }
                     }
                 }
-            }
-            
-            // User Cards
-            stats?.users?.let { users ->
-                items(users) { user ->
-                    UserAdminCard(
-                        user = user,
-                        onChatClick = {
-                            // Navigate to support chat
-                            // Will be connected to navigation logic
-                        },
-                        palette = palette
-                    )
+            } else {
+                // AI Chat Tab
+                Box(Modifier.fillMaxSize()) {
+                    AdminAiChatScreen(app, userId, onBack = { activeTab = "users" })
                 }
             }
         }
@@ -6858,4 +7021,316 @@ private fun UserAdminCard(
             }
         }
     }
+}
+
+
+/**
+ * صفحه چت هوشمند برای ادمین
+ * تاریخچه جداگانه‌ای از پیام‌های رفت‌وبرگشت با دستیار مدیریت
+ */
+@Composable
+fun AdminAiChatScreen(app: App, userId: String, onBack: () -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val palette = LocalTg.current
+    val dark = palette.dark
+    
+    var messages by remember { mutableStateOf<List<AdminChatMessageDto>>(emptyList()) }
+    var inputMessage by remember { mutableStateOf("") }
+    var loading by remember { mutableStateOf(false) }
+    var sending by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf("") }
+    
+    val api = NetworkModule.getApiService()
+    val listState = rememberLazyListState()
+    
+    // بارگذاری تاریخچه
+    LaunchedEffect(userId) {
+        loading = true
+        try {
+            val response = api.getAdminAiHistory(userId)
+            if (response.isSuccessful) {
+                messages = response.body() ?: emptyList()
+            } else {
+                error = "خطا در بارگذاری تاریخچه"
+            }
+        } catch (e: Exception) {
+            error = "خطا در اتصال: ${e.message}"
+        } finally {
+            loading = false
+        }
+    }
+    
+    // پرش به آخر لیست هنگام اضافه‌شدن پیام جدید
+    LaunchedEffect(messages.size) {
+        if (messages.isNotEmpty()) {
+            listState.animateScrollToItem(messages.size - 1)
+        }
+    }
+    
+    val card = if (dark) Color(0xFF1E293B) else Color.White
+    val ink = if (dark) Color.White else Color(0xFF111827)
+    val muted = if (dark) Color(0xFF9CA3AF) else Color(0xFF6B7280)
+    val userBubble = if (dark) palette.outgoing else Color(0xFFE0F2FE)
+    val assistantBubble = if (dark) Color(0xFF2F3E4E) else Color(0xFFF1F5F9)
+    
+    Scaffold(
+        containerColor = palette.bg,
+        topBar = {
+            Row(
+                Modifier.fillMaxWidth().padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = onBack) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = ink)
+                }
+                Text(
+                    "دستیار مدیریت",
+                    color = ink,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp,
+                    modifier = Modifier.padding(start = 8.dp)
+                )
+            }
+        }
+    ) { padding ->
+        Column(Modifier.fillMaxSize().padding(padding)) {
+            if (error.isNotEmpty()) {
+                Box(
+                    Modifier.fillMaxWidth().background(Color(0xFFFFEBEE)).padding(12.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(error, color = Color(0xFFEF4444), fontSize = 12.sp)
+                }
+            }
+            
+            // لیست پیام‌ها
+            LazyColumn(
+                Modifier.weight(1f).fillMaxWidth().padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                state = listState
+            ) {
+                if (loading && messages.isEmpty()) {
+                    item {
+                        Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
+                            Text("بارگذاری...", color = muted)
+                        }
+                    }
+                }
+                
+                items(messages, key = { it.id }) { msg ->
+                    AdminChatBubble(
+                        message = msg,
+                        isUser = msg.role == "user",
+                        userBubble = userBubble,
+                        assistantBubble = assistantBubble,
+                        ink = ink,
+                        muted = muted
+                    )
+                }
+                
+                if (sending) {
+                    item {
+                        Box(Modifier.fillMaxWidth().padding(8.dp), contentAlignment = Alignment.Center) {
+                            Text("درحال پاسخ...", color = muted, fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
+            
+            // نوار ارسال پیام
+            Row(
+                Modifier.fillMaxWidth().padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedTextField(
+                    value = inputMessage,
+                    onValueChange = { inputMessage = it },
+                    placeholder = { Text("پیام خود را بنویسید...", fontSize = 12.sp) },
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(24.dp),
+                    enabled = !sending,
+                    maxLines = 3
+                )
+                
+                IconButton(
+                    onClick = {
+                        if (inputMessage.isNotBlank() && !sending) {
+                            val userMsg = inputMessage
+                            // اضافه‌کردن پیام کاربر به لیست فوری
+                            messages = messages + AdminChatMessageDto(
+                                id = UUID.randomUUID().toString(),
+                                role = "user",
+                                content = userMsg,
+                                createdAt = System.currentTimeMillis()
+                            )
+                            inputMessage = ""
+                            
+                            // ارسال پیام
+                            sending = true
+                            scope.launch {
+                                try {
+                                    val response = api.sendAdminAiMessage(
+                                        AdminAiChatRequest(userId, userMsg)
+                                    )
+                                    if (response.isSuccessful) {
+                                        val aiReply = response.body()?.reply ?: "خطا در دریافت پاسخ"
+                                        // اضافه‌کردن پاسخ
+                                        messages = messages + AdminChatMessageDto(
+                                            id = UUID.randomUUID().toString(),
+                                            role = "assistant",
+                                            content = aiReply,
+                                            createdAt = System.currentTimeMillis()
+                                        )
+                                    } else {
+                                        error = "خطا: ${response.code()}"
+                                    }
+                                } catch (e: Exception) {
+                                    error = "خطا: ${e.message}"
+                                } finally {
+                                    sending = false
+                                }
+                            }
+                        }
+                    },
+                    enabled = inputMessage.isNotBlank() && !sending,
+                    modifier = Modifier.size(48.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Send,
+                        contentDescription = "Send"
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AdminChatBubble(
+    message: AdminChatMessageDto,
+    isUser: Boolean,
+    userBubble: Color,
+    assistantBubble: Color,
+    ink: Color,
+    muted: Color
+) {
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
+    ) {
+        Card(
+            modifier = Modifier
+                .widthIn(max = 300.dp)
+                .fillMaxWidth(0.85f),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = if (isUser) userBubble else assistantBubble
+            )
+        ) {
+            Column(Modifier.padding(12.dp)) {
+                Text(
+                    message.content,
+                    color = ink,
+                    fontSize = 14.sp,
+                    lineHeight = 18.sp
+                )
+                Text(
+                    formatTime(message.createdAt),
+                    color = muted,
+                    fontSize = 10.sp,
+                    modifier = Modifier.padding(top = 4.dp).align(Alignment.End)
+                )
+            }
+        }
+    }
+}
+
+fun formatTime(timestamp: Long): String {
+    val sdf = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
+    return sdf.format(java.util.Date(timestamp))
+}
+
+
+/**
+ * صفحه چت مستقیم هوش مصنوعی - بدون نیاز به انتخاب گفتگو
+ * کاربران plus/smart/advanced و ادمین می‌توانند با دستیار عمومی چت کنند
+ */
+@Composable
+fun DirectAiChatScreen(app: App, userId: String, onBack: () -> Unit) {
+    val user = remember(userId) { app.db.getOrCreateUser(userId) }
+    val palette = LocalTg.current
+    
+    // بررسی دسترسی بر اساس plan
+    val allowedPlans = AppConstants.AI_UNLIMITED_PLANS
+    val isAdmin = user.phone == AppConstants.ADMIN_PHONE
+    val hasAccess = user.plan in allowedPlans || isAdmin
+    
+    if (!hasAccess) {
+        // نمایش صفحه upgrade
+        Box(Modifier.fillMaxSize().background(palette.bg), contentAlignment = Alignment.Center) {
+            Card(
+                shape = RoundedCornerShape(28.dp),
+                colors = CardDefaults.cardColors(containerColor = palette.surface),
+                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+                modifier = Modifier.padding(24.dp).fillMaxWidth()
+            ) {
+                Column(
+                    Modifier.padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Box(
+                        Modifier.size(80.dp).clip(CircleShape).background(Color(0xFF3B82F6).copy(alpha = 0.1f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Filled.AutoAwesome, null, tint = Color(0xFF3B82F6), modifier = Modifier.size(40.dp))
+                    }
+                    Text(
+                        "دسترسی محدود",
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = palette.text,
+                        modifier = Modifier.padding(top = 16.dp)
+                    )
+                    Text(
+                        "چت نامحدود با هوش مصنوعی فقط برای کاربران پلن پلاس و بالاتر",
+                        fontSize = 14.sp,
+                        color = palette.subtext,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+                    Button(
+                        onClick = onBack,
+                        modifier = Modifier.padding(top = 20.dp).fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("بازگشت")
+                    }
+                }
+            }
+        }
+        return
+    }
+    
+    // ایجاد شخصیت دستیار عمومی (یا دریافت از DB)
+    // ایجاد شخصیت دستیار عمومی
+    val aiAssistant = Person(
+        id = AppConstants.AI_GENERAL_ASSISTANT_ID,
+        name = AppConstants.AI_GENERAL_ASSISTANT_NAME,
+        phone = "",
+        role = "assistant",
+        pinned = false,
+        avatar = null,
+        isGroup = false,
+        saved = true,
+        lastBody = "سلام! من دستیار هوش مصنوعی شما هستم",
+        lastAt = System.currentTimeMillis(),
+        lastKind = "text",
+        lastChannel = "ai",
+        hasNote = false
+    )
+
+// فراخوانی مستقیم AiThread (چت دوطرفه)
+    AiThread(app, userId, aiAssistant, palette, onBack = onBack)
 }

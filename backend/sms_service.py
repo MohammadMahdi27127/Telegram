@@ -1,58 +1,73 @@
+import os
+import secrets
 import logging
-import httpx
+import requests
+from dotenv import load_dotenv
 
-try:
-    from config import settings
-except ImportError:
-    from .config import settings
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-class SMSService:
-    @staticmethod
-    async def send_otp(phone: str, code: str) -> bool:
-        """
-        ارسال پیامک با وب‌سرویس مدرن پترن فراز اس‌ام‌اس (IPPanel REST API)
-        """
-        url = "https://api2.ippanel.com/api/v1/sms/pattern/normal/send"
+# خواندن متغیرها از محیط
+FARAZ_API_KEY = os.getenv("FARAZ_API_KEY", "")
+FARAZ_ORIGINATOR = os.getenv("FARAZ_ORIGINATOR", "90008361")
+PATTERN_CODE = os.getenv("FARAZ_PATTERN_CODE", "wbprpwbxQg")
 
-        # پاکسازی ورودی‌ها
-        clean_phone = phone.strip()
-        api_key = str(settings.SMS_API_KEY).strip()
-        pattern_code = str(settings.SMS_PATTERN_CODE).strip()
-        sender_number = str(getattr(settings, "SMS_ORIGINATOR", "+983000505")).strip()
+# آدرس وب‌سرویس جدید اعلام‌شده توسط پشتیبانی
+BASE_URL = "https://api.iranpayamak.com/api/v1/sms/pattern/normal/send"
 
-        headers = {
-            "apikey": api_key,
-            "Content-Type": "application/json"
-        }
 
-        payload = {
-            "code": pattern_code,
-            "sender": sender_number,
-            "recipient": clean_phone,
-            "variable": {
-                "code": str(code)  # نام متغیر در متن پترن پنل فراز (مثلاً: کد شما: %code%)
-            }
-        }
+def generate_otp_code(length: int = 6) -> str:
+    """تولید کد اعتبارسنجی عددی و ایمن"""
+    return "".join(secrets.choice("0123456789") for _ in range(length))
 
-        logger.info(f"Sending OTP via FarazSMS to {clean_phone} using pattern {pattern_code}")
 
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            try:
-                response = await client.post(url, json=payload, headers=headers)
-                logger.info(f"FarazSMS Response [{response.status_code}]: {response.text}")
+def normalize_phone_number(phone: str) -> str:
+    """استانداردسازی فرمت شماره تلفن به فرمت 09..."""
+    p = phone.strip()
+    if p.startswith("+98"):
+        p = "0" + p[3:]
+    elif p.startswith("98") and len(p) == 12:
+        p = "0" + p[2:]
+    return p
 
-                if response.status_code == 200:
-                    data = response.json()
-                    # بررسی خروجی IPPanel/FarazSMS
-                    if data.get("status") == "OK" or "data" in data or data.get("code") == 200:
-                        logger.info(f"FarazSMS: OTP sent successfully to {clean_phone}")
-                        return True
 
-                logger.error(f"FarazSMS error status {response.status_code}: {response.text}")
-                return False
+def send_otp_sms(phone: str, code: str) -> bool:
+    """
+    ارسال پیامک پترن بر اساس وب‌سرویس جدید api.iranpayamak.com
+    """
+    if not FARAZ_API_KEY:
+        logger.error("[SMS] خطا: FARAZ_API_KEY تعریف نشده است.")
+        return False
 
-            except Exception as e:
-                logger.error(f"Network error in FarazSMS: {e}", exc_info=True)
-                return False
+    normalized_phone = normalize_phone_number(phone)
+
+    headers = {
+        "Api-Key": FARAZ_API_KEY,
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+    }
+
+    # ساختار جدید با کلید attributes
+    payload = {
+        "code": PATTERN_CODE,
+        "sender": FARAZ_ORIGINATOR,
+        "recipient": normalized_phone,
+        "attributes": {
+            "code": str(code)  # کلید باید با نام متغیر تعریف شده در پنل یکسان باشد
+        },
+    }
+
+    try:
+        response = requests.post(BASE_URL, headers=headers, json=payload, timeout=10)
+        
+        if response.status_code in (200, 201):
+            logger.info(f"[SMS] پیامک با موفقیت به {normalized_phone} ارسال شد.")
+            return True
+        else:
+            logger.error(f"[SMS Error] کد وضعیت: {response.status_code} - پاسخ سرور: {response.text}")
+            return False
+
+    except requests.RequestException as e:
+        logger.error(f"[SMS Exception] خطای شبکه در ارسال پیامک: {e}")
+        return False

@@ -3,8 +3,10 @@ package ir.daftar.goftogu
 import com.google.gson.annotations.SerializedName
 import retrofit2.Response
 import retrofit2.http.Body
+import retrofit2.http.DELETE
 import retrofit2.http.GET
 import retrofit2.http.POST
+import retrofit2.http.PUT
 import retrofit2.http.Path
 import retrofit2.http.Query
 
@@ -92,6 +94,27 @@ interface ApiService {
         @Query("sort_by") sortBy: String = "highest_usage",
         @Query("plan") plan: String = "all"
     ): Response<AdminStatsResponse>
+
+    @GET("users/{user_id}/profile")
+    suspend fun getUserProfile(
+        @Path("user_id") userId: String
+    ): Response<UserProfileDto>
+
+    @PUT("users/{user_id}/username")
+    suspend fun updateUsername(
+        @Path("user_id") userId: String,
+        @Body req: UpdateUsernameReq
+    ): Response<Map<String, String>>
+
+    @GET("admin/ai/history")
+    suspend fun getAdminAiHistory(
+        @Query("admin_id") adminId: String
+    ): Response<List<AdminChatMessageDto>>
+
+    @POST("admin/ai/chat")
+    suspend fun sendAdminAiMessage(
+        @Body req: AdminAiChatRequest
+    ): Response<AdminAiChatResponse>
 }
 
 // --- مدل‌های احراز هویت ---
@@ -353,3 +376,67 @@ data class AdminStatsResponse(
     @SerializedName("total_users") val totalUsers: Int,
     @SerializedName("users") val users: List<UserStatsResponse>
 )
+
+
+// --- مدل‌های پروفایل کاربر ---
+data class UserProfileDto(
+    @SerializedName("user_id") val userId: String,
+    val phone: String,
+    val name: String,
+    val username: String? = null,
+    val plan: String,
+    val balance: Int,
+    @SerializedName("plan_expires_at") val planExpiresAt: Long?,
+    val suspended: Boolean
+)
+
+
+data class UpdateUsernameReq(
+    val username: String
+)
+
+
+// --- مدل‌های چت هوشمند ادمین ---
+data class AdminChatMessageDto(
+    val id: String,
+    val role: String,
+    val content: String,
+    @SerializedName("created_at") val createdAt: Long
+)
+
+data class AdminAiChatRequest(
+    @SerializedName("admin_id") val adminId: String,
+    val message: String
+)
+
+data class AdminAiChatResponse(
+    val reply: String
+)
+
+
+// --- مدل‌های Teams ---
+data class AddTeamMemberRequest(
+    @SerializedName("user_id") val userId: String,
+    val role: String = "member"
+)
+
+data class UpdateTeamRequest(
+    val name: String? = null,
+    val description: String? = null
+)
+
+data class SendTeamMessageRequest(
+    @SerializedName("sender_id") val senderId: String,
+    val content: String
+)
+
+data class TeamMessageDto(
+    val id: String,
+    @SerializedName("team_id") val teamId: String,
+    @SerializedName("sender_id") val senderId: String,
+    val content: String,
+    @SerializedName("created_at") val createdAt: Long
+)
+
+// --- Endpoints Teams ---
+

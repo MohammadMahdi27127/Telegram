@@ -53,6 +53,34 @@ class App : Application() {
     fun setSession(id: String?) {
         getSharedPreferences("session", Context.MODE_PRIVATE).edit().putString("userId", id).apply()
     }
+
+    /**
+     * سرور سے کاربر کی پروفائل معلومات (plan, balance، username وغیرہ) کو سنک کریں
+     * یہ method Cache clear ہونے کے بعد plan کو دوبارہ restore کرتا ہے
+     * 
+     * @param userId کاربر کی شناسہ
+     */
+    fun syncUserProfile(userId: String) {
+        if (userId.isBlank()) return
+        
+        appScope.launch {
+            try {
+                val apiService = NetworkModule.getApiService()
+                val response = apiService.getUserProfile(userId)
+                
+                if (response.isSuccessful && response.body() != null) {
+                    // لوکال ڈیٹابیس میں پروفائل اپڈیٹ کریں
+                    db.updateUserProfileFromServer(response.body()!!)
+                    Log.d("ProfileSync", "User profile synced successfully for: $userId")
+                } else {
+                    Log.w("ProfileSync", "Failed to fetch user profile: ${response.code()}")
+                }
+            } catch (e: Exception) {
+                // آفلائن mode میں خاموشی سے ناکام ہوں - کریش نہ کریں
+                Log.e("ProfileSync", "Error syncing user profile: ${e.message}")
+            }
+        }
+    }
 }
 
 fun hashPassword(password: String, salt: String): String {
@@ -128,3 +156,5 @@ fun showSupportNotification(context: Context, title: String, body: String) {
         .build()
     runCatching { NotificationManagerCompat.from(context).notify(SUPPORT_NOTIFICATION_ID, notification) }
 }
+
+

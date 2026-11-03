@@ -212,6 +212,13 @@ class MainActivity : ComponentActivity() {
             syncRequest
         )
 
+        // کاربر کی profile کو سرور سے سنک کریں (اگر logged in ہو)
+        // یہ cache clear ہونے کے بعد subscription plan کو restore کرتا ہے
+        val userId = app.sessionId()
+        if (!userId.isNullOrBlank()) {
+            app.syncUserProfile(userId)
+        }
+
         setContent {
             val context = LocalContext.current
             val theme = remember {
@@ -400,7 +407,7 @@ LaunchedEffect(userId) {
                         { nav.navigate("chat/$it") },
                         { nav.navigate("admin") },
                         { nav.navigate("notices") },
-                        onAi = { nav.navigate("ai") },
+                        onAi = { nav.navigate("ai-direct") },
                         onPay = { nav.navigate("pay") },
                         onToggleTheme = { theme.set(if (palette.dark) "light" else "dark") },
                         darkTheme = palette.dark,
@@ -430,6 +437,9 @@ LaunchedEffect(userId) {
                 }
                 screen("ai") {
                     AiChatScreen(app, userId.orEmpty()) { nav.popBackStack() }
+                }
+                screen("ai-direct") {
+                    DirectAiChatScreen(app, userId.orEmpty()) { nav.popBackStack() }
                 }
                 screen("chat/{id}", listOf(navArgument("id") { type = NavType.StringType })) { entry ->
                     ThreadScreen(app, userId.orEmpty(), entry.arguments?.getString("id").orEmpty(), { nav.popBackStack() }, { nav.navigate("pricing") })

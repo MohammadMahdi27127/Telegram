@@ -27,6 +27,7 @@ data class User(
     val monthlyAiUsageCount: Int = 0,
     val lastQuotaResetMonth: String? = null,
     val tokensUsed: Long = 0L,
+    val createdAt: Long = System.currentTimeMillis(),
 )
 
 data class Person(
@@ -74,6 +75,14 @@ data class TeamMemberInfo(
     val userId: String,
     val role: String,
     val joinedAt: Long,
+)
+
+data class TeamMessage(
+    val id: String,
+    val teamId: String,
+    val senderId: String,
+    val content: String,
+    val createdAt: Long
 )
 
 data class Entry(
@@ -439,12 +448,15 @@ class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", 
         val existing = user(id)
         if (existing != null) return existing
 
+        // 📌 نوٹ: اگر cache clear ہو تو یہاں default plan="free" ہے
+        // لیکن MainActivity.onCreate() میں syncUserProfile() کال ہو گی
+        // جو سرور سے actual plan fetch کر کے override کرے گی
         val db = writableDatabase
         val cv = ContentValues().apply {
             put("id", id)
             put("phone", "")
             put("name", "کاربر")
-            put("plan", "free")
+            put("plan", "free")  // ← temporary, will be synced from server
             put("balance", 0)
             put("created_at", System.currentTimeMillis())
             put("suspended", 0)
@@ -594,13 +606,33 @@ class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", 
 
     fun user(id: String): User? {
         val cursor = readableDatabase.rawQuery(
-            "SELECT id, phone, name, plan, balance, plan_expires_at, suspended, banner_seen, chat_bg, chat_color, avatar, username, monthly_download_count, monthly_ai_usage_count, last_quota_reset_month, tokens_used FROM users WHERE id=?",
+            "SELECT id, phone, name, plan, balance, plan_expires_at, suspended, banner_seen, chat_bg, chat_color, avatar, username, monthly_download_count, monthly_ai_usage_count, last_quota_reset_month, tokens_used, created_at FROM users WHERE id=?",
             arrayOf(id),
         )
         cursor.use {
             if (!it.moveToFirst()) return null
-            val rawPlan = it.getString(3)
-            val expires = if (it.isNull(5)) null else it.getLong(5)
+            
+            // استفاده از getColumnIndex برای بهبود امنیت
+            val idIdx = it.getColumnIndex("id")
+            val phoneIdx = it.getColumnIndex("phone")
+            val nameIdx = it.getColumnIndex("name")
+            val planIdx = it.getColumnIndex("plan")
+            val balanceIdx = it.getColumnIndex("balance")
+            val expiresIdx = it.getColumnIndex("plan_expires_at")
+            val suspendedIdx = it.getColumnIndex("suspended")
+            val bannerSeenIdx = it.getColumnIndex("banner_seen")
+            val chatBgIdx = it.getColumnIndex("chat_bg")
+            val chatColorIdx = it.getColumnIndex("chat_color")
+            val avatarIdx = it.getColumnIndex("avatar")
+            val usernameIdx = it.getColumnIndex("username")
+            val monthlyDownloadIdx = it.getColumnIndex("monthly_download_count")
+            val monthlyAiUsageIdx = it.getColumnIndex("monthly_ai_usage_count")
+            val quotaResetIdx = it.getColumnIndex("last_quota_reset_month")
+            val tokensUsedIdx = it.getColumnIndex("tokens_used")
+            val createdAtIdx = it.getColumnIndex("created_at")
+            
+            val rawPlan = it.getString(planIdx)
+            val expires = if (it.isNull(expiresIdx)) null else it.getLong(expiresIdx)
             val isExpired = expires != null && expires < System.currentTimeMillis()
 
             val plan = when {
@@ -610,22 +642,23 @@ class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", 
             }
 
             val user = User(
-                it.getString(0),
-                it.getString(1),
-                it.getString(2),
+                it.getString(idIdx),
+                it.getString(phoneIdx),
+                it.getString(nameIdx),
                 plan,
-                it.getInt(4),
+                it.getInt(balanceIdx),
                 expires,
-                it.getInt(6) == 1,
-                it.getInt(7) == 1,
-                if (it.isNull(8)) null else it.getString(8),
-                if (it.isNull(9)) null else it.getString(9),
-                if (it.isNull(10)) null else it.getString(10),
-                if (it.isNull(11)) null else it.getString(11),
-                it.getInt(12),
-                it.getInt(13),
-                if (it.isNull(14)) null else it.getString(14),
-                if (it.isNull(15)) 0L else it.getLong(15),
+                it.getInt(suspendedIdx) == 1,
+                it.getInt(bannerSeenIdx) == 1,
+                if (it.isNull(chatBgIdx)) null else it.getString(chatBgIdx),
+                if (it.isNull(chatColorIdx)) null else it.getString(chatColorIdx),
+                if (it.isNull(avatarIdx)) null else it.getString(avatarIdx),
+                if (it.isNull(usernameIdx)) null else it.getString(usernameIdx),
+                it.getInt(monthlyDownloadIdx),
+                it.getInt(monthlyAiUsageIdx),
+                if (it.isNull(quotaResetIdx)) null else it.getString(quotaResetIdx),
+                if (it.isNull(tokensUsedIdx)) 0L else it.getLong(tokensUsedIdx),
+                if (it.isNull(createdAtIdx)) System.currentTimeMillis() else it.getLong(createdAtIdx),
             )
             return ensureQuotaReset(user)
         }
@@ -1574,6 +1607,56 @@ writableDatabase.insert("entries", null, ContentValues().apply {
         writableDatabase.delete("team_members", "team_id = ? AND user_id = ?", arrayOf(teamId, userId))
     }
 
+    // --- پیام‌های درون‌تیمی (Team Messages) ---
+    
+    fun addTeamMessage(teamId: String, senderId: String, content: String): String {
+        val messageId = UUID.randomUUID().toString()
+        val now = System.currentTimeMillis()
+        
+        writableDatabase.insert("team_messages", null, ContentValues().apply {
+            put("id", messageId)
+            put("team_id", teamId)
+            put("sender_id", senderId)
+            put("content", content)
+            put("created_at", now)
+        })
+        
+        return messageId
+    }
+    
+    fun getTeamMessages(teamId: String, limit: Int = 50): List<TeamMessage> {
+        val cursor = readableDatabase.query(
+            "team_messages",
+            arrayOf("id", "team_id", "sender_id", "content", "created_at"),
+            "team_id = ?",
+            arrayOf(teamId),
+            null,
+            null,
+            "created_at ASC",
+            limit.toString()
+        )
+        
+        return cursor.use { c ->
+            val messages = mutableListOf<TeamMessage>()
+            if (c.moveToFirst()) {
+                do {
+                    messages.add(TeamMessage(
+                        id = c.getString(c.getColumnIndexOrThrow("id")),
+                        teamId = c.getString(c.getColumnIndexOrThrow("team_id")),
+                        senderId = c.getString(c.getColumnIndexOrThrow("sender_id")),
+                        content = c.getString(c.getColumnIndexOrThrow("content")),
+                        createdAt = c.getLong(c.getColumnIndexOrThrow("created_at"))
+                    ))
+                } while (c.moveToNext())
+            }
+            messages
+        }
+    }
+    
+    fun clearTeamMessages(teamId: String) {
+        writableDatabase.delete("team_messages", "team_id = ?", arrayOf(teamId))
+    }
+
     private fun startOfDay(): Long {
         val calendar = Calendar.getInstance()
         calendar.set(Calendar.HOUR_OF_DAY, 0)
@@ -1610,7 +1693,7 @@ writableDatabase.insert("entries", null, ContentValues().apply {
     }
 
     fun getUsersAdminList(query: String = "", sortBy: String = "highest_usage", planFilter: String = "all"): List<User> {
-        var sqlQuery = "SELECT id, phone, name, plan, balance, plan_expires_at, suspended, banner_seen, chat_bg, chat_color, avatar, username, monthly_download_count, monthly_ai_usage_count, last_quota_reset_month, tokens_used FROM users WHERE 1=1"
+        var sqlQuery = "SELECT id, phone, name, plan, balance, plan_expires_at, suspended, banner_seen, chat_bg, chat_color, avatar, username, monthly_download_count, monthly_ai_usage_count, last_quota_reset_month, tokens_used, created_at FROM users WHERE 1=1"
         val args = mutableListOf<String>()
 
         // فیلتر جستجو
@@ -1640,8 +1723,27 @@ writableDatabase.insert("entries", null, ContentValues().apply {
 
         cursor.use {
             while (it.moveToNext()) {
-                val rawPlan = it.getString(3) ?: "free"
-                val expires = if (it.isNull(5)) null else it.getLong(5)
+                // استفاده از getColumnIndex برای بهبود امنیت
+                val idIdx = it.getColumnIndex("id")
+                val phoneIdx = it.getColumnIndex("phone")
+                val nameIdx = it.getColumnIndex("name")
+                val planIdx = it.getColumnIndex("plan")
+                val balanceIdx = it.getColumnIndex("balance")
+                val expiresIdx = it.getColumnIndex("plan_expires_at")
+                val suspendedIdx = it.getColumnIndex("suspended")
+                val bannerSeenIdx = it.getColumnIndex("banner_seen")
+                val chatBgIdx = it.getColumnIndex("chat_bg")
+                val chatColorIdx = it.getColumnIndex("chat_color")
+                val avatarIdx = it.getColumnIndex("avatar")
+                val usernameIdx = it.getColumnIndex("username")
+                val monthlyDownloadIdx = it.getColumnIndex("monthly_download_count")
+                val monthlyAiUsageIdx = it.getColumnIndex("monthly_ai_usage_count")
+                val quotaResetIdx = it.getColumnIndex("last_quota_reset_month")
+                val tokensUsedIdx = it.getColumnIndex("tokens_used")
+                val createdAtIdx = it.getColumnIndex("created_at")
+                
+                val rawPlan = it.getString(planIdx) ?: "free"
+                val expires = if (it.isNull(expiresIdx)) null else it.getLong(expiresIdx)
                 val isExpired = expires != null && expires < System.currentTimeMillis()
 
                 val plan = when {
@@ -1651,22 +1753,23 @@ writableDatabase.insert("entries", null, ContentValues().apply {
                 }
 
                 val user = User(
-                    id = it.getString(0),
-                    phone = it.getString(1) ?: "",
-                    name = it.getString(2) ?: "",
+                    id = it.getString(idIdx),
+                    phone = it.getString(phoneIdx) ?: "",
+                    name = it.getString(nameIdx) ?: "",
                     plan = plan,
-                    balance = it.getInt(4),
+                    balance = it.getInt(balanceIdx),
                     planExpiresAt = expires,
-                    suspended = it.getInt(6) == 1,
-                    bannerSeen = it.getInt(7) == 1,
-                    chatBg = if (it.isNull(8)) null else it.getString(8),
-                    chatColor = if (it.isNull(9)) null else it.getString(9),
-                    avatar = if (it.isNull(10)) null else it.getString(10),
-                    username = if (it.isNull(11)) null else it.getString(11),
-                    monthlyDownloadCount = it.getInt(12),
-                    monthlyAiUsageCount = it.getInt(13),
-                    lastQuotaResetMonth = if (it.isNull(14)) null else it.getString(14),
-                    tokensUsed = if (it.isNull(15)) 0L else it.getLong(15),
+                    suspended = it.getInt(suspendedIdx) == 1,
+                    bannerSeen = it.getInt(bannerSeenIdx) == 1,
+                    chatBg = if (it.isNull(chatBgIdx)) null else it.getString(chatBgIdx),
+                    chatColor = if (it.isNull(chatColorIdx)) null else it.getString(chatColorIdx),
+                    avatar = if (it.isNull(avatarIdx)) null else it.getString(avatarIdx),
+                    username = if (it.isNull(usernameIdx)) null else it.getString(usernameIdx),
+                    monthlyDownloadCount = it.getInt(monthlyDownloadIdx),
+                    monthlyAiUsageCount = it.getInt(monthlyAiUsageIdx),
+                    lastQuotaResetMonth = if (it.isNull(quotaResetIdx)) null else it.getString(quotaResetIdx),
+                    tokensUsed = if (it.isNull(tokensUsedIdx)) 0L else it.getLong(tokensUsedIdx),
+                    createdAt = if (it.isNull(createdAtIdx)) System.currentTimeMillis() else it.getLong(createdAtIdx),
                 )
                 users.add(user)
             }
@@ -1674,4 +1777,23 @@ writableDatabase.insert("entries", null, ContentValues().apply {
 
         return users
     }
+
+    /**
+     * سرور سے دریافتی پروفائل ڈیٹا کو لوکال SQLite میں اپڈیٹ کریں
+     * یہ method Cache clear ہونے کے بعد subscription plan کو دوبارہ restore کرتا ہے
+     */
+    fun updateUserProfileFromServer(profile: UserProfileDto) {
+        val cv = ContentValues().apply {
+            put("id", profile.userId)
+            put("phone", profile.phone)
+            put("name", profile.name)
+            put("username", profile.username)
+            put("plan", profile.plan)
+            put("balance", profile.balance)
+            put("plan_expires_at", profile.planExpiresAt ?: 0L)
+            put("suspended", if (profile.suspended) 1 else 0)
+        }
+        writableDatabase.insertWithOnConflict("users", null, cv, SQLiteDatabase.CONFLICT_REPLACE)
+    }
 }
+
