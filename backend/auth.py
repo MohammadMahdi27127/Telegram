@@ -7,29 +7,23 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-# تلاش برای ایمپورت ماژول‌های پروژه
+# ایمپورت‌های استاندارد ریشه پروژه
+from sms_service import SMSService
+from config import settings
+
 try:
-    from sms_service import SMSService
-    from config import settings
     from database import get_db, User
 except ImportError:
-    from .sms_service import SMSService
-    from .config import settings
-    try:
-        from .database import get_db, User
-    except ImportError:
-        # در صورتی که دیتابیس در main.py تعریف شده باشد
-        from main import get_db, User
+    from main import get_db, User
 
 router = APIRouter(prefix="/api/v1/auth", tags=["Authentication"])
 
-# حافظه موقت برای کدهای OTP
-# ساختار: { "09xxxxxxxxx": {"code": str, "expires_at": float, "last_sent_at": float} }
+# حافظه موقت کدهای پیامکی
 otp_storage: Dict[str, Dict] = {}
 
 
 class OTPRequest(BaseModel):
-    phone: str = Field(..., pattern=r"^09\d{9}$", description="شماره موبایل با ۰۹")
+    phone: str = Field(..., pattern=r"^09\d{9}$", description="شماره موبایل ۱۱ رقمی با ۰۹")
 
 
 class OTPVerify(BaseModel):
@@ -50,7 +44,7 @@ class SignupRequest(BaseModel):
 
 
 def generate_otp_code() -> str:
-    """تولید کد ۶ رقمی امن عددی"""
+    """تولید کد اعتبارسنجی ۶ رقمی عددی و امن"""
     return "".join(secrets.choice("0123456789") for _ in range(6))
 
 
@@ -59,7 +53,7 @@ async def send_otp(request: OTPRequest):
     phone = request.phone.strip()
     current_time = time.time()
 
-    # جلوگیری از ارسال مکرر (حداقل فاصله ۶۰ ثانیه)
+    # جلوگیری از اسپم (محدودیت درخواست مجدد در کمتر از ۶۰ ثانیه)
     if phone in otp_storage:
         last_sent = otp_storage[phone].get("last_sent_at", 0)
         if current_time - last_sent < 60:
@@ -71,7 +65,7 @@ async def send_otp(request: OTPRequest):
 
     code = generate_otp_code()
 
-    # فراخوانی متد وب‌سرویس جدید پیامک
+    # فراخوانی وب‌سرویس پیامک
     success = await SMSService.send_otp(phone, code)
 
     if not success:
@@ -80,7 +74,6 @@ async def send_otp(request: OTPRequest):
             detail="خطا در ارسال پیامک از سمت سامانه. لطفاً دوباره تلاش کنید."
         )
 
-    # ذخیره در حافظه موقت با زمان انقضا
     expiry_seconds = getattr(settings, "OTP_EXPIRY_SECONDS", 120)
     otp_storage[phone] = {
         "code": code,
@@ -121,7 +114,6 @@ async def verify_otp(request: OTPVerify):
             detail="کد تایید وارد شده نادرست است."
         )
 
-    # حذف کد پس از اعتبارسنجی موفق
     otp_storage.pop(phone, None)
 
     return {
@@ -143,7 +135,6 @@ async def login(request: LoginRequest, db: Session = Depends(get_db)):
             detail="شماره تلفن یا رمز عبور نادرست است."
         )
 
-    # بررسی پسورد با سالت
     password_hash = hashlib.sha256(f"{user.salt}{password}".encode()).hexdigest()
     if password_hash != user.password_hash:
         raise HTTPException(
@@ -174,7 +165,7 @@ async def signup(request: SignupRequest, db: Session = Depends(get_db)):
     password = request.password
     code = request.code.strip()
 
-    # ۱. بررسی کد پیامک
+    # ۱. بررسی کد اعتبارسنجی
     stored_data = otp_storage.get(phone)
     if not stored_data:
         raise HTTPException(
@@ -195,7 +186,7 @@ async def signup(request: SignupRequest, db: Session = Depends(get_db)):
             detail="کد تایید وارد شده نادرست است."
         )
 
-    # ۲. بررسی یکتا بودن شماره در دیتابیس
+    # ۲. بررسی عدم تکرار شماره در دیتابیس
     existing = db.query(User).filter(User.phone == phone).first()
     if existing:
         raise HTTPException(
@@ -203,7 +194,6 @@ async def signup(request: SignupRequest, db: Session = Depends(get_db)):
             detail="این شماره تلفن قبلاً در سامانه ثبت شده است."
         )
 
-    # ۳. ثبت کاربر جدید
     otp_storage.pop(phone, None)
 
     salt = secrets.token_hex(16)
