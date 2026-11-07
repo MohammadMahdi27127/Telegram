@@ -8,7 +8,7 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-# خواندن متغیرها از محیط
+# خواندن متغیرها از محیط (بدون تغییر شماره ارسال)
 FARAZ_API_KEY = os.getenv("FARAZ_API_KEY", "")
 FARAZ_ORIGINATOR = os.getenv("FARAZ_ORIGINATOR", "90008361")
 PATTERN_CODE = os.getenv("FARAZ_PATTERN_CODE", "wbprpwbxQg")
@@ -48,13 +48,12 @@ def send_otp_sms(phone: str, code: str) -> bool:
         "Content-Type": "application/json",
     }
 
-    # ساختار جدید با کلید attributes
     payload = {
         "code": PATTERN_CODE,
         "sender": FARAZ_ORIGINATOR,
         "recipient": normalized_phone,
         "attributes": {
-            "code": str(code)  # کلید باید با نام متغیر تعریف شده در پنل یکسان باشد
+            "code": str(code)
         },
     }
 
@@ -71,3 +70,9 @@ def send_otp_sms(phone: str, code: str) -> bool:
     except requests.RequestException as e:
         logger.error(f"[SMS Exception] خطای شبکه در ارسال پیامک: {e}")
         return False
+
+
+class SMSService:
+    @staticmethod
+    async def send_otp(phone: str, code: str) -> bool:
+        return send_otp_sms(phone, code)
