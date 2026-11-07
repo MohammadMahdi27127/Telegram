@@ -3,19 +3,17 @@ import logging
 import secrets
 import hashlib
 import time
-from typing import List, Optional
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends
-from sqlalchemy.orm import Session
 import uuid
+import re
+from typing import List, Optional
 from contextlib import asynccontextmanager
-from typing import List
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException
 from sqlalchemy import (
-    Column, String, Integer, BigInteger, Boolean, Float, Text, create_engine
+    Column, String, Integer, BigInteger, Boolean, Float, Text, create_engine, text
 )
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import sessionmaker, Session
 from pydantic import BaseModel
 
 # تنظیم لاگر در بالاترین نقطه فایل
@@ -231,7 +229,7 @@ class AdminAiChat(Base):
     __tablename__ = "admin_ai_chats"
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     admin_id = Column(String, nullable=False, index=True)
-    role = Column(String(16), nullable=False)  # 'user' یا 'assistant'
+    role = Column(String(16), nullable=False)
     content = Column(Text, nullable=False)
     created_at = Column(BigInteger, default=lambda: int(time.time() * 1000))
 
@@ -243,29 +241,19 @@ class TeamMessage(Base):
     content = Column(Text, nullable=False)
     created_at = Column(BigInteger, nullable=False, default=lambda: int(time.time() * 1000))
 
-# متد ساخت جداول
+# ساخت جداول و اعمال دستورات SQL با استفاده از text()
 def init_db():
     try:
         logger.info("Initializing database tables...")
         Base.metadata.create_all(bind=engine)
         
-        # Database migrations
         db = SessionLocal()
         try:
-            # Ensure tokens_used column exists (PostgreSQL migration)
-            db.execute("""
-                ALTER TABLE users ADD COLUMN IF NOT EXISTS tokens_used BIGINT DEFAULT 0;
-            """)
-            logger.info("tokens_used column ensured in users table")
+            # استفاده استاندارد از text() برای سازگاری با SQLAlchemy 2.0+
+            db.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS tokens_used BIGINT DEFAULT 0;"))
+            db.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS username VARCHAR(64) UNIQUE;"))
             
-            # Ensure username column exists with unique constraint (PostgreSQL migration)
-            db.execute("""
-                ALTER TABLE users ADD COLUMN IF NOT EXISTS username VARCHAR(64) UNIQUE;
-            """)
-            logger.info("username column ensured in users table")
-            
-            # Create admin_ai_chats table if not exists
-            db.execute("""
+            db.execute(text("""
                 CREATE TABLE IF NOT EXISTS admin_ai_chats (
                     id VARCHAR(64) PRIMARY KEY,
                     admin_id VARCHAR(64) NOT NULL,
@@ -273,17 +261,10 @@ def init_db():
                     content TEXT NOT NULL,
                     created_at BIGINT NOT NULL
                 );
-            """)
-            logger.info("admin_ai_chats table ensured")
+            """))
+            db.execute(text("CREATE INDEX IF NOT EXISTS idx_admin_ai_chats_admin_id ON admin_ai_chats(admin_id);"))
             
-            # Create index on admin_id for faster queries
-            db.execute("""
-                CREATE INDEX IF NOT EXISTS idx_admin_ai_chats_admin_id ON admin_ai_chats(admin_id);
-            """)
-            logger.info("admin_ai_chats index ensured")
-            
-            # Create team_messages table if not exists
-            db.execute("""
+            db.execute(text("""
                 CREATE TABLE IF NOT EXISTS team_messages (
                     id VARCHAR(64) PRIMARY KEY,
                     team_id VARCHAR(64) NOT NULL,
@@ -291,19 +272,12 @@ def init_db():
                     content TEXT NOT NULL,
                     created_at BIGINT NOT NULL
                 );
-            """)
-            logger.info("team_messages table ensured")
-            
-            # Create indexes on team_messages
-            db.execute("""
-                CREATE INDEX IF NOT EXISTS idx_team_messages_team_id ON team_messages(team_id);
-            """)
-            db.execute("""
-                CREATE INDEX IF NOT EXISTS idx_team_messages_created_at ON team_messages(created_at);
-            """)
-            logger.info("team_messages indexes ensured")
+            """))
+            db.execute(text("CREATE INDEX IF NOT EXISTS idx_team_messages_team_id ON team_messages(team_id);"))
+            db.execute(text("CREATE INDEX IF NOT EXISTS idx_team_messages_created_at ON team_messages(created_at);"))
             
             db.commit()
+            logger.info("Database migrations executed successfully.")
         except Exception as e:
             logger.warning(f"Could not add/update columns: {e}")
             db.rollback()
@@ -368,15 +342,13 @@ app = FastAPI(title="Hamsohbat Backend", lifespan=lifespan)
 # روتر احراز هویت
 app.include_router(auth_router)
 
-# روتر همگام‌سازی (ایمپورت در این بخش مانع بروز خطای چرخه‌ای می‌شود)
+# روترهای دیگر
 from sync import router as sync_router
 app.include_router(sync_router, prefix="/api/v1")
 
-# روتر تیم‌ها
 from teams import router as teams_router
 app.include_router(teams_router, prefix="/api/v1")
 
-# روتر ادمین
 from admin import router as admin_router
 app.include_router(admin_router, prefix="/api/v1")
 
@@ -434,7 +406,6 @@ def check_user_exists(payload: UserCheckRequest, db: Session = Depends(lambda: S
         )
     return UserCheckResponse(exists=False)
 
-
 class UpdateUsernameRequest(BaseModel):
     username: str
 
@@ -450,12 +421,6 @@ class UserProfileResponse(BaseModel):
 
 @app.get("/api/v1/users/{user_id}/profile", response_model=UserProfileResponse)
 def get_user_profile(user_id: str, db: Session = Depends(lambda: SessionLocal())):
-    """
-    دریافت پروفایل کاربر شامل plan، balance، و وضعیت اشتراک
-    
-    مثال: GET /api/v1/users/123e4567-e89b-12d3-a456-426614174000/profile
-    """
-    from fastapi import HTTPException
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="کاربر یافت نشد")
@@ -470,24 +435,8 @@ def get_user_profile(user_id: str, db: Session = Depends(lambda: SessionLocal())
         suspended=user.suspended or False
     )
 
-
 @app.put("/api/v1/users/{user_id}/username")
 def update_username(user_id: str, req: UpdateUsernameRequest, db: Session = Depends(lambda: SessionLocal())):
-    """
-    آپڈیٹ نام کاربری (Username/Handle)
-    
-    درخواست: PUT /api/v1/users/{user_id}/username
-    بدنه: { "username": "mohammad_ali" }
-    
-    اعتبارسنجی:
-    - حداقل ۳ و حداکثر ۳۰ کاراکتر
-    - فقط حروف انگلیسی a-z، اعداد 0-9 و خط زیرین _
-    - حذف خودکار @ از ابتدا و تبدیل به کوچک
-    """
-    from fastapi import HTTPException
-    import re
-    
-    # اعتبارسنجی ورودی
     username = req.username.strip().lstrip('@').lower() if req.username else ""
     
     if not username:
@@ -496,24 +445,20 @@ def update_username(user_id: str, req: UpdateUsernameRequest, db: Session = Depe
     if len(username) < 3 or len(username) > 30:
         raise HTTPException(status_code=400, detail="نام کاربری باید ۳ تا ۳۰ کاراکتر باشد")
     
-    # بررسی فرمت معتبر
     if not re.match(r"^[a-z0-9_]+$", username):
         raise HTTPException(status_code=400, detail="نام کاربری فقط می‌تواند حروف انگلیسی کوچک، اعداد و خط زیرین را شامل باشد")
     
-    # بررسی موجود بودن کاربر
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="کاربر یافت نشد")
     
-    # بررسی تکراری نبودن username
     existing_user = db.query(User).filter(
         User.username == username,
-        User.id != user_id  # خود این کاربر را exclude کن
+        User.id != user_id
     ).first()
     if existing_user:
         raise HTTPException(status_code=400, detail="این نام کاربری قبلاً انتخاب شده است")
     
-    # ذخیره نام کاربری
     user.username = username
     db.commit()
     
@@ -522,9 +467,6 @@ def update_username(user_id: str, req: UpdateUsernameRequest, db: Session = Depe
         "username": user.username,
         "message": "نام کاربری با موفقیت به‌روزرسانی شد"
     }
-
-
-# --- اندپوینت‌های چت هوشمند ادمین ---
 
 class AdminAiChatMessage(BaseModel):
     id: str
@@ -541,19 +483,10 @@ class AdminAiChatResponse(BaseModel):
 
 @app.get("/api/v1/admin/ai/history")
 def get_admin_ai_history(admin_id: str, db: Session = Depends(lambda: SessionLocal())):
-    """
-    دریافت تاریخچه پیام‌های چت هوشمند ادمین
-    
-    مثال: GET /api/v1/admin/ai/history?admin_id=123e4567
-    """
-    from fastapi import HTTPException
-    
-    # بررسی اینکه آیا کاربر ادمین است
     user = db.query(User).filter(User.id == admin_id).first()
     if not user or user.phone != "09052893115":
         raise HTTPException(status_code=403, detail="دسترسی رد شد")
     
-    # دریافت تاریخچه
     messages = db.query(AdminAiChat).filter(
         AdminAiChat.admin_id == admin_id
     ).order_by(AdminAiChat.created_at.asc()).all()
@@ -570,20 +503,10 @@ def get_admin_ai_history(admin_id: str, db: Session = Depends(lambda: SessionLoc
 
 @app.post("/api/v1/admin/ai/chat")
 def send_admin_ai_message(req: AdminAiChatRequest, db: Session = Depends(lambda: SessionLocal())):
-    """
-    ارسال پیام به دستیار هوشمند مدیریت و دریافت پاسخ
-    
-    درخواست: POST /api/v1/admin/ai/chat
-    بدنه: { "admin_id": "123e4567", "message": "لطفاً گزارش کاربران فعال بده" }
-    """
-    from fastapi import HTTPException
-    
-    # بررسی اینکه آیا کاربر ادمین است
     user = db.query(User).filter(User.id == req.admin_id).first()
     if not user or user.phone != "09052893115":
         raise HTTPException(status_code=403, detail="دسترسی رد شد")
     
-    # ذخیره پیام کاربر
     user_message = AdminAiChat(
         id=str(uuid.uuid4()),
         admin_id=req.admin_id,
@@ -592,16 +515,14 @@ def send_admin_ai_message(req: AdminAiChatRequest, db: Session = Depends(lambda:
         created_at=int(time.time() * 1000)
     )
     db.add(user_message)
-    db.flush()  # برای اطمینان از ذخیره‌سازی قبل از تولید پاسخ
+    db.flush()
     
-    # تولید پاسخ از مدل هوش مصنوعی
     try:
         ai_response = generate_admin_ai_response(req.message)
     except Exception as e:
         logger.error(f"AI generation failed: {e}")
         ai_response = "متأسفانه در این لحظه نتوانستم پاسخ دهم. لطفاً دوباره تلاش کنید."
     
-    # ذخیره پاسخ
     assistant_message = AdminAiChat(
         id=str(uuid.uuid4()),
         admin_id=req.admin_id,
@@ -615,19 +536,11 @@ def send_admin_ai_message(req: AdminAiChatRequest, db: Session = Depends(lambda:
     return AdminAiChatResponse(reply=ai_response)
 
 def generate_admin_ai_response(message: str) -> str:
-    """
-    تولید پاسخ دستیار هوشمند مدیریت
-    می‌تواند از OpenAI، Claude یا مدل محلی استفاده کند
-    """
-    import os
-    
-    # نمونه ساده - می‌تواند با API واقعی جایگزین شود
     system_prompt = """You are an Executive System Copilot for the Admin of DaftarGoftogu. 
 You have direct context of system stats, users, and platform mechanics. 
 Speak formally, analytically, and provide direct technical and management insights. 
 Always respond in Persian (Farsi)."""
     
-    # اگر OpenAI API موجود است، استفاده کنید
     openai_key = os.getenv("OPENAI_API_KEY")
     if openai_key:
         try:
@@ -646,5 +559,4 @@ Always respond in Persian (Farsi)."""
         except Exception as e:
             logger.warning(f"OpenAI API error: {e}")
     
-    # فال‌بک: پاسخ ساده
     return f"تشکر از پیام شما. من به عنوان دستیار مدیریت در خدمتم برای کمک به:\n- تجزیه‌تحلیل آمار کاربران\n- نظارت بر سیستم\n- ارائه توصیه‌های بهبود\n\nپیام شما: {message[:100]}"
