@@ -2615,7 +2615,6 @@ fun ChatsScreen(
     val context = LocalContext.current
     var people by remember { mutableStateOf(app.db.people(userId)) }
     var creating by remember { mutableStateOf(false) }
-    var groupMode by remember { mutableStateOf(false) }
     var draft by remember { mutableStateOf("") }
     var query by remember { mutableStateOf("") }
     var searching by remember { mutableStateOf(false) }
@@ -2678,7 +2677,6 @@ fun ChatsScreen(
                         alert = "حالت مهمان" to "در حالت مهمان فقط یک نفر می‌توانید اضافه کنید."
                     } else {
                         draft = ""
-                        groupMode = false
                         creating = !creating
                     }
                 },
@@ -2746,15 +2744,6 @@ fun ChatsScreen(
                             text = { Text(if (darkTheme) "حالت روز" else "حالت شب") }, 
                             leadingIcon = { Icon(if (darkTheme) Icons.Filled.LightMode else Icons.Filled.DarkMode, null) }, 
                             onClick = { menu = false; onToggleTheme() }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("گروه جدید") }, 
-                            leadingIcon = { Icon(Icons.Filled.Groups, null) }, 
-                            onClick = {
-                                menu = false
-                                if (account?.plan == "guest" && people.any { !it.saved }) alert = "حالت مهمان" to "در حالت مهمان فقط یک نفر می‌توانید اضافه کنید."
-                                else { draft = ""; groupMode = true; creating = true }
-                            }
                         )
                         DropdownMenuItem(
                             text = { Text("پیام‌های ذخیره‌شده") }, 
@@ -3207,7 +3196,7 @@ fun ChatsScreen(
             exit = slideOutVertically(tween(240)) { it } + fadeOut(tween(180)),
             modifier = Modifier.align(Alignment.BottomCenter),
         ) {
-            AddPersonSheet(app, userId, draft, groupMode, onClose = { creating = false; groupMode = false }, onSaved = {
+            AddPersonSheet(app, userId, draft, onClose = { creating = false }, onSaved = {
                         people = app.db.people(userId)
                         creating = false
             }, onError = { alert = "شخص جدید" to it })
@@ -3290,7 +3279,6 @@ private fun AddPersonSheet(
     app: App,
     userId: String,
     initialPhone: String,
-    groupMode: Boolean = false,
     onClose: () -> Unit,
     onSaved: () -> Unit,
     onError: (String) -> Unit = {},
@@ -3301,8 +3289,6 @@ private fun AddPersonSheet(
     var phone by remember(initialPhone) { mutableStateOf(initialPhone) }
     var role by remember { mutableStateOf("") }
     var avatar by remember { mutableStateOf<String?>(null) }
-    var memberDraft by remember { mutableStateOf("") }
-    var members by remember { mutableStateOf(listOf<String>()) }
     var crop by remember { mutableStateOf<Bitmap?>(null) }
     val scope = rememberCoroutineScope()
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
@@ -3333,26 +3319,16 @@ private fun AddPersonSheet(
             Icon(Icons.Filled.Star, null, tint = Color(0xFFFFC107), modifier = Modifier.padding(horizontal = 8.dp))
             Box(Modifier.size(46.dp).clip(CircleShape).background(Color(0xFF7E57C2)), contentAlignment = Alignment.Center) { Icon(Icons.Outlined.Person, null, tint = Color.White) }
         }
-        Text(if (groupMode) "گروه جدید" else "افزودن شخص جدید", color = if (dark) Color.White else palette.text, fontWeight = FontWeight.Bold, fontSize = 20.sp, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
+        Text("افزودن شخص جدید", color = if (dark) Color.White else palette.text, fontWeight = FontWeight.Bold, fontSize = 20.sp, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
         Box(Modifier.padding(top = 10.dp).align(Alignment.CenterHorizontally).clickable { picker.launch("image/*") }) {
             PersonAvatar(name.ifBlank { "؟" }, avatar, size = 72.dp)
             Box(Modifier.align(Alignment.BottomEnd).size(24.dp).clip(CircleShape).background(Blue), contentAlignment = Alignment.Center) {
                 Icon(Icons.Filled.CameraAlt, null, tint = Color.White, modifier = Modifier.size(14.dp))
             }
         }
-        SheetField(name, { name = it }, if (groupMode) "نام گروه" else "نام", Icons.Outlined.Person, dark)
-        if (!groupMode) {
-            SheetField(phone, { phone = it }, "شماره موبایل", Icons.Filled.Phone, dark, KeyboardType.Phone)
-            SheetField(role, { role = it }, "سمت", Icons.Filled.Star, dark)
-        }
-        SheetField(memberDraft, { memberDraft = it }, "نام عضو", Icons.Filled.Person, dark)
-        Text("افزودن عضو", color = Blue, modifier = Modifier.padding(top = 6.dp).clickable {
-            if (memberDraft.isNotBlank()) {
-                members = members + memberDraft.trim()
-                memberDraft = ""
-            }
-        })
-        if (members.isNotEmpty()) Text(members.joinToString("، "), color = palette.subtext, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
+        SheetField(name, { name = it }, "نام", Icons.Outlined.Person, dark)
+        SheetField(phone, { phone = it }, "شماره موبایل", Icons.Filled.Phone, dark, KeyboardType.Phone)
+        SheetField(role, { role = it }, "سمت", Icons.Filled.Star, dark)
         val pressed = remember { MutableInteractionSource() }
         val down by pressed.collectIsPressedAsState()
         val scale by animateFloatAsState(if (down) 0.98f else 1f, label = "save-person")
@@ -3373,7 +3349,7 @@ private fun AddPersonSheet(
                         return@clickable
                     }
                     try {
-                        app.db.addPerson(userId, name, if (groupMode) "" else phone, role, avatar, if (groupMode) members else members)
+                        app.db.addPerson(userId, name, phone, role, avatar)
                         if (!isDeviceOnline(context)) app.db.enqueue("person", name)
                         onSaved()
                     } catch (e: Exception) {
@@ -3385,7 +3361,7 @@ private fun AddPersonSheet(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Filled.Check, null, tint = Color.White, modifier = Modifier.size(18.dp))
-                Text(if (groupMode) "ساخت گروه" else "ثبت شخص جدید", color = Color.White, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 8.dp))
+                Text("ثبت شخص جدید", color = Color.White, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 8.dp))
             }
         }
     }
@@ -4229,7 +4205,6 @@ fun ThreadScreen(app: App, userId: String, personId: String, back: () -> Unit, o
     }
     var attachMenu by remember { mutableStateOf(false) }
     var cameraShot by remember { mutableStateOf<File?>(null) }
-    var newMember by remember { mutableStateOf("") }
     var searchOpen by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
     var notesOnly by remember { mutableStateOf(false) }
@@ -4495,17 +4470,6 @@ fun ThreadScreen(app: App, userId: String, personId: String, back: () -> Unit, o
                                 Text(m.name, color = ink, fontSize = 14.sp, modifier = Modifier.padding(start = 8.dp))
                             }
                         }
-                        OutlinedTextField(newMember, { newMember = it }, Modifier.fillMaxWidth().padding(top = 8.dp), label = { Text("افزودن عضو (شماره یا نام کاربری)") })
-                        TextButton(onClick = {
-                            if (newMember.isBlank()) return@TextButton
-                            try {
-                                app.db.addMember(personId, newMember)
-                                members = app.db.members(personId)
-                                person = app.db.people(userId).find { it.id == personId }
-                                newMember = ""
-                                infoError = ""
-                            } catch (e: Exception) { infoError = e.message ?: "خطا" }
-                        }) { Text("افزودن به گروه") }
                     }
                     Box(Modifier.padding(vertical = 8.dp).clickable { personPhoto.launch("image/*") }) {
                         PersonAvatar(editName.ifBlank { personTitle }, person?.avatar, size = 72.dp)

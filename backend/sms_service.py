@@ -34,8 +34,10 @@ def send_otp_sms(phone: str, code: str) -> bool:
     normalized_phone = normalize_phone_number(phone)
 
     # هدر وب‌سرویس جدید فراز اس‌ام‌اس
+    # هدر استاندارد وب‌سرویس پترن IPPanel / فراز
     headers = {
         "apikey": FARAZ_API_KEY.strip(),
+        "Accept": "application/json",
         "Content-Type": "application/json",
     }
 
