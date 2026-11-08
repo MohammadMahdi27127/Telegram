@@ -40,11 +40,16 @@ def send_otp_sms(phone: str, code: str) -> bool:
         "Content-Type": "application/json",
     }
 
+    # کلیدهای دقیق و الزامی وب‌سرویس پترن جدید فراز اس‌ام‌اس
     payload = {
         "code": PATTERN_CODE,
-        "sender": FARAZ_ORIGINATOR,
+        "line_number": FARAZ_ORIGINATOR,      # الزامی: به جای sender
         "recipient": normalized_phone,
-        "variable": {
+        "number_format": "english",            # الزامی: فرمت اعداد
+        "attributes": {                        # متغیرهای پترن
+            "code": str(code).strip()
+        },
+        "variable": {                          # برای سازگاری کامل
             "code": str(code).strip()
         }
     }
@@ -52,10 +57,9 @@ def send_otp_sms(phone: str, code: str) -> bool:
     try:
         response = requests.post(BASE_URL, headers=headers, json=payload, timeout=10)
         
-        # تبدیل صریح به عدد صحیح برای مقایسه قطعی
         status_code = int(response.status_code)
         
-        # در وب‌سرویس فراز وضعیت ۲۰۰ یا ۲۰۱ نشانه موفقیت قطعی است
+        # وضعیت 200 یا 201 یعنی پیامک با موفقیت در صف ارسال قرار گرفت
         if status_code in (200, 201):
             logger.info(f"[SMS Success] پیامک با موفقیت ارسال شد: {response.text}")
             return True
