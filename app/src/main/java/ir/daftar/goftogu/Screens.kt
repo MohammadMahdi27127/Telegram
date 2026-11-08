@@ -98,6 +98,11 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Note
+import androidx.compose.material.icons.filled.ViewList
+import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.TableChart
@@ -124,6 +129,8 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.RotateRight
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.LightMode
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Share
@@ -146,6 +153,7 @@ import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.Receipt
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.MenuDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -202,6 +210,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.window.Dialog
 import java.io.File
 import kotlin.random.Random
 import kotlinx.coroutines.Dispatchers
@@ -524,14 +533,19 @@ fun BottomBar(route: String, avatar: String?, name: String, hasStar: Boolean = f
         Modifier.fillMaxWidth(),
         enter = fadeIn(tween(250, easing = FastOutSlowInEasing)) + slideInVertically(tween(250, easing = FastOutSlowInEasing)) { dy },
     ) {
-    Box(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp)) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = Color.Transparent,
+        shadowElevation = 0.dp,
+    ) {
+    Box(Modifier.fillMaxWidth().background(Color.Transparent).padding(horizontal = 24.dp, vertical = 8.dp)) {
         Row(
             Modifier
                 .fillMaxWidth()
                 .height(56.dp)
                 .shadow(6.dp, RoundedCornerShape(50), ambientColor = Color.Black.copy(alpha = 0.06f), spotColor = Color.Black.copy(alpha = 0.08f))
                 .clip(RoundedCornerShape(50))
-                .background(palette.surface.copy(alpha = 0.95f))
+                .background(Color.Transparent)
                 .border(1.dp, if (palette.dark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.06f), RoundedCornerShape(50))
                 .padding(horizontal = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -559,6 +573,7 @@ fun BottomBar(route: String, avatar: String?, name: String, hasStar: Boolean = f
             }
         }
     }
+        }
     }
 }
 
@@ -2613,32 +2628,91 @@ fun ChatsScreen(
             Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                 Box {
                     IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, "منو", tint = headerInk, modifier = Modifier.size(22.dp)) }
-                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                        DropdownMenuItem(text = { Text(if (darkTheme) "حالت روز" else "حالت شب") }, leadingIcon = { Icon(Icons.Filled.DarkMode, null) }, onClick = { menu = false; onToggleTheme() })
-                        DropdownMenuItem(text = { Text("گروه جدید") }, leadingIcon = { Icon(Icons.Filled.Person, null) }, onClick = {
-                            menu = false
-                            if (account?.plan == "guest" && people.any { !it.saved }) alert = "حالت مهمان" to "در حالت مهمان فقط یک نفر می‌توانید اضافه کنید."
-                            else { draft = ""; groupMode = true; creating = true }
-                        })
-                        DropdownMenuItem(text = { Text("پیام‌های ذخیره‌شده") }, leadingIcon = { Icon(Icons.Filled.PushPin, null) }, onClick = {
-                            menu = false
-                            open(app.db.ensureSaved(userId))
-                        })
-                        DropdownMenuItem(text = { Text("اطلاعیه‌ها") }, onClick = { menu = false; onNotices() })
-                        if (isAdmin(account?.phone)) DropdownMenuItem(text = { Text("ادمین") }, onClick = { menu = false; onAdmin() })
+                    DropdownMenu(
+                        expanded = menu,
+                        onDismissRequest = { menu = false },
+                        modifier = Modifier
+                            .shadow(6.dp, RoundedCornerShape(20.dp))
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(palette.surface, RoundedCornerShape(20.dp))
+                            .border(
+                                BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.12f)),
+                                RoundedCornerShape(20.dp),
+                            )
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text(if (darkTheme) "حالت روز" else "حالت شب") }, 
+                            leadingIcon = { Icon(if (darkTheme) Icons.Filled.LightMode else Icons.Filled.DarkMode, null) }, 
+                            onClick = { menu = false; onToggleTheme() }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("گروه جدید") }, 
+                            leadingIcon = { Icon(Icons.Filled.Groups, null) }, 
+                            onClick = {
+                                menu = false
+                                if (account?.plan == "guest" && people.any { !it.saved }) alert = "حالت مهمان" to "در حالت مهمان فقط یک نفر می‌توانید اضافه کنید."
+                                else { draft = ""; groupMode = true; creating = true }
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("پیام‌های ذخیره‌شده") }, 
+                            leadingIcon = { Icon(Icons.Filled.PushPin, null) }, 
+                            onClick = {
+                                menu = false
+                                open(app.db.ensureSaved(userId))
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("اطلاعیه‌ها") }, 
+                            leadingIcon = { Icon(Icons.Filled.Notifications, null) },
+                            onClick = { menu = false; onNotices() }
+                        )
+                        if (isAdmin(account?.phone)) {
+                            DropdownMenuItem(
+                                text = { Text("پنل ادمین") }, 
+                                leadingIcon = { Icon(Icons.Filled.AdminPanelSettings, null) },
+                                onClick = { menu = false; onAdmin() }
+                            )
+                        }
                     }
                 }
                 if (account != null) {
+                    // منطق نمایش براساس plan
+                    val isSubscribed = account.plan == "plus" || account.plan == "smart"
+                    val planExpiresAt = account.planExpiresAt
+                    val remainingDays = if (isSubscribed && planExpiresAt != null && planExpiresAt > System.currentTimeMillis()) {
+                        val diff = planExpiresAt - System.currentTimeMillis()
+                        (diff / (1000 * 60 * 60 * 24)).coerceAtLeast(1)
+                    } else 0
+                    
                     Row(
                         Modifier
                             .clip(RoundedCornerShape(20.dp))
-                            .background(Brush.horizontalGradient(listOf(Blue.copy(alpha = 0.20f), Blue.copy(alpha = 0.12f))))
+                            .background(
+                                if (isSubscribed) Brush.horizontalGradient(listOf(Color(0xFFFFD700).copy(alpha = 0.15f), Color(0xFFFFD700).copy(alpha = 0.08f)))
+                                else Brush.horizontalGradient(listOf(Blue.copy(alpha = 0.20f), Blue.copy(alpha = 0.12f)))
+                            )
                             .clickable(onClick = onPay)
                             .padding(horizontal = 10.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Icon(Icons.Filled.Wallet, null, tint = palette.blue, modifier = Modifier.size(16.dp))
-                        Text("موجودی: ${formatToman(account.balance)} تومان", color = palette.text, fontSize = 12.sp, modifier = Modifier.padding(start = 6.dp))
+                        Icon(
+                            if (isSubscribed) Icons.Filled.Star else Icons.Filled.Wallet, 
+                            null, 
+                            tint = if (isSubscribed) Color(0xFFFFD700) else palette.blue, 
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            if (isSubscribed) {
+                                if (remainingDays > 0) "اشتراک: $remainingDays روز باقیمانده"
+                                else "اشتراک منقضی شده"
+                            } else {
+                                "موجودی: ${formatToman(account.balance)} تومان"
+                            },
+                            color = palette.text, 
+                            fontSize = 12.sp, 
+                            modifier = Modifier.padding(start = 6.dp)
+                        )
                     }
                 }
                 Spacer(Modifier.weight(1f))
@@ -3458,6 +3532,7 @@ private fun ChatTopBar(
     onDeleteIdentity: () -> Unit,
 ) {
     val dark = LocalDark.current
+    val palette = LocalTg.current
     val ink = if (dark) Color.White else LocalAppTheme.current.onContainerColor
     val sub = if (dark) Color(0xFF9CA3AF) else Color(0xFF6B7280)
     val action = if (dark) Color(0xFFD1D5DB) else LocalAppTheme.current.onContainerColor
@@ -3499,16 +3574,74 @@ private fun ChatTopBar(
                             Icon(Icons.Filled.MoreVert, "منو", tint = action, modifier = Modifier.size(20.dp))
                         }
                     }
-                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                        DropdownMenuItem(text = { Text("مشخصات هویت") }, onClick = { menu = false; onInfo() })
-                        DropdownMenuItem(text = { Text("ویرایش هویت") }, onClick = { menu = false; onEditIdentity() })
-                        DropdownMenuItem(text = { Text("خلاصه‌سازی") }, onClick = { menu = false; onSummary() })
-                        DropdownMenuItem(text = { Text("خروجی گزارش") }, onClick = { menu = false; onExport() })
-                        DropdownMenuItem(text = { Text("ساخت پرونده از گزارش") }, onClick = { menu = false; onBuildFile() })
-                        DropdownMenuItem(text = { Text("جستجو در گزاره‌ها") }, onClick = { menu = false; onSearch() })
-                        DropdownMenuItem(text = { Text("همۀ گزاره‌ها") }, onClick = { menu = false; onAll() })
-                        DropdownMenuItem(text = { Text("فقط یادداشت‌ها") }, onClick = { menu = false; onNotes() })
-                        DropdownMenuItem(text = { Text("حذف هویت", color = Color.Red) }, onClick = { menu = false; onDeleteIdentity() })
+                    DropdownMenu(
+                        expanded = menu,
+                        onDismissRequest = { menu = false },
+                        modifier = Modifier
+                            .shadow(6.dp, RoundedCornerShape(20.dp))
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(palette.surface, RoundedCornerShape(20.dp))
+                            .border(
+                                BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.12f)),
+                                RoundedCornerShape(20.dp),
+                            )
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("مشخصات هویت") }, 
+                            leadingIcon = { Icon(Icons.Filled.Info, null) },
+                            onClick = { menu = false; onInfo() }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("ویرایش هویت") }, 
+                            leadingIcon = { Icon(Icons.Filled.Edit, null) },
+                            onClick = { menu = false; onEditIdentity() }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("خلاصه‌سازی") }, 
+                            leadingIcon = { Icon(Icons.Filled.AutoAwesome, null) },
+                            onClick = { menu = false; onSummary() }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("خروجی گزارش") }, 
+                            leadingIcon = { Icon(Icons.Filled.Download, null) },
+                            onClick = { menu = false; onExport() }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("ساخت پرونده") }, 
+                            leadingIcon = { Icon(Icons.Filled.Save, null) },
+                            onClick = { menu = false; onBuildFile() }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("جستجو") }, 
+                            leadingIcon = { Icon(Icons.Filled.Search, null) },
+                            onClick = { menu = false; onSearch() }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("همۀ گزاره‌ها") }, 
+                            leadingIcon = { Icon(Icons.Filled.ViewList, null) },
+                            onClick = { menu = false; onAll() }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("یادداشت‌ها") }, 
+                            leadingIcon = { Icon(Icons.Filled.Note, null) },
+                            onClick = { menu = false; onNotes() }
+                        )
+                        Divider()
+                        val deleteInteraction = remember { MutableInteractionSource() }
+                        val deletePressed by deleteInteraction.collectIsPressedAsState()
+                        DropdownMenuItem(
+                            text = { Text("حذف هویت", color = Color(0xFFE53935)) },
+                            leadingIcon = { Icon(Icons.Filled.Delete, null, tint = Color(0xFFE53935)) },
+                            onClick = { menu = false; onDeleteIdentity() },
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(if (deletePressed) Color(0xFFE53935).copy(alpha = 0.10f) else Color.Transparent),
+                            interactionSource = deleteInteraction,
+                            colors = MenuDefaults.itemColors(
+                                textColor = Color(0xFFE53935),
+                                leadingIconColor = Color(0xFFE53935),
+                            ),
+                        )
                     }
                 }
                 Surface(shape = CircleShape, shadowElevation = 2.dp, color = pill) {
@@ -5658,135 +5791,245 @@ fun ProfileScreen(
         Text("نسخه: V1", style = MaterialTheme.typography.bodySmall, color = Color.Gray, modifier = Modifier.padding(top = 16.dp, bottom = 24.dp))
     }
     if (editProfile) {
-        AlertDialog(
-            onDismissRequest = { editProfile = false; usernameError = "" },
-            shape = RoundedCornerShape(24.dp),
-            containerColor = themeDialogContainer(),
-            title = { Text("ویرایش پروفایل") },
-            text = {
-                Column {
-                    OutlinedTextField(
-                        name,
-                        { name = it },
-                        Modifier.fillMaxWidth(),
-                        label = { Text("نام نمایشی") }
-                    )
-                    OutlinedTextField(
-                        username,
-                        { username = it },
-                        Modifier.fillMaxWidth().padding(top = 8.dp),
-                        label = { Text("نام کاربری (بدون @)") },
-                        isError = usernameError.isNotEmpty(),
-                        enabled = !usernameLoading
-                    )
-                    if (usernameError.isNotEmpty()) {
+        Dialog(onDismissRequest = { editProfile = false; usernameError = "" }) {
+            Surface(
+                modifier = Modifier.fillMaxWidth().widthIn(max = 480.dp),
+                shape = RoundedCornerShape(28.dp),
+                color = themeDialogContainer(),
+                tonalElevation = 6.dp,
+            ) {
+                Column(
+                    Modifier.fillMaxWidth().padding(20.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            Modifier.size(52.dp).clip(CircleShape).background(Blue.copy(alpha = 0.12f)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(Icons.Filled.Edit, null, tint = Blue, modifier = Modifier.size(26.dp))
+                        }
                         Text(
-                            usernameError,
-                            color = Color(0xFFEF4444),
-                            fontSize = 12.sp,
-                            modifier = Modifier.padding(top = 4.dp)
+                            "ویرایش پروفایل",
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (dark) Color.White else Color(0xFF111827),
+                            modifier = Modifier.padding(start = 14.dp),
                         )
                     }
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        try {
-                            // محقق کردن نام کاربری
-                            val cleanUsername = username.trim().lowercase()
-                            usernameError = ""
-                            
-                            if (cleanUsername.isNotEmpty() && cleanUsername != (user.username ?: "")) {
-                                // اگر username تبدیل ہوا تو validation کریں
-                                if (cleanUsername.length < 3 || cleanUsername.length > 30) {
-                                    usernameError = "نام کاربری باید ۳ تا ۳۰ کاراکتر باشد"
-                                    return@TextButton
-                                }
-                                if (!Regex("^[a-z0-9_]+$").matches(cleanUsername)) {
-                                    usernameError = "فقط حروف کوچک انگلیسی، اعداد و خط زیرین مجاز است"
-                                    return@TextButton
-                                }
-                                
-                                // سرور سے API call کریں
-                                usernameLoading = true
-                                scope.launch {
-                                    try {
-                                        val api = NetworkModule.getApiService()
-                                        val response = api.updateUsername(userId, UpdateUsernameReq(cleanUsername))
-                                        if (response.isSuccessful) {
-                                            app.db.setUsername(userId, cleanUsername)
-                                            user = app.db.getOrCreateUser(userId)
-                                            username = cleanUsername
-                                            message = "نام کاربری ذخیره شد"
-                                            editProfile = false
-                                        } else {
-                                            val errorBody = response.errorBody()?.string()
-                                            usernameError = if (errorBody?.contains("قبلاً انتخاب شده") == true) {
-                                                "این نام کاربری قبلاً انتخاب شده است"
-                                            } else {
-                                                "خطا در ذخیره: ${response.code()}"
+
+                    OutlinedTextField(
+                        value = name,
+                        onValueChange = { name = it },
+                        modifier = Modifier.fillMaxWidth().padding(top = 20.dp),
+                        label = { Text("نام نمایشی") },
+                        shape = RoundedCornerShape(16.dp),
+                        leadingIcon = { Icon(Icons.Filled.Person, null, modifier = Modifier.size(20.dp)) },
+                        singleLine = true,
+                    )
+
+                    OutlinedTextField(
+                        value = username,
+                        onValueChange = { username = it },
+                        modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                        label = { Text("نام کاربری") },
+                        shape = RoundedCornerShape(16.dp),
+                        leadingIcon = {
+                            Text("@", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                        },
+                        placeholder = { Text("نام کاربری انگلیسی", fontSize = 12.sp) },
+                        isError = usernameError.isNotEmpty(),
+                        enabled = !usernameLoading,
+                        singleLine = true,
+                        supportingText = {
+                            if (usernameError.isNotEmpty()) {
+                                Text(usernameError, color = Color(0xFFE53935), fontSize = 12.sp)
+                            } else {
+                                Text("حروف انگلیسی، اعداد و _", fontSize = 11.sp, color = Color.Gray)
+                            }
+                        },
+                    )
+
+                    Row(
+                        Modifier.fillMaxWidth().padding(top = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        OutlinedButton(
+                            onClick = { editProfile = false; usernameError = "" },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(16.dp),
+                            enabled = !usernameLoading,
+                        ) {
+                            Text("انصراف")
+                        }
+                        Button(
+                            onClick = {
+                                try {
+                                    val cleanUsername = username.trim().lowercase()
+                                    usernameError = ""
+
+                                    if (cleanUsername.isNotEmpty() && cleanUsername != (user.username ?: "")) {
+                                        if (cleanUsername.length < 3 || cleanUsername.length > 30) {
+                                            usernameError = "نام کاربری باید ۳ تا ۳۰ کاراکتر باشد"
+                                            return@Button
+                                        }
+                                        if (!Regex("^[a-z0-9_]+$").matches(cleanUsername)) {
+                                            usernameError = "فقط حروف کوچک انگلیسی، اعداد و خط زیرین مجاز است"
+                                            return@Button
+                                        }
+
+                                        usernameLoading = true
+                                        scope.launch {
+                                            try {
+                                                val api = NetworkModule.getApiService()
+                                                val response = api.updateUsername(userId, UpdateUsernameReq(cleanUsername))
+                                                if (response.isSuccessful) {
+                                                    app.db.setUsername(userId, cleanUsername)
+                                                    app.db.rename(userId, name)
+                                                    user = app.db.getOrCreateUser(userId)
+                                                    username = cleanUsername
+                                                    message = "پروفایل ذخیره شد"
+                                                    editProfile = false
+                                                } else {
+                                                    val errorBody = response.errorBody()?.string()
+                                                    usernameError = if (errorBody?.contains("قبلاً انتخاب شده") == true) {
+                                                        "این نام کاربری قبلاً انتخاب شده است"
+                                                    } else {
+                                                        "خطا در ذخیره: ${response.code()}"
+                                                    }
+                                                }
+                                            } catch (e: Exception) {
+                                                usernameError = "خطا در اتصال: ${e.message}"
+                                            } finally {
+                                                usernameLoading = false
                                             }
                                         }
-                                    } catch (e: Exception) {
-                                        usernameError = "خطا در اتصال: ${e.message}"
-                                    } finally {
-                                        usernameLoading = false
+                                    } else {
+                                        app.db.rename(userId, name)
+                                        user = app.db.getOrCreateUser(userId)
+                                        message = "پروفایل ذخیره شد"
+                                        editProfile = false
                                     }
+                                } catch (e: Exception) {
+                                    message = e.message ?: "خطا"
                                 }
-                            } else {
-                                // فقط نام تغییر کردہ ہے
-                                app.db.rename(userId, name)
-                                user = app.db.getOrCreateUser(userId)
-                                message = "پروفایل ذخیره شد"
-                                editProfile = false
-                            }
-                        } catch (e: Exception) {
-                            message = e.message ?: "خطا"
+                            },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(16.dp),
+                            elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp),
+                            enabled = !usernameLoading,
+                        ) {
+                            Text(if (usernameLoading) "درحال ذخیره..." else "ذخیره تغییرات", maxLines = 1)
                         }
-                    },
-                    enabled = !usernameLoading
-                ) {
-                    Text(if (usernameLoading) "درحال ذخیره..." else "ذخیره")
+                    }
                 }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = { editProfile = false; usernameError = "" },
-                    enabled = !usernameLoading
-                ) {
-                    Text("بستن")
-                }
-            },
-        )
+            }
+        }
     }
     if (donation) PrettyAlert("حمایت مالی", "از حمایت شما سپاسگزاریم. برای هماهنگی حمایت با پشتیبانی در ارتباط باشید.", onConfirm = { donation = false })
     if (editPassword) {
-        AlertDialog(
-            onDismissRequest = { editPassword = false },
-            shape = RoundedCornerShape(24.dp),
-            containerColor = themeDialogContainer(),
-            title = { Text("رمز عبور") },
-            text = {
-                Column {
-                    OutlinedTextField(currentPassword, { currentPassword = it }, Modifier.fillMaxWidth(), label = { Text("رمز فعلی") }, visualTransformation = PasswordVisualTransformation())
-                    OutlinedTextField(nextPassword, { nextPassword = it }, Modifier.fillMaxWidth(), label = { Text("رمز جدید") }, visualTransformation = PasswordVisualTransformation())
+        Dialog(onDismissRequest = { editPassword = false }) {
+            var currentPassVisible by remember { mutableStateOf(false) }
+            var newPassVisible by remember { mutableStateOf(false) }
+            Surface(
+                modifier = Modifier.fillMaxWidth().widthIn(max = 480.dp),
+                shape = RoundedCornerShape(28.dp),
+                color = themeDialogContainer(),
+                tonalElevation = 6.dp,
+            ) {
+                Column(Modifier.fillMaxWidth().padding(20.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            Modifier.size(52.dp).clip(CircleShape).background(Blue.copy(alpha = 0.12f)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(Icons.Filled.Lock, null, tint = Blue, modifier = Modifier.size(26.dp))
+                        }
+                        Text(
+                            "تغییر رمز عبور",
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (dark) Color.White else Color(0xFF111827),
+                            modifier = Modifier.padding(start = 14.dp),
+                        )
+                    }
+
+                    OutlinedTextField(
+                        value = currentPassword,
+                        onValueChange = { currentPassword = it },
+                        modifier = Modifier.fillMaxWidth().padding(top = 20.dp),
+                        label = { Text("رمز فعلی") },
+                        shape = RoundedCornerShape(16.dp),
+                        leadingIcon = { Icon(Icons.Filled.Lock, null, modifier = Modifier.size(20.dp)) },
+                        trailingIcon = {
+                            IconButton(onClick = { currentPassVisible = !currentPassVisible }) {
+                                Icon(
+                                    if (currentPassVisible) Icons.Filled.Visibility else Icons.Filled.VisibilityOff,
+                                    if (currentPassVisible) "مخفی کردن رمز" else "نمایش رمز",
+                                    modifier = Modifier.size(20.dp),
+                                )
+                            }
+                        },
+                        visualTransformation = if (currentPassVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        singleLine = true,
+                    )
+
+                    OutlinedTextField(
+                        value = nextPassword,
+                        onValueChange = { nextPassword = it },
+                        modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                        label = { Text("رمز جدید") },
+                        shape = RoundedCornerShape(16.dp),
+                        leadingIcon = { Icon(Icons.Filled.Lock, null, modifier = Modifier.size(20.dp)) },
+                        trailingIcon = {
+                            IconButton(onClick = { newPassVisible = !newPassVisible }) {
+                                Icon(
+                                    if (newPassVisible) Icons.Filled.Visibility else Icons.Filled.VisibilityOff,
+                                    if (newPassVisible) "مخفی کردن رمز" else "نمایش رمز",
+                                    modifier = Modifier.size(20.dp),
+                                )
+                            }
+                        },
+                        visualTransformation = if (newPassVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        singleLine = true,
+                    )
+
+                    Row(
+                        Modifier.fillMaxWidth().padding(top = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        OutlinedButton(
+                            onClick = { editPassword = false },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(16.dp),
+                        ) {
+                            Text("انصراف")
+                        }
+                        Button(
+                            onClick = {
+                                try {
+                                    app.db.login(current.phone, currentPassword)
+                                    app.db.reset(current.phone, nextPassword)
+                                    currentPassword = ""
+                                    nextPassword = ""
+                                    message = "رمز عوض شد"
+                                    editPassword = false
+                                } catch (e: Exception) {
+                                    message = e.message ?: "خطا"
+                                }
+                            },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(16.dp),
+                            elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp),
+                        ) {
+                            Text("ثبت تغییر", maxLines = 1)
+                        }
+                    }
                 }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    try {
-                        app.db.login(current.phone, currentPassword)
-                        app.db.reset(current.phone, nextPassword)
-                        currentPassword = ""
-                        nextPassword = ""
-                        message = "رمز عوض شد"
-                        editPassword = false
-                    } catch (e: Exception) { message = e.message ?: "خطا" }
-                }) { Text("تغییر") }
-            },
-            dismissButton = { TextButton(onClick = { editPassword = false }) { Text("بستن") } },
-        )
+            }
+        }
     }
     crop?.let { bitmap ->
         CropDialog(bitmap, onCancel = { crop = null }) { saved ->

@@ -8,22 +8,16 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-# خواندن متغیرها از محیط (بدون تغییر شماره ارسال)
+# خواندن از محیط یا مقادیر پیش‌فرض
 FARAZ_API_KEY = os.getenv("FARAZ_API_KEY", "")
 FARAZ_ORIGINATOR = os.getenv("FARAZ_ORIGINATOR", "90008361")
 PATTERN_CODE = os.getenv("FARAZ_PATTERN_CODE", "wbprpwbxQg")
 
-# آدرس وب‌سرویس جدید اعلام‌شده توسط پشتیبانی
-BASE_URL = "https://api.iranpayamak.com/api/v1/sms/pattern/normal/send"
-
-
-def generate_otp_code(length: int = 6) -> str:
-    """تولید کد اعتبارسنجی عددی و ایمن"""
-    return "".join(secrets.choice("0123456789") for _ in range(length))
+# اندپوینت معتبر و اصلی پترن سامانه فراز / IPPanel
+BASE_URL = "https://api2.ippanel.com/api/v1/sms/pattern/normal/send"
 
 
 def normalize_phone_number(phone: str) -> str:
-    """استانداردسازی فرمت شماره تلفن به فرمت 09..."""
     p = phone.strip()
     if p.startswith("+98"):
         p = "0" + p[3:]
@@ -33,35 +27,33 @@ def normalize_phone_number(phone: str) -> str:
 
 
 def send_otp_sms(phone: str, code: str) -> bool:
-    """
-    ارسال پیامک پترن بر اساس وب‌سرویس جدید api.iranpayamak.com
-    """
     if not FARAZ_API_KEY:
         logger.error("[SMS] خطا: FARAZ_API_KEY تعریف نشده است.")
         return False
 
     normalized_phone = normalize_phone_number(phone)
 
+    # هدر وب‌سرویس جدید فراز اس‌ام‌اس
     headers = {
-        "Api-Key": FARAZ_API_KEY,
-        "Accept": "application/json",
+        "apikey": FARAZ_API_KEY.strip(),
         "Content-Type": "application/json",
     }
 
     payload = {
-        "code": PATTERN_CODE,
-        "sender": FARAZ_ORIGINATOR,
+        "code": PATTERN_CODE.strip(),
+        "sender": FARAZ_ORIGINATOR.strip(),
         "recipient": normalized_phone,
-        "attributes": {
+        "variable": {
             "code": str(code)
-        },
+        }
     }
 
     try:
         response = requests.post(BASE_URL, headers=headers, json=payload, timeout=10)
         
+        # اگر سرور با موفقیت ۲۰۰ داد
         if response.status_code in (200, 201):
-            logger.info(f"[SMS] پیامک با موفقیت به {normalized_phone} ارسال شد.")
+            logger.info(f"[SMS] پیامک با موفقیت به {normalized_phone} ارسال شد. پاسخ: {response.text}")
             return True
         else:
             logger.error(f"[SMS Error] کد وضعیت: {response.status_code} - پاسخ سرور: {response.text}")
