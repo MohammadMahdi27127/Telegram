@@ -1882,6 +1882,7 @@ fun SignUpScreen(app: App, onReady: (String) -> Unit, openLogin: () -> Unit) {
     var name by remember { mutableStateOf("") }
     var phone by remember { mutableStateOf("") }
     var code by remember { mutableStateOf("") }
+    var otpSecondsLeft by remember { mutableIntStateOf(120) }
     var password by remember { mutableStateOf("") }
     var confirm by remember { mutableStateOf("") }
     var alert by remember { mutableStateOf<Pair<String, String>?>(null) }
@@ -1889,10 +1890,21 @@ fun SignUpScreen(app: App, onReady: (String) -> Unit, openLogin: () -> Unit) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val verified = code.length == 6
+
+    LaunchedEffect(step) {
+        if (step == 1) {
+            otpSecondsLeft = 120
+            while (otpSecondsLeft > 0) {
+                delay(1_000)
+                otpSecondsLeft--
+            }
+        }
+    }
     
     Box(Modifier.fillMaxSize()) {
         AuthCard(title = "ثبت‌نام") {
-            when (step) {
+            AnimatedContent(targetState = step, label = "signup-step") { currentStep ->
+            when (currentStep) {
                 0 -> {
                     AuthField(name, { name = it }, "نام", KeyboardType.Text)
                     AuthField(phone, { phone = it }, "شماره موبایل", KeyboardType.Phone)
@@ -1920,12 +1932,18 @@ fun SignUpScreen(app: App, onReady: (String) -> Unit, openLogin: () -> Unit) {
                                     val apiService = NetworkModule.getApiService()
                                     apiService.sendOtp(OtpRequest(normalized))
                                 }
-                                loading = false
-                                step = 1
-                                alert = "کد تأیید" to "کد تأیید پیامک‌شده را در ۶ خانه وارد کن."
+                                if (response.isSuccessful) {
+                                    code = ""
+                                    step = 1
+                                    alert = null
+                                } else {
+                                    alert = "خطا در ارسال پیامک" to
+                                        "کد ارسال نشد: ${response.message().ifBlank { response.code().toString() }}"
+                                }
                             } catch (e: Exception) {
-                                loading = false
                                 alert = "خطا در ارسال پیامک" to NetworkHelper.getErrorMessage(e)
+                            } finally {
+                                loading = false
                             }
                         }
                     }
@@ -1933,6 +1951,13 @@ fun SignUpScreen(app: App, onReady: (String) -> Unit, openLogin: () -> Unit) {
                 1 -> {
                     Text("کد پیامک را وارد کن", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Start)
                     OtpBoxes(code) { code = it.filter { ch -> ch.isDigit() }.take(6) }
+                    Text(
+                        "مهلت اعتبار کد: ${persianDigits(otpSecondsLeft.toString())} ثانیه",
+                        color = Color(0xFF6B7280),
+                        fontSize = 12.sp,
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                        textAlign = TextAlign.Start,
+                    )
                     AuthButton("مرحله بعد") {
                         if (code.length < 6) {
                             alert = "کد ناقص" to "شش رقم کد پیامک‌شده را کامل وارد کن."
@@ -1998,7 +2023,14 @@ fun SignUpScreen(app: App, onReady: (String) -> Unit, openLogin: () -> Unit) {
                     }
                 }
             }
-            AuthLinks("ورود", openLogin, if (step > 0) "مرحله قبل" else "ورود", { if (step > 0) step -= 1 else openLogin() })
+            }
+            Text(
+                "قبلاً ثبت‌نام کرده‌اید؟ ورود به حساب",
+                color = Color(0xFF0288D1),
+                fontSize = 14.sp,
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp).clickable(onClick = openLogin),
+                textAlign = TextAlign.Center,
+            )
         }
         alert?.let { (title, body) ->
             PrettyAlert(title, body, onConfirm = { alert = null })
@@ -2040,16 +2072,21 @@ fun ForgotScreen(app: App, openLogin: () -> Unit, openSignup: () -> Unit) {
                                     loading = false
                                     return@launch
                                 }
-                                withContext(Dispatchers.IO) {
+                                val response = withContext(Dispatchers.IO) {
                                     val apiService = NetworkModule.getApiService()
                                     apiService.sendOtp(OtpRequest(normalized))
                                 }
-                                loading = false
-                                step = 1
-                                alert = "کد تأیید" to "کد تأیید پیامک‌شده را در ۶ خانه وارد کن."
+                                if (response.isSuccessful) {
+                                    step = 1
+                                    alert = null
+                                } else {
+                                    alert = "خطا در ارسال پیامک" to
+                                        "کد ارسال نشد: ${response.message().ifBlank { response.code().toString() }}"
+                                }
                             } catch (e: Exception) {
-                                loading = false
                                 alert = "خطا در ارسال پیامک" to NetworkHelper.getErrorMessage(e)
+                            } finally {
+                                loading = false
                             }
                         }
                     }
