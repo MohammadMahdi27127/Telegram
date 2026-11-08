@@ -54,6 +54,7 @@ import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -98,7 +99,6 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Note
 import androidx.compose.material.icons.filled.ViewList
@@ -131,7 +131,6 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Notifications
-import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.FormatSize
@@ -167,6 +166,7 @@ import androidx.compose.material3.FabPosition
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.DropdownMenu
@@ -232,8 +232,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -512,9 +514,9 @@ private fun RiseRow(id: String, index: Int, arrived: MutableList<String>, conten
 @Composable
 fun BottomBar(route: String, avatar: String?, name: String, hasStar: Boolean = false, onSelect: (String) -> Unit) {
     val palette = LocalTg.current
-    val idle = if (palette.dark) Color(0xFFE0E0E0) else Color(0xFF17212B)
+    val idle = if (palette.dark) Color(0xFF9AA7B5) else Color(0xFF7A8490)
     val accent = Blue
-    val pill = themeContainer()
+    val indicatorColor = if (palette.dark) accent.copy(alpha = 0.24f) else accent.copy(alpha = 0.14f)
     val items = listOf(
         TabGlyph("chats", "چت‌ها", Icons.Outlined.ChatBubbleOutline),
         TabGlyph("teams", "تیم‌ها", Icons.Filled.Groups),
@@ -524,55 +526,109 @@ fun BottomBar(route: String, avatar: String?, name: String, hasStar: Boolean = f
     val dy = with(LocalDensity.current) { 20.dp.roundToPx() }
     val played = PlayedOnce.bottomBar
     var shown by remember { mutableStateOf(played) }
+    val indicatorWidth = remember { Animatable(64f) }
+    val indicatorIndex = items.indexOfFirst { it.id == route }.coerceAtLeast(0)
     LaunchedEffect(Unit) {
         shown = true
         PlayedOnce.bottomBar = true
+    }
+    LaunchedEffect(route) {
+        indicatorWidth.snapTo(52f)
+        indicatorWidth.animateTo(64f, spring(dampingRatio = 0.72f, stiffness = 420f))
     }
     AnimatedVisibility(
         shown,
         Modifier.fillMaxWidth(),
         enter = fadeIn(tween(250, easing = FastOutSlowInEasing)) + slideInVertically(tween(250, easing = FastOutSlowInEasing)) { dy },
     ) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        color = Color.Transparent,
-        shadowElevation = 0.dp,
-    ) {
-    Box(Modifier.fillMaxWidth().background(Color.Transparent).padding(horizontal = 24.dp, vertical = 8.dp)) {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .height(56.dp)
-                .shadow(6.dp, RoundedCornerShape(50), ambientColor = Color.Black.copy(alpha = 0.06f), spotColor = Color.Black.copy(alpha = 0.08f))
-                .clip(RoundedCornerShape(50))
-                .background(Color.Transparent)
-                .border(1.dp, if (palette.dark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.06f), RoundedCornerShape(50))
-                .padding(horizontal = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            color = if (palette.dark) {
+                Color.Black.copy(alpha = 0.05f)
+            } else {
+                palette.surface.copy(alpha = 0.05f)
+            },
+            shadowElevation = 0.dp,
         ) {
-            items.forEach { item ->
-                val on = route == item.id
-                val tint by animateColorAsState(if (on) accent else idle, tween(200, easing = FastOutSlowInEasing), label = "tab-tint")
-                val capsule by animateColorAsState(if (on) pill else Color.Transparent, tween(200, easing = FastOutSlowInEasing), label = "tab-pill")
-                Column(
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .background(Color.Transparent)
+                    .padding(horizontal = 24.dp, vertical = 8.dp),
+            ) {
+                Row(
                     Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(capsule)
-                        .clickable { onSelect(item.id) }
-                        .padding(horizontal = if (on) 8.dp else 4.dp, vertical = 4.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
+                        .fillMaxWidth()
+                        .height(68.dp)
+                        .shadow(
+                            8.dp,
+                            CircleShape,
+                        )
+                        .clip(CircleShape)
+                        .background(if (palette.dark) palette.surface else Color.White),
                 ) {
-                    if (item.id == "profile") {
-                        PersonAvatar(name, avatar, size = 20.dp, star = hasStar)
-                    } else {
-                        Icon(item.icon, item.label, tint = tint, modifier = Modifier.size(20.dp))
+                    BoxWithConstraints(Modifier.fillMaxSize().padding(horizontal = 6.dp)) {
+                        val segmentWidth = maxWidth / items.size
+                        val actualIndicatorWidth = indicatorWidth.value.dp.coerceAtMost(segmentWidth)
+                        val indicatorOffset by animateDpAsState(
+                            targetValue = run {
+                                segmentWidth * indicatorIndex +
+                                    (segmentWidth - actualIndicatorWidth) / 2
+                            },
+                            animationSpec = spring(dampingRatio = 0.82f, stiffness = 520f),
+                            label = "bottom-nav-indicator-offset",
+                        )
+                        Box(
+                            Modifier
+                                .align(Alignment.TopStart)
+                                .padding(top = (maxHeight - 48.dp) / 2)
+                                .offset(x = indicatorOffset)
+                                .width(actualIndicatorWidth)
+                                .height(32.dp)
+                                .clip(CircleShape)
+                                .background(indicatorColor),
+                        )
+                        Row(Modifier.fillMaxSize()) {
+                            items.forEach { item ->
+                                val on = route == item.id
+                                val tint by animateColorAsState(
+                                    if (on) accent else idle,
+                                    tween(220, easing = FastOutSlowInEasing),
+                                    label = "tab-tint-${item.id}",
+                                )
+                                Column(
+                                    Modifier
+                                        .weight(1f)
+                                        .fillMaxHeight()
+                                        .clip(RoundedCornerShape(16.dp))
+                                        .clickable { onSelect(item.id) },
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.Center,
+                                ) {
+                                    Box(
+                                        Modifier.width(64.dp).height(32.dp),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        if (item.id == "profile") {
+                                            PersonAvatar(name, avatar, size = 20.dp, star = hasStar)
+                                        } else {
+                                            Icon(item.icon, item.label, tint = tint, modifier = Modifier.size(20.dp))
+                                        }
+                                    }
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(
+                                        item.label,
+                                        fontSize = 10.sp,
+                                        fontWeight = if (on) FontWeight.SemiBold else FontWeight.Medium,
+                                        color = tint,
+                                        maxLines = 1,
+                                    )
+                                }
+                            }
+                        }
                     }
-                    Text(item.label, fontSize = 10.sp, fontWeight = if (on) FontWeight.SemiBold else FontWeight.Medium, color = tint, maxLines = 1)
                 }
             }
-        }
-    }
         }
     }
 }
@@ -1334,12 +1390,45 @@ private fun SupportBadge(size: androidx.compose.ui.unit.Dp) {
 private fun supportClock(millis: Long): String =
     persianDigits(SimpleDateFormat("HH:mm", Locale.US).format(Date(millis)))
 
+private val inlineMarkdownPattern = Regex("""(\*\*|\*|_|~|`)(.+?)\1""")
+
+private fun parseMarkdown(rawText: String): androidx.compose.ui.text.AnnotatedString {
+    if (rawText.none { it == '*' || it == '_' || it == '~' || it == '`' }) {
+        return androidx.compose.ui.text.AnnotatedString(rawText)
+    }
+
+    return buildAnnotatedString {
+        var cursor = 0
+        inlineMarkdownPattern.findAll(rawText).forEach { match ->
+            append(rawText.substring(cursor, match.range.first))
+            val delimiter = match.groupValues[1]
+            val content = match.groupValues[2]
+            val style = when (delimiter) {
+                "*", "**" -> SpanStyle(fontWeight = FontWeight.Bold)
+                "_" -> SpanStyle(fontStyle = FontStyle.Italic)
+                "~" -> SpanStyle(textDecoration = TextDecoration.LineThrough)
+                "`" -> SpanStyle(
+                    fontFamily = FontFamily.Monospace,
+                    background = Color(0x22000000),
+                )
+                else -> SpanStyle()
+            }
+            pushStyle(style)
+            append(content)
+            pop()
+            cursor = match.range.last + 1
+        }
+        append(rawText.substring(cursor))
+    }
+}
+
 @Composable
 private fun SupportBubble(message: SupportMessage, mine: Boolean) {
     val palette = LocalTg.current
     val chatTheme = LocalChatPalette.current
     val bubble = if (mine) (if (palette.dark) palette.outgoing else chatTheme.outgoingBubble) else (if (palette.dark) Color(0xFF1E293B) else Color.White)
     val ink = if (palette.dark && !mine) Color.White else palette.text
+    val formattedBody = remember(message.body) { parseMarkdown(message.body) }
     val shape = if (mine) {
         RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 16.dp, bottomEnd = 4.dp)
     } else {
@@ -1363,7 +1452,7 @@ private fun SupportBubble(message: SupportMessage, mine: Boolean) {
             if (message.body.isNotBlank()) {
                 val chatFont = LocalChatFont.current
                 Text(
-                    message.body,
+                    formattedBody,
                     color = ink,
                     fontSize = chatFont.sp,
                     lineHeight = (chatFont * 1.5f).sp,
@@ -2594,8 +2683,14 @@ fun ChatsScreen(
                     }
                 },
                 shape = CircleShape,
-                containerColor = if (creating) Blue.copy(alpha = 0.85f) else Blue,
+                containerColor = Color(0xFF00897B),
                 contentColor = Color.White,
+                elevation = FloatingActionButtonDefaults.elevation(
+                    defaultElevation = 0.dp,
+                    pressedElevation = 0.dp,
+                    focusedElevation = 0.dp,
+                    hoveredElevation = 0.dp,
+                ),
                 modifier = Modifier
                     .graphicsLayer {
                         val scale = fabScale * fabPop.value
@@ -2603,11 +2698,18 @@ fun ChatsScreen(
                         scaleY = scale
                         alpha = fabFade.value
                     }
-                    .size(56.dp)
                     .padding(bottom = 24.dp, end = 24.dp)
-                    .border(if (creating) 2.dp else 0.dp, Color.White, CircleShape)
+                    .size(56.dp)
+                    .shadow(6.dp, CircleShape)
             ) {
-                Icon(if (creating) Icons.Filled.Close else Icons.Filled.Edit, "شخص جدید", modifier = Modifier.size(24.dp))
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Icon(
+                        if (creating) Icons.Filled.Close else Icons.Filled.Edit,
+                        "شخص جدید",
+                        tint = Color.White,
+                        modifier = Modifier.size(26.dp),
+                    )
+                }
             }
         }
     ) { paddingValues ->
@@ -4221,10 +4323,16 @@ fun ThreadScreen(app: App, userId: String, personId: String, back: () -> Unit, o
             Text(summary, Modifier.fillMaxWidth().background(Color.White).padding(12.dp), color = Color(0xFF334155))
         }
         val shown = entries.filter { (!notesOnly || it.kind == "note") && (query.isBlank() || it.body.contains(query.trim(), true)) }
+        val previousEntryById = remember(shown) {
+            shown.mapIndexedNotNull { index, entry ->
+                if (index == 0) null else entry.id to shown[index - 1]
+            }.toMap()
+        }
         LazyColumn(Modifier.weight(1f).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            itemsIndexed(shown, key = { _, e -> e.id }) { index, entry ->
+            items(shown, key = { it.id }) { entry ->
+                val previousEntry = previousEntryById[entry.id]
                 Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-                    if (index == 0 || dayKey(shown[index - 1].occurredAt) != dayKey(entry.occurredAt)) DateSeparatorPill(entry.occurredAt)
+                    if (previousEntry == null || dayKey(previousEntry.occurredAt) != dayKey(entry.occurredAt)) DateSeparatorPill(entry.occurredAt)
                     val visible = entry.id !in hidden
                     AnimatedVisibility(
                         visible = visible,
@@ -4316,7 +4424,7 @@ fun ThreadScreen(app: App, userId: String, personId: String, back: () -> Unit, o
                     error = ""
                     try {
                         if (editingId != null && pendingMedia == null) {
-                            app.db.updateEntry(editingId!!, body, kind, channel, System.currentTimeMillis())
+                            app.db.updateEntry(editingId!!, body)
                             editingId = null
                         } else {
                             val sendKind = if (pendingMedia != null) pendingKind else kind
@@ -5093,6 +5201,7 @@ private fun JournalBubble(entry: Entry, title: String, onPin: () -> Unit, onDele
     val chatFont = LocalChatFont.current
     val bodySize = chatFont.sp
     val bodyLine = (chatFont * 1.5f).sp
+    val formattedBody = remember(entry.body) { parseMarkdown(entry.body) }
     val ink = if (entry.kind == "voice") Color.White else if (palette.dark && !note) Color.White else palette.text
     val shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomEnd = 16.dp, bottomStart = 4.dp)
     
@@ -5157,7 +5266,7 @@ private fun JournalBubble(entry: Entry, title: String, onPin: () -> Unit, onDele
                         modifier = Modifier.align(Alignment.BottomEnd).padding(6.dp).clip(RoundedCornerShape(8.dp)).background(Color(0x99000000)).padding(horizontal = 6.dp, vertical = 2.dp),
                     )
                 }
-                if (entry.body.isNotBlank() && entry.body != "عکس") Text(entry.body, color = ink, fontSize = bodySize, lineHeight = bodyLine, modifier = Modifier.padding(top = 6.dp))
+                if (entry.body.isNotBlank() && entry.body != "عکس") Text(formattedBody, color = ink, fontSize = bodySize, lineHeight = bodyLine, modifier = Modifier.padding(top = 6.dp))
             } else {
                 entry.mediaPath?.let { path -> MediaPreview(path, entry.kind) }
                 if (entry.kind != "photo" && entry.kind != "video") {
@@ -5167,7 +5276,7 @@ private fun JournalBubble(entry: Entry, title: String, onPin: () -> Unit, onDele
                         style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, fontWeight = FontWeight.Bold),
                     )
                 }
-                if (entry.body.isNotBlank() && entry.body != "عکس") Text(entry.body, color = ink, fontSize = bodySize, lineHeight = bodyLine, modifier = Modifier.padding(top = 4.dp))
+                if (entry.body.isNotBlank() && entry.body != "عکس") Text(formattedBody, color = ink, fontSize = bodySize, lineHeight = bodyLine, modifier = Modifier.padding(top = 4.dp))
             }
             if (entry.kind != "photo") Text(persianDigits(SimpleDateFormat("HH:mm", Locale.US).format(Date(entry.occurredAt))), fontSize = 11.sp, color = if (entry.kind == "voice") Color.White.copy(alpha = 0.8f) else palette.subtext, modifier = Modifier.align(Alignment.End).padding(top = 4.dp))
         }

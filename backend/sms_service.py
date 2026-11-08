@@ -14,7 +14,7 @@ FARAZ_ORIGINATOR = os.getenv("FARAZ_ORIGINATOR", "90008361")
 PATTERN_CODE = os.getenv("FARAZ_PATTERN_CODE", "wbprpwbxQg")
 
 # اندپوینت معتبر و اصلی پترن سامانه فراز / IPPanel
-BASE_URL = "https://api2.ippanel.com/api/v1/sms/pattern/normal/send"
+BASE_URL = "https://api.iranpayamak.com/ws/v1/sms/simple"
 
 
 def normalize_phone_number(phone: str) -> str:

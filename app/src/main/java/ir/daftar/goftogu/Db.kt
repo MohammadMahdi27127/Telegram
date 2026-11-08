@@ -939,7 +939,7 @@ class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", 
 
     fun entries(personId: String): List<Entry> {
         val cursor = readableDatabase.rawQuery(
-            "SELECT e.id, e.user_id, e.body, e.kind, e.channel, e.occurred_at, e.pinned, e.voice_path, e.media_path, m.name, e.target_recipient_id FROM entries e LEFT JOIN members m ON m.id = e.member_id WHERE e.person_id=? ORDER BY e.pinned DESC, e.occurred_at",
+            "SELECT e.id, e.user_id, e.body, e.kind, e.channel, e.occurred_at, e.pinned, e.voice_path, e.media_path, m.name, e.target_recipient_id FROM entries e LEFT JOIN members m ON m.id = e.member_id WHERE e.person_id=? ORDER BY e.occurred_at ASC, e.created_at ASC",
             arrayOf(personId),
         )
         return cursor.use {
@@ -1168,12 +1168,9 @@ writableDatabase.insert("entries", null, ContentValues().apply {
         }
     }
 
-    fun updateEntry(id: String, body: String, kind: String, channel: String, occurredAt: Long) {
+    fun updateEntry(id: String, body: String) {
         writableDatabase.update("entries", ContentValues().apply {
             put("body", body.trim())
-            put("kind", kind)
-            put("channel", channel)
-            put("occurred_at", occurredAt)
             put("updated_at", System.currentTimeMillis())
         }, "id=?", arrayOf(id))
     }
@@ -1796,4 +1793,3 @@ writableDatabase.insert("entries", null, ContentValues().apply {
         writableDatabase.insertWithOnConflict("users", null, cv, SQLiteDatabase.CONFLICT_REPLACE)
     }
 }
-
