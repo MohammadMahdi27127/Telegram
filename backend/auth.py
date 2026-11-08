@@ -1,4 +1,5 @@
 import hashlib
+import logging
 import secrets
 import time
 import uuid
@@ -8,6 +9,8 @@ from pydantic import BaseModel, Field
 
 from sms_service import SMSService
 from config import settings
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/auth", tags=["Authentication"])
 
@@ -58,8 +61,12 @@ async def send_otp(request: OTPRequest):
 
     code = generate_otp_code()
 
-    # ارسال پیامک از طریق وب‌سرویس جدید
-    success = await SMSService.send_otp(phone, code)
+    # ارسال پیامک از طریق وب‌سرویس فراز / IPPanel
+    try:
+        success = await SMSService.send_otp(phone, code)
+    except Exception as e:
+        logger.error(f"[SMS Exception in router]: {e}")
+        success = False
 
     if not success:
         raise HTTPException(
@@ -67,17 +74,24 @@ async def send_otp(request: OTPRequest):
             detail="خطا در ارسال پیامک. لطفاً دوباره تلاش کنید."
         )
 
-    expiry_seconds = getattr(settings, "OTP_EXPIRY_SECONDS", 120)
+    # تبدیل امن به عدد صحیح برای رفع باگ جمع float با str
+    raw_expiry = getattr(settings, "OTP_EXPIRY_SECONDS", 120)
+    try:
+        expiry_seconds = int(raw_expiry)
+    except (ValueError, TypeError):
+        expiry_seconds = 120
+
     otp_storage[phone] = {
-        "code": code,
+        "code": str(code),
         "expires_at": current_time + expiry_seconds,
         "last_sent_at": current_time
     }
 
     return {
+        "status": "success",
+        "success": True,
         "message": "کد تایید ارسال شد.",
-        "expires_in": expiry_seconds,
-        "status": "success"
+        "expires_in": expiry_seconds
     }
 
 
@@ -110,8 +124,9 @@ async def verify_otp(request: OTPVerify):
     otp_storage.pop(phone, None)
 
     return {
-        "message": "احراز هویت با موفقیت انجام شد.",
-        "status": "success"
+        "status": "success",
+        "success": True,
+        "message": "احراز هویت با موفقیت انجام شد."
     }
 
 
@@ -147,12 +162,13 @@ async def login(request: LoginRequest):
             )
 
         return {
+            "status": "success",
+            "success": True,
             "message": "ورود موفق",
             "user_id": user.id,
             "phone": user.phone,
             "name": user.name,
-            "plan": getattr(user, "plan", "free"),
-            "status": "success"
+            "plan": getattr(user, "plan", "free")
         }
     finally:
         db.close()
@@ -223,11 +239,12 @@ async def signup(request: SignupRequest):
         db.refresh(new_user)
 
         return {
+            "status": "success",
+            "success": True,
             "message": "ثبت نام موفق",
             "user_id": new_user.id,
             "phone": new_user.phone,
-            "name": new_user.name,
-            "status": "success"
+            "name": new_user.name
         }
     except HTTPException:
         db.rollback()

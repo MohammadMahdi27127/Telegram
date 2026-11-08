@@ -1883,15 +1883,15 @@ fun SignUpScreen(app: App, onReady: (String) -> Unit, openLogin: () -> Unit) {
     var phone by remember { mutableStateOf("") }
     var code by remember { mutableStateOf("") }
     var otpSecondsLeft by remember { mutableIntStateOf(120) }
+    var otpTimerKey by remember { mutableIntStateOf(0) }
     var password by remember { mutableStateOf("") }
     var confirm by remember { mutableStateOf("") }
     var alert by remember { mutableStateOf<Pair<String, String>?>(null) }
     var loading by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    val verified = code.length == 6
 
-    LaunchedEffect(step) {
+    LaunchedEffect(step, otpTimerKey) {
         if (step == 1) {
             otpSecondsLeft = 120
             while (otpSecondsLeft > 0) {
@@ -1903,126 +1903,152 @@ fun SignUpScreen(app: App, onReady: (String) -> Unit, openLogin: () -> Unit) {
     
     Box(Modifier.fillMaxSize()) {
         AuthCard(title = "ثبت‌نام") {
-            AnimatedContent(targetState = step, label = "signup-step") { currentStep ->
-            when (currentStep) {
-                0 -> {
-                    AuthField(name, { name = it }, "نام", KeyboardType.Text)
-                    AuthField(phone, { phone = it }, "شماره موبایل", KeyboardType.Phone)
-                    AuthButton(if (loading) "در حال ارسال کد..." else "دریافت کد تأیید") {
-                        if (loading) return@AuthButton
-                        if (name.trim().length < 2) {
-                            alert = "نام" to "نام را کامل‌تر بنویس."
-                            return@AuthButton
-                        }
-                        val normalized = normalizePhone(phone)
-                        if (normalized == null) {
-                            alert = "شماره نادرست" to "شماره موبایل باید ۱۱ رقم و با ۰۹ شروع شود."
-                            return@AuthButton
-                        }
+            if (step == 0) {
+                AuthField(name, { name = it }, "نام", KeyboardType.Text)
+                AuthField(phone, { phone = it }, "شماره موبایل", KeyboardType.Phone)
+                AuthButton(if (loading) "در حال ارسال کد..." else "دریافت کد تأیید") {
+                    if (loading) return@AuthButton
+                    if (name.trim().length < 2) {
+                        alert = "نام" to "نام را کامل‌تر بنویس."
+                        return@AuthButton
+                    }
+                    val normalized = normalizePhone(phone)
+                    if (normalized == null) {
+                        alert = "شماره نادرست" to "شماره موبایل باید ۱۱ رقم و با ۰۹ شروع شود."
+                        return@AuthButton
+                    }
 
-                        loading = true
-                        scope.launch(Dispatchers.Main) {
-                            try {
-                                if (!NetworkHelper.isDeviceOnline(context)) {
-                                    alert = "خطا در شبکه" to "لطفاً اتصال اینترنت را بررسی کنید"
-                                    loading = false
-                                    return@launch
-                                }
-                                val response = withContext(Dispatchers.IO) {
-                                    val apiService = NetworkModule.getApiService()
-                                    apiService.sendOtp(OtpRequest(normalized))
-                                }
-                                if (response.isSuccessful) {
-                                    code = ""
-                                    step = 1
-                                    alert = null
-                                } else {
-                                    alert = "خطا در ارسال پیامک" to
-                                        "کد ارسال نشد: ${response.message().ifBlank { response.code().toString() }}"
-                                }
-                            } catch (e: Exception) {
-                                alert = "خطا در ارسال پیامک" to NetworkHelper.getErrorMessage(e)
-                            } finally {
-                                loading = false
+                    loading = true
+                    scope.launch(Dispatchers.Main) {
+                        try {
+                            if (!NetworkHelper.isDeviceOnline(context)) {
+                                alert = "خطا در شبکه" to "لطفاً اتصال اینترنت را بررسی کنید"
+                                return@launch
                             }
+                            val response = withContext(Dispatchers.IO) {
+                                NetworkModule.getApiService().sendOtp(OtpRequest(normalized))
+                            }
+                            response.body()?.close()
+                            response.errorBody()?.close()
+                            if (response.isSuccessful) {
+                                code = ""
+                                step = 1
+                                alert = null
+                            } else {
+                                alert = "خطا در ارسال پیامک" to
+                                    "کد ارسال نشد: ${response.message().ifBlank { response.code().toString() }}"
+                            }
+                        } catch (e: Exception) {
+                            alert = "خطا در ارسال پیامک" to NetworkHelper.getErrorMessage(e)
+                        } finally {
+                            loading = false
                         }
                     }
                 }
-                1 -> {
-                    Text("کد پیامک را وارد کن", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Start)
-                    OtpBoxes(code) { code = it.filter { ch -> ch.isDigit() }.take(6) }
+            } else {
+                Text("کد پیامک‌شده را وارد کن", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Start)
+                OtpBoxes(code) { code = it.filter { character -> character.isDigit() }.take(6) }
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     Text(
-                        "مهلت اعتبار کد: ${persianDigits(otpSecondsLeft.toString())} ثانیه",
+                        "اعتبار کد: ${persianDigits(otpSecondsLeft.toString())} ثانیه",
                         color = Color(0xFF6B7280),
                         fontSize = 12.sp,
-                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                        textAlign = TextAlign.Start,
                     )
-                    AuthButton("مرحله بعد") {
-                        if (code.length < 6) {
-                            alert = "کد ناقص" to "شش رقم کد پیامک‌شده را کامل وارد کن."
-                            return@AuthButton
-                        }
-                        step = 2
-                    }
-                }
-                else -> {
-                    AuthPassword(password, { password = it }, "رمز عبور")
-                    AuthPassword(confirm, { confirm = it }, "تکرار رمز عبور")
-                    AuthButton(if (loading) "در حال ساخت حساب..." else "ساخت حساب") {
-                        if (loading) return@AuthButton
-                        if (password.length < 8) {
-                            alert = "رمز کوتاه" to "رمز باید حداقل ۸ کاراکتر باشد."
-                            return@AuthButton
-                        }
-                        if (password != confirm) {
-                            alert = "رمز" to "رمز و تکرار آن یکی نیست."
-                            return@AuthButton
-                        }
-                        val normalized = normalizePhone(phone) ?: return@AuthButton
-                        
-                        loading = true
-                        scope.launch(Dispatchers.Main) {
-                            try {
-                                if (!NetworkHelper.isDeviceOnline(context)) {
-                                    alert = "خطا در شبکه" to "لطفاً اتصال اینترنت را بررسی کنید"
+                    TextButton(
+                        onClick = {
+                            if (loading || otpSecondsLeft > 0) return@TextButton
+                            val normalized = normalizePhone(phone) ?: return@TextButton
+                            loading = true
+                            scope.launch(Dispatchers.Main) {
+                                try {
+                                    if (!NetworkHelper.isDeviceOnline(context)) {
+                                        alert = "خطا در شبکه" to "لطفاً اتصال اینترنت را بررسی کنید"
+                                        return@launch
+                                    }
+                                    val response = withContext(Dispatchers.IO) {
+                                        NetworkModule.getApiService().sendOtp(OtpRequest(normalized))
+                                    }
+                                    response.body()?.close()
+                                    response.errorBody()?.close()
+                                    if (response.isSuccessful) {
+                                        code = ""
+                                        otpTimerKey++
+                                        alert = null
+                                    } else {
+                                        alert = "ارسال مجدد ناموفق" to
+                                            "کد ارسال نشد: ${response.message().ifBlank { response.code().toString() }}"
+                                    }
+                                } catch (e: Exception) {
+                                    alert = "ارسال مجدد ناموفق" to NetworkHelper.getErrorMessage(e)
+                                } finally {
                                     loading = false
-                                    return@launch
                                 }
-                                
-                                val response = withContext(Dispatchers.IO) {
-                                    val apiService = NetworkModule.getApiService()
-                                    val signupRequest = SignupRequest(phone = normalized, name = name, password = password, code = code)
-                                    apiService.signup(signupRequest)
-                                }
-                                
-                                if (response.status == "success" && response.userId != null) {
-    val uid = response.userId!!
-    
-    // 👈 دقیقاً این خطوط اضافه میشن:
-    withContext(Dispatchers.IO) {
-        app.db.saveOrUpdateUser(
-            id = uid,
-            phone = response.phone ?: normalized,
-            name = response.name ?: name,
-            plan = "free"
-        )
-    }
-    
-    app.setSession(uid)
-    onReady(uid)
-} else {
-                                    alert = "ثبت‌نام ناموفق" to (response.message ?: "خطای نامشخص")
-                                }
-                                loading = false
-                            } catch (e: Exception) {
-                                alert = "ثبت‌نام ناموفق" to NetworkHelper.getErrorMessage(e)
-                                loading = false
                             }
+                        },
+                        enabled = !loading && otpSecondsLeft == 0,
+                    ) {
+                        Text("ارسال مجدد")
+                    }
+                }
+                AuthPassword(password, { password = it }, "رمز عبور جدید")
+                AuthPassword(confirm, { confirm = it }, "تکرار رمز عبور")
+                AuthButton(if (loading) "در حال ثبت‌نام..." else "تکمیل و ثبت‌نام") {
+                    if (loading) return@AuthButton
+                    if (code.length != 6) {
+                        alert = "کد ناقص" to "کد ۶ رقمی پیامک‌شده را کامل وارد کن."
+                        return@AuthButton
+                    }
+                    if (password.length < 8) {
+                        alert = "رمز کوتاه" to "رمز باید حداقل ۸ کاراکتر باشد."
+                        return@AuthButton
+                    }
+                    if (password != confirm) {
+                        alert = "رمز" to "رمز و تکرار آن یکی نیست."
+                        return@AuthButton
+                    }
+                    val normalized = normalizePhone(phone) ?: return@AuthButton
+                    loading = true
+                    scope.launch(Dispatchers.Main) {
+                        try {
+                            if (!NetworkHelper.isDeviceOnline(context)) {
+                                alert = "خطا در شبکه" to "لطفاً اتصال اینترنت را بررسی کنید"
+                                return@launch
+                            }
+                            val response = withContext(Dispatchers.IO) {
+                                val signupRequest = SignupRequest(
+                                    phone = normalized,
+                                    name = name.trim(),
+                                    password = password,
+                                    code = code,
+                                )
+                                NetworkModule.getApiService().signup(signupRequest)
+                            }
+                            if (response.status == "success" && response.userId != null) {
+                                val uid = response.userId
+                                withContext(Dispatchers.IO) {
+                                    app.db.saveOrUpdateUser(
+                                        id = uid,
+                                        phone = response.phone ?: normalized,
+                                        name = response.name ?: name.trim(),
+                                        plan = "free",
+                                    )
+                                }
+                                app.setSession(uid)
+                                onReady(uid)
+                            } else {
+                                alert = "ثبت‌نام ناموفق" to (response.message ?: "خطای نامشخص")
+                            }
+                        } catch (e: Exception) {
+                            alert = "ثبت‌نام ناموفق" to NetworkHelper.getErrorMessage(e)
+                        } finally {
+                            loading = false
                         }
                     }
                 }
-            }
             }
             Text(
                 "قبلاً ثبت‌نام کرده‌اید؟ ورود به حساب",

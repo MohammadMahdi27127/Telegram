@@ -1,6 +1,7 @@
 package ir.daftar.goftogu
 
 import com.google.gson.annotations.SerializedName
+import okhttp3.ResponseBody
 import retrofit2.Response
 import retrofit2.http.Body
 import retrofit2.http.DELETE
@@ -12,7 +13,7 @@ import retrofit2.http.Query
 
 interface ApiService {
     @POST("auth/send-otp")
-    suspend fun sendOtp(@Body request: OtpRequest): OtpResponse
+    suspend fun sendOtp(@Body request: OtpRequest): Response<ResponseBody>
 
     @POST("auth/verify-otp")
     suspend fun verifyOtp(@Body request: OtpVerifyRequest): VerifyResponse
@@ -137,11 +138,6 @@ data class SignupRequest(
     @SerializedName("name") val name: String,
     @SerializedName("password") val password: String,
     @SerializedName("code") val code: String
-)
-
-data class OtpResponse(
-    @SerializedName("message") val message: String? = null,
-    @SerializedName("expires_in") val expiresIn: Int? = null
 )
 
 data class VerifyResponse(
@@ -439,4 +435,3 @@ data class TeamMessageDto(
 )
 
 // --- Endpoints Teams ---
-
