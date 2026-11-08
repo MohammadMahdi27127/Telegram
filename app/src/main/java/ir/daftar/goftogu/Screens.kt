@@ -1906,7 +1906,10 @@ fun SignUpScreen(app: App, onReady: (String) -> Unit, openLogin: () -> Unit) {
             if (step == 0) {
                 AuthField(name, { name = it }, "نام", KeyboardType.Text)
                 AuthField(phone, { phone = it }, "شماره موبایل", KeyboardType.Phone)
-                AuthButton(if (loading) "در حال ارسال کد..." else "دریافت کد تأیید") {
+                AuthButton(
+                    if (loading) "در حال ارسال کد..." else "دریافت کد تأیید",
+                    loading = loading,
+                ) {
                     if (loading) return@AuthButton
                     if (name.trim().length < 2) {
                         alert = "نام" to "نام را کامل‌تر بنویس."
@@ -2351,14 +2354,31 @@ private fun AuthCodeRow(value: String, onChange: (String) -> Unit, request: () -
 }
 
 @Composable
-private fun AuthButton(label: String, onClick: () -> Unit) {
+private fun AuthButton(label: String, loading: Boolean = false, onClick: () -> Unit) {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val scale by animateFloatAsState(if (pressed) 0.95f else 1f, label = "auth-btn")
     Box(
-        Modifier.graphicsLayer { scaleX = scale; scaleY = scale }.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Color(0xFF29B6F6)).clickable(interaction, null, onClick = onClick).padding(vertical = 14.dp),
+        Modifier.graphicsLayer { scaleX = scale; scaleY = scale }.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Color(0xFF29B6F6)).clickable(
+            interactionSource = interaction,
+            indication = null,
+            enabled = !loading,
+            onClick = onClick,
+        ).padding(vertical = 14.dp),
         contentAlignment = Alignment.Center,
-    ) { Text(label, color = Color.White, fontWeight = FontWeight.Bold) }
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+            if (loading) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(18.dp),
+                    color = Color.White,
+                    strokeWidth = 2.dp,
+                )
+                Spacer(Modifier.width(10.dp))
+            }
+            Text(label, color = Color.White, fontWeight = FontWeight.Bold)
+        }
+    }
 }
 
 @Composable
