@@ -1797,7 +1797,7 @@ fun AuthScreen(app: App, onLoggedIn: (String) -> Unit, openSignup: () -> Unit, o
             AuthPassword(password, { password = it }, "رمز عبور")
             AuthButton(if (loading) "در حال ورود..." else "ورود") {
                 if (loading) return@AuthButton
-                val normalized = normalizePhone(phone)
+                val normalized = normalizePhone(phone.toEnglishDigits())
                 if (normalized == null) {
                     alert = "شماره نادرست" to "شماره موبایل باید ۱۱ رقم و با ۰۹ شروع شود."
                     return@AuthButton
@@ -1947,7 +1947,7 @@ fun SignUpScreen(app: App, onReady: (String) -> Unit, openLogin: () -> Unit) {
                 }
             } else {
                 Text("کد پیامک‌شده را وارد کن", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Start)
-                OtpBoxes(code) { code = it.filter { character -> character.isDigit() }.take(6) }
+                OtpBoxes(code) { code = it.toEnglishDigits().filter { character -> character.isDigit() }.take(6) }
                 Row(
                     Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -1961,7 +1961,7 @@ fun SignUpScreen(app: App, onReady: (String) -> Unit, openLogin: () -> Unit) {
                     TextButton(
                         onClick = {
                             if (loading || otpSecondsLeft > 0) return@TextButton
-                            val normalized = normalizePhone(phone) ?: return@TextButton
+                            val normalized = normalizePhone(phone.toEnglishDigits()) ?: return@TextButton
                             loading = true
                             scope.launch(Dispatchers.Main) {
                                 try {
@@ -2010,7 +2010,18 @@ fun SignUpScreen(app: App, onReady: (String) -> Unit, openLogin: () -> Unit) {
                         alert = "رمز" to "رمز و تکرار آن یکی نیست."
                         return@AuthButton
                     }
-                    val normalized = normalizePhone(phone) ?: return@AuthButton
+                    val nameState = name.trim()
+                    if (nameState.length < 2) {
+                        alert = "نام" to "نام را کامل‌تر بنویس."
+                        return@AuthButton
+                    }
+                    val phoneNumber = normalizePhone(phone.toEnglishDigits())
+                    if (phoneNumber == null) {
+                        alert = "شماره نادرست" to "شماره موبایل باید ۱۱ رقم و با ۰۹ شروع شود."
+                        return@AuthButton
+                    }
+                    val otpCode = code.toEnglishDigits().trim()
+                    val passwordState = password.trim()
                     loading = true
                     scope.launch(Dispatchers.Main) {
                         try {
@@ -2020,27 +2031,40 @@ fun SignUpScreen(app: App, onReady: (String) -> Unit, openLogin: () -> Unit) {
                             }
                             val response = withContext(Dispatchers.IO) {
                                 val signupRequest = SignupRequest(
-                                    phone = normalized,
-                                    name = name.trim(),
-                                    password = password,
-                                    code = code,
+                                    phone = phoneNumber.toEnglishDigits().trim(),
+                                    name = nameState,
+                                    password = passwordState,
+                                    code = otpCode,
                                 )
                                 NetworkModule.getApiService().signup(signupRequest)
                             }
-                            if (response.status == "success" && response.userId != null) {
-                                val uid = response.userId
-                                withContext(Dispatchers.IO) {
-                                    app.db.saveOrUpdateUser(
-                                        id = uid,
-                                        phone = response.phone ?: normalized,
-                                        name = response.name ?: name.trim(),
-                                        plan = "free",
-                                    )
+                            if (response.isSuccessful) {
+                                val signupResponse = response.body()
+                                if (signupResponse?.status == "success" && signupResponse.userId != null) {
+                                    val uid = signupResponse.userId
+                                    withContext(Dispatchers.IO) {
+                                        app.db.saveOrUpdateUser(
+                                            id = uid,
+                                            phone = signupResponse.phone ?: phoneNumber,
+                                            name = signupResponse.name ?: nameState,
+                                            plan = "free",
+                                        )
+                                    }
+                                    app.setSession(uid)
+                                    onReady(uid)
+                                } else {
+                                    alert = "ثبت‌نام ناموفق" to (signupResponse?.message ?: "پاسخ سرور نامعتبر است.")
                                 }
-                                app.setSession(uid)
-                                onReady(uid)
                             } else {
-                                alert = "ثبت‌نام ناموفق" to (response.message ?: "خطای نامشخص")
+                                val errorMessage = try {
+                                    response.errorBody()?.string()?.let { jsonString ->
+                                        org.json.JSONObject(jsonString).optString("detail", "خطا در ثبت‌نام")
+                                    } ?: "خطا در برقراری ارتباط با سرور"
+                                } catch (e: Exception) {
+                                    "درخواست نامعتبر (${response.code()})"
+                                }
+                                Log.e("SignUp", "Signup failed with HTTP ${response.code()}: $errorMessage")
+                                alert = "ثبت‌نام ناموفق" to errorMessage
                             }
                         } catch (e: Exception) {
                             alert = "ثبت‌نام ناموفق" to NetworkHelper.getErrorMessage(e)

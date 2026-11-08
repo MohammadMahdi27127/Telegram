@@ -22,7 +22,7 @@ interface ApiService {
     suspend fun login(@Body request: LoginRequest): LoginResponse
 
     @POST("auth/signup")
-    suspend fun signup(@Body request: SignupRequest): SignupResponse
+    suspend fun signup(@Body request: SignupRequest): Response<SignupResponse>
 
     @POST("sync/entries")
     suspend fun syncEntries(

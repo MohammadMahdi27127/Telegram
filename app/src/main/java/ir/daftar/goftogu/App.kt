@@ -88,13 +88,19 @@ fun hashPassword(password: String, salt: String): String {
     return digest.joinToString("") { "%02x".format(it) }
 }
 
-fun normalizePhone(input: String): String? {
-    val persian = "۰۱۲۳۴۵۶۷۸۹"
-    val arabic = "٠١٢٣٤٥٦٧٨٩"
-    var text = input.trim()
+fun String.toEnglishDigits(): String {
+    val persianDigits = charArrayOf('۰', '۱', '۲', '۳', '۴', '۵', '۶', '۷', '۸', '۹')
+    val arabicDigits = charArrayOf('٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩')
+    var result = this
     for (i in 0..9) {
-        text = text.replace(persian[i].toString(), i.toString()).replace(arabic[i].toString(), i.toString())
+        result = result.replace(persianDigits[i], '0' + i)
+            .replace(arabicDigits[i], '0' + i)
     }
+    return result
+}
+
+fun normalizePhone(input: String): String? {
+    val text = input.toEnglishDigits().trim()
     var digits = text.filter { it.isDigit() }
     if (digits.startsWith("0098")) digits = digits.drop(4)
     if (digits.startsWith("98") && digits.length == 12) digits = digits.drop(2)
@@ -156,5 +162,4 @@ fun showSupportNotification(context: Context, title: String, body: String) {
         .build()
     runCatching { NotificationManagerCompat.from(context).notify(SUPPORT_NOTIFICATION_ID, notification) }
 }
-
 
