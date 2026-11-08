@@ -33,46 +33,38 @@ def send_otp_sms(phone: str, code: str) -> bool:
     normalized_phone = normalize_phone_number(phone)
 
     headers = {
+        "apikey": FARAZ_API_KEY,
+        "Api-Key": FARAZ_API_KEY,
+        "Authorization": f"AccessKey {FARAZ_API_KEY}",
         "Accept": "application/json",
         "Content-Type": "application/json",
-        "Api-Key": FARAZ_API_KEY.strip(),
     }
 
     payload = {
-        "code": PATTERN_CODE.strip(),
-        "attributes": {
-            "code": str(code),
-        },
+        "code": PATTERN_CODE,
+        "sender": FARAZ_ORIGINATOR,
         "recipient": normalized_phone,
-        "line_number": FARAZ_ORIGINATOR.strip(),
-        "number_format": "english",
+        "variable": {
+            "code": str(code).strip()
+        }
     }
 
     try:
-        response = requests.post(
-            BASE_URL,
-            headers=headers,
-            json=payload,
-            timeout=10,
-        )
-
-        if response.status_code == 201:
-            logger.info(
-                "[SMS] پیامک OTP با موفقیت به %s ارسال شد. پاسخ: %s",
-                normalized_phone,
-                response.text,
-            )
+        response = requests.post(BASE_URL, headers=headers, json=payload, timeout=10)
+        
+        # تبدیل صریح به عدد صحیح برای مقایسه قطعی
+        status_code = int(response.status_code)
+        
+        # در وب‌سرویس فراز وضعیت ۲۰۰ یا ۲۰۱ نشانه موفقیت قطعی است
+        if status_code in (200, 201):
+            logger.info(f"[SMS Success] پیامک با موفقیت ارسال شد: {response.text}")
             return True
-
-        logger.error(
-            "[SMS Error] کد وضعیت: %s - پاسخ سرور: %s",
-            response.status_code,
-            response.text,
-        )
-        return False
+        else:
+            logger.error(f"[SMS Error] کد وضعیت: {status_code} - پاسخ سرور: {response.text}")
+            return False
 
     except requests.RequestException as e:
-        logger.error("[SMS Exception] خطای شبکه در ارسال پیامک: %s", e)
+        logger.error(f"[SMS Exception] خطای شبکه: {e}")
         return False
 
 
