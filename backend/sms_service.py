@@ -1,5 +1,4 @@
 import os
-import secrets
 import logging
 import requests
 from dotenv import load_dotenv
@@ -8,21 +7,21 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-# خواندن از محیط یا مقادیر پیش‌فرض
 FARAZ_API_KEY = os.getenv("FARAZ_API_KEY", "")
 FARAZ_ORIGINATOR = os.getenv("FARAZ_ORIGINATOR", "90008361")
 PATTERN_CODE = os.getenv("FARAZ_PATTERN_CODE", "wbprpwbxQg")
 
-# اندپوینت معتبر و اصلی پترن سامانه فراز / IPPanel
-BASE_URL = "https://api.iranpayamak.com/ws/v1/sms/simple"
+BASE_URL = "https://api.iranpayamak.com/ws/v1/sms/pattern"
 
 
 def normalize_phone_number(phone: str) -> str:
-    p = phone.strip()
+    p = phone.strip().replace(" ", "")
+
     if p.startswith("+98"):
         p = "0" + p[3:]
     elif p.startswith("98") and len(p) == 12:
         p = "0" + p[2:]
+
     return p
 
 
@@ -33,36 +32,47 @@ def send_otp_sms(phone: str, code: str) -> bool:
 
     normalized_phone = normalize_phone_number(phone)
 
-    # هدر وب‌سرویس جدید فراز اس‌ام‌اس
-    # هدر استاندارد وب‌سرویس پترن IPPanel / فراز
     headers = {
-        "apikey": FARAZ_API_KEY.strip(),
         "Accept": "application/json",
         "Content-Type": "application/json",
+        "Api-Key": FARAZ_API_KEY.strip(),
     }
 
     payload = {
         "code": PATTERN_CODE.strip(),
-        "sender": FARAZ_ORIGINATOR.strip(),
+        "attributes": {
+            "code": str(code),
+        },
         "recipient": normalized_phone,
-        "variable": {
-            "code": str(code)
-        }
+        "line_number": FARAZ_ORIGINATOR.strip(),
+        "number_format": "english",
     }
 
     try:
-        response = requests.post(BASE_URL, headers=headers, json=payload, timeout=10)
-        
-        # اگر سرور با موفقیت ۲۰۰ داد
-        if response.status_code in (200, 201):
-            logger.info(f"[SMS] پیامک با موفقیت به {normalized_phone} ارسال شد. پاسخ: {response.text}")
+        response = requests.post(
+            BASE_URL,
+            headers=headers,
+            json=payload,
+            timeout=10,
+        )
+
+        if response.status_code == 201:
+            logger.info(
+                "[SMS] پیامک OTP با موفقیت به %s ارسال شد. پاسخ: %s",
+                normalized_phone,
+                response.text,
+            )
             return True
-        else:
-            logger.error(f"[SMS Error] کد وضعیت: {response.status_code} - پاسخ سرور: {response.text}")
-            return False
+
+        logger.error(
+            "[SMS Error] کد وضعیت: %s - پاسخ سرور: %s",
+            response.status_code,
+            response.text,
+        )
+        return False
 
     except requests.RequestException as e:
-        logger.error(f"[SMS Exception] خطای شبکه در ارسال پیامک: {e}")
+        logger.error("[SMS Exception] خطای شبکه در ارسال پیامک: %s", e)
         return False
 
 
