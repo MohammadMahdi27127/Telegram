@@ -209,13 +209,13 @@ def get_user_teams(user_id: str, db: Session = Depends(get_db)):
         if not user:
             raise HTTPException(status_code=404, detail="کاربر یافت نشد")
         
-        # دریافت تیم‌های کاربر
-        team_memberships = db.query(TeamMember).filter(
-            TeamMember.user_id == user_id
-        ).all()
-        
-        team_ids = [tm.team_id for tm in team_memberships]
-        teams = db.query(Team).filter(Team.id.in_(team_ids)).all() if team_ids else []
+        # دریافت تیم‌هایی که کاربر (چه سازنده، چه عضو عادی) در جدول TeamMember عضو آن‌هاست
+        teams = (
+            db.query(Team)
+            .join(TeamMember, Team.id == TeamMember.team_id)
+            .filter(TeamMember.user_id == user_id)
+            .all()
+        )
         
         result = []
         for team in teams:

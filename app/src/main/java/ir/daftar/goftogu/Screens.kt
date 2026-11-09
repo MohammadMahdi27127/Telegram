@@ -775,7 +775,7 @@ fun TeamsScreen(
         }
 
         // سینک خودکار لیست تیم‌ها هنگام ورود به صفحه
-        LaunchedEffect(Unit) { fetchTeams() }
+        LaunchedEffect(userId) { fetchTeams() }
 
         Scaffold(
             containerColor = palette.bg,
