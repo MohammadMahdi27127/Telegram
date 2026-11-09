@@ -186,6 +186,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarResult
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.rememberCoroutineScope
@@ -664,6 +665,7 @@ private const val TELEGRAM_ID = "Mahdi27_127"
 /** آیدی پشتیبانی در پیام‌رسان بله. */
 private const val BALE_ID = "127_27"
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TeamsScreen(
     app: App,
@@ -733,6 +735,39 @@ fun TeamsScreen(
     } else {
         var teams by remember { mutableStateOf(app.db.teams(userId)) }
         var creating by remember { mutableStateOf(false) }
+        var refreshing by remember { mutableStateOf(false) }
+        val scope = rememberCoroutineScope()
+
+        // واکشی تیم‌ها از سرور و ذخیره آن‌ها در دیتابیس لوکال برای استفاده آفلاین
+        suspend fun fetchTeams() {
+            refreshing = true
+            try {
+                val response = withContext(Dispatchers.IO) {
+                    NetworkModule.getApiService().getUserTeams(userId)
+                }
+                if (response.isSuccessful) {
+                    val remote = response.body().orEmpty()
+                    withContext(Dispatchers.IO) {
+                        remote.forEach { team ->
+                            app.db.upsertGroupTeam(
+                                userId = userId,
+                                teamId = team.id,
+                                name = team.name,
+                                description = team.description,
+                            )
+                        }
+                    }
+                    teams = app.db.teams(userId)
+                }
+            } catch (_: Exception) {
+                // در صورت نبود اتصال، لیست لوکال نمایش داده می‌شود
+            } finally {
+                refreshing = false
+            }
+        }
+
+        // سینک خودکار لیست تیم‌ها هنگام ورود به صفحه
+        LaunchedEffect(Unit) { fetchTeams() }
 
         Scaffold(
             containerColor = palette.bg,
@@ -755,28 +790,36 @@ fun TeamsScreen(
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = palette.text) }
                     Text("تیم‌های من", color = palette.text, fontWeight = FontWeight.Bold, fontSize = 20.sp, modifier = Modifier.padding(start = 8.dp))
                 }
-                if (teams.isEmpty()) {
-                    Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                        Text("هنوز تیمی نساخته‌اید", color = palette.subtext)
-                    }
-                } else {
-                    LazyColumn(Modifier.weight(1f)) {
-                        items(teams) { team ->
-                            Card(
-                                shape = RoundedCornerShape(22.dp),
-                                colors = CardDefaults.cardColors(containerColor = Color.White),
-                                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp).clickable { onOpenTeam(team.id) }
-                            ) {
-                                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Box(Modifier.size(48.dp).clip(CircleShape).background(Blue.copy(alpha = 0.1f)), contentAlignment = Alignment.Center) {
-                                        Icon(Icons.Filled.Groups, null, tint = Blue)
+                PullToRefreshBox(
+                    isRefreshing = refreshing,
+                    onRefresh = { scope.launch { fetchTeams() } },
+                    modifier = Modifier.weight(1f).fillMaxWidth()
+                ) {
+                    LazyColumn(Modifier.fillMaxSize()) {
+                        if (teams.isEmpty()) {
+                            item {
+                                Box(Modifier.fillParentMaxSize(), contentAlignment = Alignment.Center) {
+                                    Text("هنوز تیمی نساخته‌اید", color = palette.subtext)
+                                }
+                            }
+                        } else {
+                            items(teams) { team ->
+                                Card(
+                                    shape = RoundedCornerShape(22.dp),
+                                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp).clickable { onOpenTeam(team.id) }
+                                ) {
+                                    Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        Box(Modifier.size(48.dp).clip(CircleShape).background(Blue.copy(alpha = 0.1f)), contentAlignment = Alignment.Center) {
+                                            Icon(Icons.Filled.Groups, null, tint = Blue)
+                                        }
+                                        Column(Modifier.weight(1f).padding(start = 16.dp)) {
+                                            Text(team.name, color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                            Text(team.lastBody.ifBlank { team.description }, color = Color.Gray, fontSize = 13.sp, maxLines = 1)
+                                        }
+                                        Text(listStamp(team.lastAt), color = Color.Gray, fontSize = 11.sp)
                                     }
-                                    Column(Modifier.weight(1f).padding(start = 16.dp)) {
-                                        Text(team.name, color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                                        Text(team.lastBody.ifBlank { team.description }, color = Color.Gray, fontSize = 13.sp, maxLines = 1)
-                                    }
-                                    Text(listStamp(team.lastAt), color = Color.Gray, fontSize = 11.sp)
                                 }
                             }
                         }
@@ -787,8 +830,8 @@ fun TeamsScreen(
 
         if (creating) {
             AddTeamSheet(app, userId, onClose = { creating = false }, onSaved = {
-                teams = app.db.teams(userId)
                 creating = false
+                scope.launch { fetchTeams() }
             })
         }
     }
@@ -921,15 +964,15 @@ fun AddTeamSheet(app: App, userId: String, onClose: () -> Unit, onSaved: () -> U
                 val response = api.createTeam(createReq)
                 
                 if (response.isSuccessful && response.body() != null) {
-                    // ذخیره در دیتابیس لوکال
+                    // ذخیره تیم در دیتابیس لوکال به صورت گروه با همان شناسه سرور
                     val team = response.body()!!
-                    app.db.addTeam(
+                    app.db.upsertGroupTeam(
+                        userId = userId,
+                        teamId = team.id,
                         name = team.name,
                         description = team.description,
-                        creatorId = team.creatorId,
-                        memberIds = memberIds
                     )
-                    
+
                     onSaved()
                 } else {
                     error = "خطا در ساخت تیم"

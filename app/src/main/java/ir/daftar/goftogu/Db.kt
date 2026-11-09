@@ -1501,7 +1501,44 @@ writableDatabase.insert("entries", null, ContentValues().apply {
         
         return teamId
     }
-    
+
+    /**
+     * درج یا به‌روزرسانی تیم سرور به صورت «گروه» در جدول people
+     * (با همان شناسه تیم سرور) تا در لیست تیم‌ها و صفحه گفتگو دیده شود.
+     */
+    fun upsertGroupTeam(userId: String, teamId: String, name: String, description: String? = null) {
+        val exists = readableDatabase.rawQuery(
+            "SELECT 1 FROM people WHERE id=? AND user_id=? LIMIT 1",
+            arrayOf(teamId, userId),
+        ).use { it.moveToFirst() }
+
+        if (exists) {
+            writableDatabase.update(
+                "people",
+                ContentValues().apply {
+                    put("name", name.trim())
+                    put("role", description?.trim() ?: "")
+                    put("is_group", 1)
+                },
+                "id=? AND user_id=?",
+                arrayOf(teamId, userId),
+            )
+        } else {
+            writableDatabase.insert("people", null, ContentValues().apply {
+                put("id", teamId)
+                put("user_id", userId)
+                put("name", name.trim())
+                put("phone", "")
+                put("role", description?.trim() ?: "")
+                put("pinned", 0)
+                put("created_at", System.currentTimeMillis())
+                putNull("avatar")
+                put("is_group", 1)
+                put("saved", 0)
+            })
+        }
+    }
+
     fun getTeams(userId: String): List<TeamInfo> {
         val query = """
             SELECT t.id, t.name, t.description, t.creator_id, t.created_at,
