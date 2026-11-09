@@ -96,7 +96,7 @@ fun String.toEnglishDigits(): String {
         result = result.replace(persianDigits[i], '0' + i)
             .replace(arabicDigits[i], '0' + i)
     }
-    return result
+    return result.trim()
 }
 
 fun normalizePhone(input: String): String? {

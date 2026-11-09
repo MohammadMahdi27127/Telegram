@@ -832,7 +832,9 @@ fun AddTeamSheet(app: App, userId: String, onClose: () -> Unit, onSaved: () -> U
         
         scope.launch {
             try {
-                val response = api.checkUserExists(UserCheckRequest(phone = phoneInput.trim()))
+                val rawInput = phoneInput.trim().toEnglishDigits()
+                val query = normalizePhone(rawInput) ?: rawInput
+                val response = api.checkUserExists(UserCheckRequest(phone = query))
                 if (response.isSuccessful) {
                     val result = response.body()
                     if (result != null) {
@@ -1950,7 +1952,7 @@ fun SignUpScreen(app: App, onReady: (String) -> Unit, openLogin: () -> Unit) {
                 }
             } else {
                 Text("کد پیامک‌شده را وارد کن", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Start)
-                OtpBoxes(code) { code = it.toEnglishDigits().filter { character -> character.isDigit() }.take(6) }
+                OtpBoxes(code) { code = it }
                 Row(
                     Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -2013,18 +2015,17 @@ fun SignUpScreen(app: App, onReady: (String) -> Unit, openLogin: () -> Unit) {
                         alert = "رمز" to "رمز و تکرار آن یکی نیست."
                         return@AuthButton
                     }
-                    val nameState = name.trim()
-                    if (nameState.length < 2) {
+                    val cleanName = name.trim()
+                    if (cleanName.length < 2) {
                         alert = "نام" to "نام را کامل‌تر بنویس."
                         return@AuthButton
                     }
-                    val phoneNumber = normalizePhone(phone.toEnglishDigits())
-                    if (phoneNumber == null) {
+                    val cleanPhone = normalizePhone(phone)
+                    if (cleanPhone == null) {
                         alert = "شماره نادرست" to "شماره موبایل باید ۱۱ رقم و با ۰۹ شروع شود."
                         return@AuthButton
                     }
-                    val otpCode = code.toEnglishDigits().trim()
-                    val passwordState = password.trim()
+                    val cleanCode = code.toEnglishDigits().trim()
                     loading = true
                     scope.launch(Dispatchers.Main) {
                         try {
@@ -2034,10 +2035,10 @@ fun SignUpScreen(app: App, onReady: (String) -> Unit, openLogin: () -> Unit) {
                             }
                             val response = withContext(Dispatchers.IO) {
                                 val signupRequest = SignupRequest(
-                                    phone = phoneNumber.toEnglishDigits().trim(),
-                                    name = nameState,
-                                    password = passwordState,
-                                    code = otpCode,
+                                    phone = cleanPhone,
+                                    name = cleanName,
+                                    password = password,
+                                    code = cleanCode,
                                 )
                                 NetworkModule.getApiService().signup(signupRequest)
                             }
@@ -2048,8 +2049,8 @@ fun SignUpScreen(app: App, onReady: (String) -> Unit, openLogin: () -> Unit) {
                                     withContext(Dispatchers.IO) {
                                         app.db.saveOrUpdateUser(
                                             id = uid,
-                                            phone = signupResponse.phone ?: phoneNumber,
-                                            name = signupResponse.name ?: nameState,
+                                            phone = signupResponse.phone ?: cleanPhone,
+                                            name = signupResponse.name ?: cleanName,
                                             plan = "free",
                                         )
                                     }
@@ -2146,7 +2147,7 @@ fun ForgotScreen(app: App, openLogin: () -> Unit, openSignup: () -> Unit) {
                 }
                 1 -> {
                     Text("کد پیامک را وارد کن", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Start)
-                    OtpBoxes(code) { code = it.filter { ch -> ch.isDigit() }.take(6) }
+                    OtpBoxes(code) { code = it }
                     AuthButton("مرحله بعد") {
                         if (code.length < 6) {
                             alert = "کد ناقص" to "شش رقم کد را درست و کامل وارد کن."
@@ -2177,7 +2178,7 @@ fun ForgotScreen(app: App, openLogin: () -> Unit, openSignup: () -> Unit) {
                                 
                                 val response = withContext(Dispatchers.IO) {
                                     val apiService = NetworkModule.getApiService()
-                                    val verifyRequest = OtpVerifyRequest(phone = normalized, code = code)
+                                    val verifyRequest = OtpVerifyRequest(phone = normalized, code = code.toEnglishDigits().trim())
                                     apiService.verifyOtp(verifyRequest)
                                 }
                                 
@@ -2212,8 +2213,8 @@ private fun OtpBoxes(value: String, onChange: (String) -> Unit) {
     val border = if (ok) CheckGreen else Color(0xFFE5E7EB)
     BasicTextField(
         value,
-        onChange,
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+        { input -> onChange(input.toEnglishDigits().filter { it in '0'..'9' }.take(6)) },
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
         singleLine = true,
         decorationBox = {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -2228,7 +2229,7 @@ private fun OtpBoxes(value: String, onChange: (String) -> Unit) {
                             .background(if (ok) Color(0xFFE8F5E9) else Color.White),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text(if (char.isEmpty()) "" else persianDigits(char), fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                        Text(if (char.isEmpty()) "" else char, fontSize = 20.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
