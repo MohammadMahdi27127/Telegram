@@ -343,7 +343,7 @@ LaunchedEffect(userId) {
             route = route,
             avatar = u?.avatar,
             name = u?.name ?: "",
-            hasStar = (u?.plan == "advanced" || u?.plan == "basic")
+            hasStar = (u?.plan in AppConstants.TEAM_ALLOWED_PLANS)
         ) { targetRoute ->
             nav.navigate(targetRoute) {
                 popUpTo("chats") { saveState = true }

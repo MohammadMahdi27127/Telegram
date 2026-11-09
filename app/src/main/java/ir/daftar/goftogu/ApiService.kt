@@ -84,6 +84,18 @@ interface ApiService {
         @Path("user_id") userId: String
     ): Response<List<TeamDto>>
 
+    @POST("teams/{team_id}/messages")
+    suspend fun sendTeamMessage(
+        @Path("team_id") teamId: String,
+        @Body request: SendTeamMessageRequest
+    ): Response<TeamMessageDto>
+
+    @GET("teams/{team_id}/messages")
+    suspend fun getTeamMessages(
+        @Path("team_id") teamId: String,
+        @Query("user_id") userId: String? = null
+    ): Response<List<TeamMessageDto>>
+
     @POST("sync/tokens")
     suspend fun syncTokens(
         @Body payload: TokenUsageSyncPayload
@@ -106,6 +118,12 @@ interface ApiService {
         @Path("user_id") userId: String,
         @Body req: UpdateUsernameReq
     ): Response<Map<String, String>>
+
+    @POST("users/{user_id}/plan")
+    suspend fun updateUserPlan(
+        @Path("user_id") userId: String,
+        @Body req: UpdatePlanReq
+    ): Response<UpdatePlanDto>
 
     @GET("admin/ai/history")
     suspend fun getAdminAiHistory(
@@ -392,6 +410,19 @@ data class UpdateUsernameReq(
 )
 
 
+data class UpdatePlanReq(
+    @SerializedName("plan") val plan: String,
+    @SerializedName("duration_days") val durationDays: Int = 30
+)
+
+data class UpdatePlanDto(
+    @SerializedName("status") val status: String,
+    @SerializedName("user_id") val userId: String,
+    @SerializedName("plan") val plan: String,
+    @SerializedName("plan_expires_at") val planExpiresAt: Long? = null
+)
+
+
 // --- مدل‌های چت هوشمند ادمین ---
 data class AdminChatMessageDto(
     val id: String,
@@ -423,7 +454,8 @@ data class UpdateTeamRequest(
 
 data class SendTeamMessageRequest(
     @SerializedName("sender_id") val senderId: String,
-    val content: String
+    @SerializedName("content") val content: String,
+    @SerializedName("recipient_id") val recipientId: String? = null
 )
 
 data class TeamMessageDto(
@@ -431,6 +463,7 @@ data class TeamMessageDto(
     @SerializedName("team_id") val teamId: String,
     @SerializedName("sender_id") val senderId: String,
     val content: String,
+    @SerializedName("recipient_id") val recipientId: String? = null,
     @SerializedName("created_at") val createdAt: Long
 )
 

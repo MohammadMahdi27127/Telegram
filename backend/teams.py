@@ -5,6 +5,7 @@ import logging
 from typing import List, Optional
 from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from main import SessionLocal, User, Team, TeamMember, TeamMessage
@@ -61,12 +62,14 @@ class TeamDto(BaseModel):
 class SendTeamMessageRequest(BaseModel):
     sender_id: str
     content: str
+    recipient_id: Optional[str] = None  # None = ارسال همگانی به همه اعضا
 
 class TeamMessageDto(BaseModel):
     id: str
     team_id: str
     sender_id: str
     content: str
+    recipient_id: Optional[str] = None
     created_at: int
 
 # --- Endpoints ---
@@ -427,28 +430,44 @@ def delete_team(
 @router.get("/teams/{team_id}/messages", response_model=List[TeamMessageDto])
 def get_team_messages(
     team_id: str,
+    user_id: Optional[str] = None,
     skip: int = 0,
     limit: int = 50,
     db: Session = Depends(get_db)
 ):
     """
-    دریافت پیام‌های اشتراک‌شده درون تیم (آخرین ۵۰ پیام)
+    دریافت پیام‌های اشتراک‌شده درون تیم (آخرین ۵۰ پیام).
+
+    اگر user_id ارسال شود، کاربر فقط پیام‌های زیر را می‌بیند:
+      - پیام‌های همگانی (recipient_id == None)
+      - پیام‌های ارسال‌شده توسط خودش (sender_id == user_id)
+      - پیام‌های خصوصی که مستقیماً به او ارسال شده‌اند (recipient_id == user_id)
     """
     # بررسی تیم موجود
     team = db.query(Team).filter(Team.id == team_id).first()
     if not team:
         raise HTTPException(status_code=404, detail="تیم یافت نشد")
-    
-    messages = db.query(TeamMessage).filter(
-        TeamMessage.team_id == team_id
-    ).order_by(TeamMessage.created_at.asc()).offset(skip).limit(limit).all()
-    
+
+    query = db.query(TeamMessage).filter(TeamMessage.team_id == team_id)
+
+    if user_id:
+        query = query.filter(
+            or_(
+                TeamMessage.recipient_id.is_(None),
+                TeamMessage.sender_id == user_id,
+                TeamMessage.recipient_id == user_id,
+            )
+        )
+
+    messages = query.order_by(TeamMessage.created_at.asc()).offset(skip).limit(limit).all()
+
     return [
         TeamMessageDto(
             id=msg.id,
             team_id=msg.team_id,
             sender_id=msg.sender_id,
             content=msg.content,
+            recipient_id=msg.recipient_id,
             created_at=msg.created_at
         )
         for msg in messages
@@ -463,8 +482,9 @@ def send_team_message(
 ):
     """
     ارسال پیام درون تیم
-    
-    درخواست: { "sender_id": "user-123", "content": "سلام" }
+
+    درخواست: { "sender_id": "user-123", "content": "سلام", "recipient_id": null }
+    recipient_id == None یعنی ارسال همگانی؛ در غیر این صورت پیام خصوصی به آن عضو.
     """
     # بررسی تیم موجود
     team = db.query(Team).filter(Team.id == team_id).first()
@@ -486,6 +506,7 @@ def send_team_message(
         team_id=team_id,
         sender_id=req.sender_id,
         content=req.content,
+        recipient_id=req.recipient_id,
         created_at=int(time.time() * 1000)
     )
     db.add(message)
@@ -496,5 +517,6 @@ def send_team_message(
         team_id=message.team_id,
         sender_id=message.sender_id,
         content=message.content,
+        recipient_id=message.recipient_id,
         created_at=message.created_at
     )

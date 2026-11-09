@@ -239,6 +239,7 @@ class TeamMessage(Base):
     team_id = Column(String, nullable=False, index=True)
     sender_id = Column(String, nullable=False, index=True)
     content = Column(Text, nullable=False)
+    recipient_id = Column(String, nullable=True, default=None)  # None = Broadcast to all
     created_at = Column(BigInteger, nullable=False, default=lambda: int(time.time() * 1000))
 
 # ساخت جداول و اعمال دستورات SQL با استفاده از text()
@@ -270,9 +271,11 @@ def init_db():
                     team_id VARCHAR(64) NOT NULL,
                     sender_id VARCHAR(64) NOT NULL,
                     content TEXT NOT NULL,
+                    recipient_id VARCHAR(64),
                     created_at BIGINT NOT NULL
                 );
             """))
+            db.execute(text("ALTER TABLE team_messages ADD COLUMN IF NOT EXISTS recipient_id VARCHAR(64);"))
             db.execute(text("CREATE INDEX IF NOT EXISTS idx_team_messages_team_id ON team_messages(team_id);"))
             db.execute(text("CREATE INDEX IF NOT EXISTS idx_team_messages_created_at ON team_messages(created_at);"))
             
@@ -433,6 +436,53 @@ def get_user_profile(user_id: str, db: Session = Depends(lambda: SessionLocal())
         balance=user.balance or 0,
         plan_expires_at=user.plan_expires_at,
         suspended=user.suspended or False
+    )
+
+class UpdatePlanRequest(BaseModel):
+    plan: str
+    duration_days: int = 30
+
+class UpdatePlanResponse(BaseModel):
+    status: str
+    user_id: str
+    plan: str
+    plan_expires_at: Optional[int] = None
+
+# پلن‌های مجاز برای ارتقا/تأیید اشتراک
+ALLOWED_PLANS = {"free", "guest", "plus", "smart", "advanced", "basic", "admin"}
+
+@app.post("/api/v1/users/{user_id}/plan", response_model=UpdatePlanResponse)
+def update_user_plan(user_id: str, req: UpdatePlanRequest, db: Session = Depends(lambda: SessionLocal())):
+    """
+    تغییر/تأیید پلن کاربر (هنگام خرید یا تأیید اشتراک).
+    مقدار plan و plan_expires_at را در PostgreSQL ذخیره می‌کند.
+    """
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="کاربر یافت نشد")
+
+    plan = (req.plan or "").strip().lower()
+    if plan not in ALLOWED_PLANS:
+        raise HTTPException(status_code=400, detail="پلن نامعتبر است")
+
+    duration_days = req.duration_days if (req.duration_days and req.duration_days > 0) else 30
+
+    user.plan = plan
+    if plan == "free":
+        user.plan_expires_at = None
+    else:
+        user.plan_expires_at = int(time.time() * 1000) + duration_days * 24 * 60 * 60 * 1000
+
+    db.commit()
+    db.refresh(user)
+
+    logger.info(f"User {user.id} plan updated to '{user.plan}' (expires_at={user.plan_expires_at})")
+
+    return UpdatePlanResponse(
+        status="ok",
+        user_id=user.id,
+        plan=user.plan,
+        plan_expires_at=user.plan_expires_at,
     )
 
 @app.put("/api/v1/users/{user_id}/username")

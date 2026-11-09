@@ -143,10 +143,10 @@ data class SupportThread(
     val unread: Int,
 )
 data class AiMessage(val id: String, val personId: String, val role: String, val body: String, val image: String?, val createdAt: Long)
-data class Member(val id: String, val name: String)
+data class Member(val id: String, val name: String, val userId: String? = null)
 data class Banner(val id: String, val title: String, val body: String, val image: String? = null)
 
-class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 18) {
+class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 19) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
             """CREATE TABLE users (
@@ -183,7 +183,7 @@ class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", 
         db.execSQL("ALTER TABLE people ADD COLUMN saved INTEGER NOT NULL DEFAULT 0")
         db.execSQL("ALTER TABLE people ADD COLUMN archived INTEGER NOT NULL DEFAULT 0")
         db.execSQL("ALTER TABLE entries ADD COLUMN member_id TEXT")
-        db.execSQL("CREATE TABLE members (id TEXT PRIMARY KEY, person_id TEXT, name TEXT, created_at INTEGER)")
+        db.execSQL("CREATE TABLE members (id TEXT PRIMARY KEY, person_id TEXT, name TEXT, user_id TEXT, created_at INTEGER)")
         db.execSQL("CREATE TABLE wallpapers (id TEXT PRIMARY KEY, title TEXT, category TEXT, path TEXT, created_at INTEGER)")
         db.execSQL("CREATE TABLE outbox (id TEXT PRIMARY KEY, kind TEXT, payload TEXT, created_at INTEGER)")
         db.execSQL("CREATE TABLE ai_messages (id TEXT PRIMARY KEY, user_id TEXT, person_id TEXT, role TEXT, body TEXT, image_path TEXT, created_at INTEGER)")
@@ -245,7 +245,13 @@ class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", 
         if ("saved" !in peopleColumns) db.execSQL("ALTER TABLE people ADD COLUMN saved INTEGER NOT NULL DEFAULT 0")
         if ("member_id" !in entryColumns) db.execSQL("ALTER TABLE entries ADD COLUMN member_id TEXT")
         if ("target_recipient_id" !in entryColumns) db.execSQL("ALTER TABLE entries ADD COLUMN target_recipient_id TEXT")
-        db.execSQL("CREATE TABLE IF NOT EXISTS members (id TEXT PRIMARY KEY, person_id TEXT, name TEXT, created_at INTEGER)")
+        db.execSQL("CREATE TABLE IF NOT EXISTS members (id TEXT PRIMARY KEY, person_id TEXT, name TEXT, user_id TEXT, created_at INTEGER)")
+        val memberColumns = db.rawQuery("PRAGMA table_info(members)", null).use {
+            val names = mutableListOf<String>()
+            while (it.moveToNext()) names += it.getString(1)
+            names
+        }
+        if ("user_id" !in memberColumns) db.execSQL("ALTER TABLE members ADD COLUMN user_id TEXT")
         db.execSQL("CREATE TABLE IF NOT EXISTS wallpapers (id TEXT PRIMARY KEY, title TEXT, category TEXT, path TEXT, created_at INTEGER)")
         db.execSQL("CREATE TABLE IF NOT EXISTS outbox (id TEXT PRIMARY KEY, kind TEXT, payload TEXT, created_at INTEGER)")
         db.execSQL("CREATE TABLE IF NOT EXISTS ai_messages (id TEXT PRIMARY KEY, user_id TEXT, person_id TEXT, role TEXT, body TEXT, image_path TEXT, created_at INTEGER)")
@@ -831,13 +837,16 @@ class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", 
     }
 
     fun members(personId: String): List<Member> = readableDatabase.rawQuery(
-        "SELECT id, name FROM members WHERE person_id=? ORDER BY created_at",
+        "SELECT id, name, user_id FROM members WHERE person_id=? ORDER BY created_at",
         arrayOf(personId),
     ).use {
         val list = mutableListOf<Member>()
         while (it.moveToNext()) {
             val id = it.getString(0)
             var name = it.getString(1)
+            var memberUserId = if (it.isNull(2)) null else it.getString(2)
+            // برای اعضای قدیمی که نامشان همان شناسه کاربر (UUID) است، شناسه کاربر بازیابی می‌شود.
+            if (memberUserId.isNullOrBlank() && isUuid(name)) memberUserId = name
             if (isUuid(name)) {
                 user(name)?.let { u ->
                     name = if (!u.name.isNullOrBlank() && !u.username.isNullOrBlank()) {
@@ -850,7 +859,10 @@ class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", 
                     writableDatabase.execSQL("UPDATE members SET name=? WHERE id=?", arrayOf(name, id))
                 }
             }
-            list += Member(id, name)
+            if (!memberUserId.isNullOrBlank()) {
+                writableDatabase.execSQL("UPDATE members SET user_id=? WHERE id=? AND (user_id IS NULL OR user_id='')", arrayOf(memberUserId, id))
+            }
+            list += Member(id, name, memberUserId)
         }
         list
     }
@@ -869,7 +881,7 @@ class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", 
         if (contact.isBlank()) error("شماره تماس یا نام کاربری را بنویسید")
         val user = findUserByContact(contact) ?: error("کاربری با این مشخصات یافت نشد")
 
-        if (user.plan != "advanced") {
+        if (user.plan !in AppConstants.TEAM_ALLOWED_PLANS) {
             error("تنها کاربران دارای اشتراک پلاس امکان عضویت در تیم را دارند")
         }
 
@@ -886,6 +898,7 @@ class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", 
             put("id", id)
             put("person_id", personId)
             put("name", nameToSave)
+            put("user_id", user.id)
             put("created_at", System.currentTimeMillis())
         })
         writableDatabase.update("people", ContentValues().apply { put("is_group", 1) }, "id=?", arrayOf(personId))
@@ -1506,7 +1519,14 @@ writableDatabase.insert("entries", null, ContentValues().apply {
      * درج یا به‌روزرسانی تیم سرور به صورت «گروه» در جدول people
      * (با همان شناسه تیم سرور) تا در لیست تیم‌ها و صفحه گفتگو دیده شود.
      */
-    fun upsertGroupTeam(userId: String, teamId: String, name: String, description: String? = null) {
+    fun upsertGroupTeam(
+        userId: String,
+        teamId: String,
+        name: String,
+        description: String? = null,
+        members: List<TeamMemberDto> = emptyList(),
+        memberNames: Map<String, String> = emptyMap(),
+    ) {
         val exists = readableDatabase.rawQuery(
             "SELECT 1 FROM people WHERE id=? AND user_id=? LIMIT 1",
             arrayOf(teamId, userId),
@@ -1536,6 +1556,37 @@ writableDatabase.insert("entries", null, ContentValues().apply {
                 put("is_group", 1)
                 put("saved", 0)
             })
+        }
+
+        // درج اعضای برگشتی از سرور (TeamDto.members) در جدول لوکال members
+        // تا بخش «اعضای تیم» و «تعداد اعضا» به‌درستی پر شوند.
+        // شناسه ترکیبی (teamId:memberId) + CONFLICT_IGNORE از درج تکراری در سینک‌های بعدی جلوگیری می‌کند.
+        members.forEach { member ->
+            val memberId = member.userId.trim()
+            if (memberId.isEmpty()) return@forEach
+            val displayName = memberNames[memberId]?.trim()?.takeIf { it.isNotEmpty() } ?: memberId
+            val rowId = "$teamId:$memberId"
+            // اگر عضو از قبل وجود دارد فقط شناسه کاربر تکمیل می‌شود تا ترتیب created_at حفظ شود.
+            val updated = writableDatabase.update(
+                "members",
+                ContentValues().apply { put("user_id", memberId) },
+                "id=?",
+                arrayOf(rowId),
+            )
+            if (updated == 0) {
+                writableDatabase.insertWithOnConflict(
+                    "members",
+                    null,
+                    ContentValues().apply {
+                        put("id", rowId)
+                        put("person_id", teamId)
+                        put("name", displayName)
+                        put("user_id", memberId)
+                        put("created_at", System.currentTimeMillis())
+                    },
+                    SQLiteDatabase.CONFLICT_IGNORE,
+                )
+            }
         }
     }
 
@@ -1817,8 +1868,9 @@ writableDatabase.insert("entries", null, ContentValues().apply {
      * یہ method Cache clear ہونے کے بعد subscription plan کو دوبارہ restore کرتا ہے
      */
     fun updateUserProfileFromServer(profile: UserProfileDto) {
+        // فقط ستون‌های پروفایل را UPDATE می‌کنیم تا داده‌های محلی
+        // (avatar, chat_bg, chat_color, banner_seen, quota, ...) پاک نشوند.
         val cv = ContentValues().apply {
-            put("id", profile.userId)
             put("phone", profile.phone)
             put("name", profile.name)
             put("username", profile.username)
@@ -1827,6 +1879,30 @@ writableDatabase.insert("entries", null, ContentValues().apply {
             put("plan_expires_at", profile.planExpiresAt ?: 0L)
             put("suspended", if (profile.suspended) 1 else 0)
         }
-        writableDatabase.insertWithOnConflict("users", null, cv, SQLiteDatabase.CONFLICT_REPLACE)
+        val updated = writableDatabase.update("users", cv, "id = ?", arrayOf(profile.userId))
+        if (updated == 0) {
+            // اگر رکورد کاربر به‌صورت لوکال وجود نداشت، یک رکورد پایه می‌سازیم.
+            val insertCv = ContentValues(cv).apply {
+                put("id", profile.userId)
+                put("created_at", System.currentTimeMillis())
+            }
+            writableDatabase.insertWithOnConflict("users", null, insertCv, SQLiteDatabase.CONFLICT_REPLACE)
+        }
+    }
+
+    /**
+     * به‌روزرسانی مستقیم پلن کاربر در دیتابیس لوکال
+     * (پس از تأیید سرور، برای اعمال فوری در همان سشن).
+     */
+    fun setUserPlan(userId: String, plan: String, planExpiresAt: Long?) {
+        writableDatabase.update(
+            "users",
+            ContentValues().apply {
+                put("plan", plan)
+                put("plan_expires_at", planExpiresAt ?: 0L)
+            },
+            "id = ?",
+            arrayOf(userId),
+        )
     }
 }

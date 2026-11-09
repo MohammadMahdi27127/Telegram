@@ -754,6 +754,7 @@ fun TeamsScreen(
                                 teamId = team.id,
                                 name = team.name,
                                 description = team.description,
+                                members = team.members,
                             )
                         }
                     }
@@ -971,6 +972,10 @@ fun AddTeamSheet(app: App, userId: String, onClose: () -> Unit, onSaved: () -> U
                         teamId = team.id,
                         name = team.name,
                         description = team.description,
+                        members = team.members,
+                        memberNames = selectedMembers
+                            .mapNotNull { m -> m.userId?.let { id -> id to (m.name ?: "") } }
+                            .toMap(),
                     )
 
                     onSaved()
@@ -4036,7 +4041,10 @@ private fun ChatInputBar(
         if (group) {
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 InputChip("ارسال به همه اعضا", memberId == null, dark) { onMember(null) }
-                members.forEach { member -> InputChip(member.name, memberId == member.id, dark) { onMember(member.id) } }
+                members.forEach { member ->
+                    val selected = memberId == member.id
+                    InputChip((if (selected) "🔒 " else "") + member.name, selected, dark) { onMember(member.id) }
+                }
             }
         }
         if (pendingMedia != null) {
@@ -4346,6 +4354,8 @@ fun ThreadScreen(app: App, userId: String, personId: String, back: () -> Unit, o
     var summary by remember { mutableStateOf("") }
     var members by remember(personId) { mutableStateOf(app.db.members(personId)) }
     var memberId by remember { mutableStateOf<String?>(null) }
+    // شناسه کاربرِ گیرندهٔ انتخاب‌شده برای پیام خصوصی (null = ارسال به همه اعضا)
+    fun selectedRecipientId(): String? = members.firstOrNull { it.id == memberId }?.userId
     var photoCrop by remember { mutableStateOf<Bitmap?>(null) }
     var toast by remember { mutableStateOf("") }
     LaunchedEffect(toast) {
@@ -4363,6 +4373,21 @@ fun ThreadScreen(app: App, userId: String, personId: String, back: () -> Unit, o
     var summaryOpen by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    // ارسال پیام به سرور برای چت تیم (همگانی یا خصوصی هدفمند)
+    fun dispatchTeamMessage(content: String) {
+        if (person?.isGroup != true) return
+        val recipient = selectedRecipientId()
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    NetworkModule.getApiService().sendTeamMessage(
+                        personId,
+                        SendTeamMessageRequest(senderId = userId, content = content, recipientId = recipient),
+                    )
+                }
+            }
+        }
+    }
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
         runCatching { photoCrop = context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) } }.onFailure { error = it.message ?: "عکس خوانده نشد" }
@@ -4387,8 +4412,9 @@ fun ThreadScreen(app: App, userId: String, personId: String, back: () -> Unit, o
                 return@launch
             }
             try {
-                app.db.addEntry(user, personId, saved.second, "file", channel, System.currentTimeMillis(), mediaPath = saved.first, memberId = memberId, targetRecipientId = memberId)
+                app.db.addEntry(user, personId, saved.second, "file", channel, System.currentTimeMillis(), mediaPath = saved.first, memberId = memberId, targetRecipientId = selectedRecipientId())
                 if (!isDeviceOnline(context)) app.db.enqueue("entry", saved.second)
+                dispatchTeamMessage(saved.second)
                 allEntries = app.db.entries(personId)
                 attachMenu = false
             } catch (e: Exception) {
@@ -4465,7 +4491,7 @@ fun ThreadScreen(app: App, userId: String, personId: String, back: () -> Unit, o
                         enter = if (entry.id in fresh) fadeIn(tween(280)) + expandVertically(tween(280)) else fadeIn(tween(1)),
                         exit = shrinkVertically(tween(260)) + fadeOut(tween(220)),
                     ) {
-                        JournalBubble(entry, personTitle, onPin = {
+                        JournalBubble(entry, personTitle, currentUserId = userId, memberNameFor = { uid -> members.firstOrNull { it.userId == uid }?.name }, onPin = {
                             app.db.setEntryPinned(entry.id, !entry.pinned)
                             allEntries = app.db.entries(personId)
                         }, onDelete = {
@@ -4500,7 +4526,8 @@ fun ThreadScreen(app: App, userId: String, personId: String, back: () -> Unit, o
                     if (voicePaused) runCatching { voiceRecorder.value?.resume() }
                     stopVoice(app, user, personId) { path ->
                         runCatching {
-                            app.db.addEntry(user, personId, "", "voice", channel, System.currentTimeMillis(), path, memberId = memberId, targetRecipientId = memberId)
+                            app.db.addEntry(user, personId, "", "voice", channel, System.currentTimeMillis(), path, memberId = memberId, targetRecipientId = selectedRecipientId())
+                            dispatchTeamMessage("پیام صوتی")
                             allEntries = app.db.entries(personId)
                         }.onFailure { error = it.message ?: "خطا" }
                     }
@@ -4555,8 +4582,9 @@ fun ThreadScreen(app: App, userId: String, personId: String, back: () -> Unit, o
                         } else {
                             val sendKind = if (pendingMedia != null) pendingKind else kind
                             val caption = body.ifBlank { if (pendingKind == "video") "فیلم" else if (pendingMedia != null) "عکس" else "" }
-                            app.db.addEntry(user, personId, caption, sendKind, channel, System.currentTimeMillis(), mediaPath = pendingMedia, memberId = memberId, targetRecipientId = memberId)
+                            app.db.addEntry(user, personId, caption, sendKind, channel, System.currentTimeMillis(), mediaPath = pendingMedia, memberId = memberId, targetRecipientId = selectedRecipientId())
                             if (!isDeviceOnline(context)) app.db.enqueue("entry", caption)
+                            dispatchTeamMessage(caption)
                             pendingMedia = null
                         }
                         body = ""
@@ -4649,8 +4677,9 @@ fun ThreadScreen(app: App, userId: String, personId: String, back: () -> Unit, o
                     val dest = File(context.filesDir, "photo-${System.currentTimeMillis()}.jpg")
                     dest.outputStream().use { saved.compress(Bitmap.CompressFormat.JPEG, 90, it) }
                     if (saved !== bitmap) saved.recycle()
-                    app.db.addEntry(user, personId, "عکس", "photo", channel, System.currentTimeMillis(), mediaPath = dest.absolutePath, memberId = memberId, targetRecipientId = memberId)
+                    app.db.addEntry(user, personId, "عکس", "photo", channel, System.currentTimeMillis(), mediaPath = dest.absolutePath, memberId = memberId, targetRecipientId = selectedRecipientId())
                     if (!isDeviceOnline(context)) app.db.enqueue("entry", "عکس")
+                    dispatchTeamMessage("عکس")
                     allEntries = app.db.entries(personId)
                     photoCrop = null
                 } catch (e: Exception) {
@@ -5300,7 +5329,7 @@ private fun GalaxyBackdrop() {
 
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun JournalBubble(entry: Entry, title: String, onPin: () -> Unit, onDelete: () -> Unit, onEdit: () -> Unit) {
+private fun JournalBubble(entry: Entry, title: String, currentUserId: String, memberNameFor: (String) -> String?, onPin: () -> Unit, onDelete: () -> Unit, onEdit: () -> Unit) {
     var open by remember { mutableStateOf(false) }
     var viewer by remember { mutableStateOf(false) }
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
@@ -5366,7 +5395,23 @@ private fun JournalBubble(entry: Entry, title: String, onPin: () -> Unit, onDele
                     .padding(horizontal = 14.dp, vertical = 10.dp),
         ) {
             if (entry.pinned) Text("سنجاق", color = Blue, fontSize = 11.sp)
-            entry.memberName?.let { Text(it, color = Blue, fontSize = 12.sp, fontWeight = FontWeight.Bold) }
+            if (entry.targetRecipientId != null) {
+                val mine = entry.userId == currentUserId
+                val label = if (mine) {
+                    "🔒 پیام خصوصی به ${entry.memberName ?: memberNameFor(entry.targetRecipientId) ?: "عضو تیم"}"
+                } else {
+                    "🔒 پیام خصوصی از ${entry.memberName ?: "عضو تیم"}"
+                }
+                Text(
+                    label,
+                    color = Blue,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(Blue.copy(alpha = 0.14f)).padding(horizontal = 6.dp, vertical = 2.dp),
+                )
+            } else {
+                entry.memberName?.let { Text(it, color = Blue, fontSize = 12.sp, fontWeight = FontWeight.Bold) }
+            }
             if (entry.kind == "voice" && entry.voicePath != null) {
                 VoiceMessage(entry.voicePath)
             } else if (entry.kind == "file" && entry.mediaPath != null) {
@@ -6733,6 +6778,7 @@ fun PayScreen(app: App, userId: String, back: () -> Unit, selectedPlan: Subscrip
     var receiptPath by remember { mutableStateOf<String?>(null) }
     var copiedCard by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
     
     val page = if (dark) Color(0xFF0F172A) else Color(0xFFE6E6FA)
     val card = if (dark) Color(0xFF1E293B) else Color.White
@@ -6941,6 +6987,30 @@ fun PayScreen(app: App, userId: String, back: () -> Unit, selectedPlan: Subscrip
                             "دفتر گفتگو - ثبت پرداخت",
                             "رسید پرداخت ${selectedSubscriptionPlan?.name} ثبت شد و در انتظار بررسی است."
                         )
+
+                        // اطلاع‌رسانی پلن جدید به سرور تا پس از ری‌استارت/سینک، پلن به free برنگردد
+                        val selectedId = selectedSubscriptionPlan?.id
+                        val newPlan = if (selectedId == "seasonal") "smart" else "plus"
+                        val newDuration = if (selectedId == "seasonal") 90 else 30
+                        scope.launch {
+                            runCatching {
+                                val planResponse = withContext(Dispatchers.IO) {
+                                    NetworkModule.getApiService().updateUserPlan(
+                                        userId,
+                                        UpdatePlanReq(plan = newPlan, durationDays = newDuration),
+                                    )
+                                }
+                                if (planResponse.isSuccessful) {
+                                    val dto = planResponse.body()
+                                    app.db.setUserPlan(
+                                        userId,
+                                        dto?.plan ?: newPlan,
+                                        dto?.planExpiresAt,
+                                    )
+                                    user = app.db.user(userId)
+                                }
+                            }
+                        }
                     } catch (e: Exception) {
                         error = e.message ?: "خطا در ثبت رسید"
                     }
