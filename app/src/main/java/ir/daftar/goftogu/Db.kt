@@ -146,7 +146,7 @@ data class AiMessage(val id: String, val personId: String, val role: String, val
 data class Member(val id: String, val name: String, val userId: String? = null)
 data class Banner(val id: String, val title: String, val body: String, val image: String? = null)
 
-class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 19) {
+class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 20) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
             """CREATE TABLE users (
@@ -161,7 +161,7 @@ class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", 
         )
         db.execSQL(
             """CREATE TABLE people (
-                id TEXT PRIMARY KEY, user_id TEXT, name TEXT, phone TEXT, role TEXT, pinned INTEGER, created_at INTEGER
+                id TEXT PRIMARY KEY, user_id TEXT, name TEXT, phone TEXT, role TEXT, pinned INTEGER, created_at INTEGER, creator_id TEXT
             )""",
         )
         db.execSQL(
@@ -243,6 +243,7 @@ class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", 
         if ("avatar" !in peopleColumns) db.execSQL("ALTER TABLE people ADD COLUMN avatar TEXT")
         if ("is_group" !in peopleColumns) db.execSQL("ALTER TABLE people ADD COLUMN is_group INTEGER NOT NULL DEFAULT 0")
         if ("saved" !in peopleColumns) db.execSQL("ALTER TABLE people ADD COLUMN saved INTEGER NOT NULL DEFAULT 0")
+        if ("creator_id" !in peopleColumns) db.execSQL("ALTER TABLE people ADD COLUMN creator_id TEXT")
         if ("member_id" !in entryColumns) db.execSQL("ALTER TABLE entries ADD COLUMN member_id TEXT")
         if ("target_recipient_id" !in entryColumns) db.execSQL("ALTER TABLE entries ADD COLUMN target_recipient_id TEXT")
         db.execSQL("CREATE TABLE IF NOT EXISTS members (id TEXT PRIMARY KEY, person_id TEXT, name TEXT, user_id TEXT, created_at INTEGER)")
@@ -1526,6 +1527,7 @@ writableDatabase.insert("entries", null, ContentValues().apply {
         description: String? = null,
         members: List<TeamMemberDto> = emptyList(),
         memberNames: Map<String, String> = emptyMap(),
+        creatorId: String? = null,
     ) {
         val exists = readableDatabase.rawQuery(
             "SELECT 1 FROM people WHERE id=? AND user_id=? LIMIT 1",
@@ -1539,6 +1541,7 @@ writableDatabase.insert("entries", null, ContentValues().apply {
                     put("name", name.trim())
                     put("role", description?.trim() ?: "")
                     put("is_group", 1)
+                    if (creatorId != null) put("creator_id", creatorId)
                 },
                 "id=? AND user_id=?",
                 arrayOf(teamId, userId),
@@ -1555,6 +1558,7 @@ writableDatabase.insert("entries", null, ContentValues().apply {
                 putNull("avatar")
                 put("is_group", 1)
                 put("saved", 0)
+                if (creatorId != null) put("creator_id", creatorId)
             })
         }
 
@@ -1587,6 +1591,17 @@ writableDatabase.insert("entries", null, ContentValues().apply {
                     SQLiteDatabase.CONFLICT_IGNORE,
                 )
             }
+        }
+
+        // حذف اعضایی که دیگر روی سرور عضو این تیم نیستند (مثلاً عضو تیم را ترک کرده است)
+        val remoteMemberIds = members.map { it.userId.trim() }.filter { it.isNotEmpty() }.toSet()
+        if (remoteMemberIds.isNotEmpty()) {
+            val placeholders = remoteMemberIds.joinToString(",") { "?" }
+            writableDatabase.delete(
+                "members",
+                "person_id = ? AND user_id IS NOT NULL AND user_id != '' AND user_id NOT IN ($placeholders)",
+                arrayOf(teamId, *remoteMemberIds.toTypedArray()),
+            )
         }
     }
 
@@ -1682,6 +1697,43 @@ writableDatabase.insert("entries", null, ContentValues().apply {
         try {
             writableDatabase.delete("team_members", "team_id = ?", arrayOf(teamId))
             writableDatabase.delete("teams", "id = ?", arrayOf(teamId))
+            writableDatabase.setTransactionSuccessful()
+        } finally {
+            writableDatabase.endTransaction()
+        }
+    }
+
+    /**
+     * شناسه سازنده یک تیم/گروه (از ستون creator_id جدول people).
+     */
+    fun teamCreatorId(teamId: String): String? {
+        val cursor = readableDatabase.rawQuery("SELECT creator_id FROM people WHERE id=?", arrayOf(teamId))
+        return cursor.use { if (it.moveToFirst()) it.getString(0) else null }
+    }
+
+    /**
+     * شناسه تیم‌های لوکال (گروه‌های) یک کاربر برای تطبیق با لیست سرور.
+     */
+    fun localTeamIds(userId: String): List<String> {
+        val cursor = readableDatabase.rawQuery(
+            "SELECT id FROM people WHERE user_id=? AND is_group=1",
+            arrayOf(userId),
+        )
+        val list = mutableListOf<String>()
+        cursor.use { while (it.moveToNext()) list += it.getString(0) }
+        return list
+    }
+
+    /**
+     * حذف کامل داده‌های لوکال یک تیم/گروه از جداول people، members و entries.
+     * برای «حذف تیم» توسط سازنده و «ترک تیم» توسط عضو استفاده می‌شود.
+     */
+    fun deleteTeamLocally(teamId: String) {
+        writableDatabase.beginTransaction()
+        try {
+            writableDatabase.delete("members", "person_id = ?", arrayOf(teamId))
+            writableDatabase.delete("entries", "person_id = ?", arrayOf(teamId))
+            writableDatabase.delete("people", "id = ?", arrayOf(teamId))
             writableDatabase.setTransactionSuccessful()
         } finally {
             writableDatabase.endTransaction()

@@ -748,6 +748,7 @@ fun TeamsScreen(
                 if (response.isSuccessful) {
                     val remote = response.body().orEmpty()
                     withContext(Dispatchers.IO) {
+                        val remoteIds = remote.map { it.id }.toSet()
                         remote.forEach { team ->
                             app.db.upsertGroupTeam(
                                 userId = userId,
@@ -755,8 +756,14 @@ fun TeamsScreen(
                                 name = team.name,
                                 description = team.description,
                                 members = team.members,
+                                creatorId = team.creatorId,
                             )
                         }
+                        // حذف تیم‌های لوکالی که دیگر روی سرور برای این کاربر وجود ندارند
+                        // (مثلاً تیم حذف شده یا کاربر از تیم خارج شده است).
+                        app.db.localTeamIds(userId)
+                            .filter { it !in remoteIds }
+                            .forEach { app.db.deleteTeamLocally(it) }
                     }
                     teams = app.db.teams(userId)
                 }
@@ -976,6 +983,7 @@ fun AddTeamSheet(app: App, userId: String, onClose: () -> Unit, onSaved: () -> U
                         memberNames = selectedMembers
                             .mapNotNull { m -> m.userId?.let { id -> id to (m.name ?: "") } }
                             .toMap(),
+                        creatorId = team.creatorId,
                     )
 
                     onSaved()
@@ -4372,6 +4380,8 @@ fun ThreadScreen(app: App, userId: String, personId: String, back: () -> Unit, o
     var exportOpen by remember { mutableStateOf(false) }
     var summaryOpen by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
+    var confirmTeamExit by remember { mutableStateOf(false) }
+    var teamExitBusy by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     // ارسال پیام به سرور برای چت تیم (همگانی یا خصوصی هدفمند)
     fun dispatchTeamMessage(content: String) {
@@ -4668,8 +4678,83 @@ fun ThreadScreen(app: App, userId: String, personId: String, back: () -> Unit, o
                         } catch (e: Exception) { infoError = e.message ?: "خطا" }
                     }, Modifier.padding(top = 8.dp)) { Text("ذخیره") }
                     InfoLine("رسانه مشترک", entries.size.toString())
+                    if (person?.isGroup == true) {
+                        val isCreator = app.db.teamCreatorId(personId) == userId
+                        OutlinedButton(
+                            onClick = { confirmTeamExit = true },
+                            enabled = !teamExitBusy,
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.error),
+                            modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                        ) {
+                            Text(
+                                if (isCreator) "حذف کامل تیم" else "ترک تیم",
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
+                    }
                 }
             }
+        }
+        if (confirmTeamExit) {
+            val dark = LocalDark.current
+            val isCreator = app.db.teamCreatorId(personId) == userId
+            AlertDialog(
+                onDismissRequest = { if (!teamExitBusy) confirmTeamExit = false },
+                shape = RoundedCornerShape(24.dp),
+                containerColor = themeDialogContainer(),
+                title = {
+                    Text(
+                        if (isCreator) "حذف کامل تیم" else "ترک تیم",
+                        fontWeight = FontWeight.Bold,
+                        color = if (dark) Color.White else Color(0xFF111827),
+                    )
+                },
+                text = {
+                    Text(
+                        if (isCreator) "تیم «$personTitle» به‌طور کامل حذف می‌شود. این عمل بازگشت‌پذیر نیست."
+                        else "از تیم «$personTitle» خارج می‌شوید و دیگر پیام‌های آن را دریافت نمی‌کنید.",
+                        color = if (dark) Color(0xFFC7D2DE) else Color(0xFF4B5563),
+                    )
+                },
+                confirmButton = {
+                    TextButton(
+                        enabled = !teamExitBusy,
+                        onClick = {
+                            teamExitBusy = true
+                            scope.launch {
+                                val res = runCatching {
+                                    withContext(Dispatchers.IO) {
+                                        if (isCreator) NetworkModule.getApiService().deleteTeam(personId, userId)
+                                        else NetworkModule.getApiService().leaveTeam(personId, userId, userId)
+                                    }
+                                }.getOrNull()
+                                teamExitBusy = false
+                                if (res != null && res.isSuccessful) {
+                                    app.db.deleteTeamLocally(personId)
+                                    confirmTeamExit = false
+                                    info = false
+                                    back()
+                                } else {
+                                    confirmTeamExit = false
+                                    error = if (isCreator) "خطا در حذف تیم" else "خطا در ترک تیم"
+                                }
+                            }
+                        },
+                    ) {
+                        Text(
+                            if (isCreator) "حذف" else "ترک",
+                            color = Color(0xFFEF4444),
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { confirmTeamExit = false }) {
+                        Text("انصراف", color = if (dark) Color(0xFF9CA3AF) else Color(0xFF6B7280))
+                    }
+                },
+            )
         }
         photoCrop?.let { bitmap ->
             PhotoSendPreview(bitmap, onCancel = { photoCrop = null }) { saved ->

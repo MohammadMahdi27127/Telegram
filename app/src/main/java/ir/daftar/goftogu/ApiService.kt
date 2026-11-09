@@ -6,6 +6,7 @@ import retrofit2.Response
 import retrofit2.http.Body
 import retrofit2.http.DELETE
 import retrofit2.http.GET
+import retrofit2.http.Header
 import retrofit2.http.POST
 import retrofit2.http.PUT
 import retrofit2.http.Path
@@ -83,6 +84,19 @@ interface ApiService {
     suspend fun getUserTeams(
         @Path("user_id") userId: String
     ): Response<List<TeamDto>>
+
+    @DELETE("teams/{team_id}")
+    suspend fun deleteTeam(
+        @Path("team_id") teamId: String,
+        @Header("X-User-Id") userId: String
+    ): Response<Map<String, String>>
+
+    @DELETE("teams/{team_id}/members/{user_id}")
+    suspend fun leaveTeam(
+        @Path("team_id") teamId: String,
+        @Path("user_id") targetUserId: String,
+        @Header("X-User-Id") currentUserId: String
+    ): Response<Map<String, String>>
 
     @POST("teams/{team_id}/messages")
     suspend fun sendTeamMessage(

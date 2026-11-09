@@ -4,7 +4,7 @@ import uuid
 import logging
 from typing import List, Optional
 from pydantic import BaseModel
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Header, status
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
@@ -334,28 +334,40 @@ def add_team_member(
         joined_at=new_member.joined_at
     )
 
-# ۵. DELETE /api/v1/teams/{team_id}/members/{user_id} - حذف عضو
-@router.delete("/teams/{team_id}/members/{user_id}")
+# ۵. DELETE /api/v1/teams/{team_id}/members/{user_id} - خروج عضو از تیم
+@router.delete("/teams/{team_id}/members/{user_id}", status_code=status.HTTP_200_OK)
 def remove_team_member(
     team_id: str,
     user_id: str,
+    current_user_id: str = Header(..., alias="X-User-Id"),
     db: Session = Depends(get_db)
 ):
     """
-    حذف عضو از تیم
+    خروج کاربر از تیم (فقط خودِ کاربر می‌تواند از تیم خارج شود).
+    سازنده تیم نمی‌تواند خارج شود و باید تیم را حذف کند.
     """
-    member = db.query(TeamMember).filter(
+    if user_id != current_user_id:
+        raise HTTPException(status_code=403, detail="امکان حذف سایر کاربران وجود ندارد.")
+    
+    team = db.query(Team).filter(Team.id == team_id).first()
+    if not team:
+        raise HTTPException(status_code=404, detail="تیم یافت نشد.")
+    
+    if team.creator_id == user_id:
+        raise HTTPException(status_code=400, detail="سازنده تیم نمی‌تواند تیم را ترک کند؛ باید تیم را حذف نمایید.")
+    
+    membership = db.query(TeamMember).filter(
         TeamMember.team_id == team_id,
         TeamMember.user_id == user_id
     ).first()
     
-    if not member:
-        raise HTTPException(status_code=404, detail="عضو یافت نشد")
+    if not membership:
+        raise HTTPException(status_code=404, detail="عضویت در این تیم یافت نشد.")
     
-    db.delete(member)
+    db.delete(membership)
     db.commit()
     
-    return {"status": "success", "message": "عضو حذف شد"}
+    return {"status": "success", "message": "با موفقیت از تیم خارج شدید."}
 
 # ۶. PUT /api/v1/teams/{team_id} - ویرایش تیم
 @router.put("/teams/{team_id}", response_model=TeamDto)
@@ -401,30 +413,35 @@ def update_team(
         members=members
     )
 
-# ۷. DELETE /api/v1/teams/{team_id} - حذف تیم
-@router.delete("/teams/{team_id}")
+# ۷. DELETE /api/v1/teams/{team_id} - حذف تیم (فقط سازنده)
+@router.delete("/teams/{team_id}", status_code=status.HTTP_200_OK)
 def delete_team(
     team_id: str,
+    current_user_id: str = Header(..., alias="X-User-Id"),
     db: Session = Depends(get_db)
 ):
     """
-    حذف تیم و تمام اعضا و پیام‌های آن
+    حذف کامل تیم و تمام اعضا و پیام‌های آن (تنها سازنده مجاز است)
     """
-    # حذف اعضا
-    db.query(TeamMember).filter(TeamMember.team_id == team_id).delete()
-    
-    # حذف پیام‌های تیم
-    db.query(TeamMessage).filter(TeamMessage.team_id == team_id).delete()
-    
-    # حذف تیم
     team = db.query(Team).filter(Team.id == team_id).first()
     if not team:
-        raise HTTPException(status_code=404, detail="تیم یافت نشد")
+        raise HTTPException(status_code=404, detail="تیم مورد نظر یافت نشد.")
     
+    # تنها سازنده تیم می‌تواند کل تیم را حذف کند
+    if team.creator_id != current_user_id:
+        raise HTTPException(status_code=403, detail="تنها سازنده تیم امکان حذف آن را دارد.")
+    
+    # حذف پیام‌های تیم
+    db.query(TeamMessage).filter(TeamMessage.team_id == team_id).delete(synchronize_session=False)
+    
+    # حذف اعضا
+    db.query(TeamMember).filter(TeamMember.team_id == team_id).delete(synchronize_session=False)
+    
+    # حذف تیم
     db.delete(team)
     db.commit()
     
-    return {"status": "success", "message": "تیم و تمام داده‌های آن حذف شدند"}
+    return {"status": "success", "message": "تیم با موفقیت حذف شد."}
 
 # ۸. GET /api/v1/teams/{team_id}/messages - دریافت پیام‌های تیم
 @router.get("/teams/{team_id}/messages", response_model=List[TeamMessageDto])
