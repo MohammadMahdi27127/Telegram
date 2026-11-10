@@ -28,6 +28,7 @@ class SyncEntryItem(BaseModel):
     occurred_at: int
     voice_path: Optional[str] = None
     media_path: Optional[str] = None
+    member_id: Optional[str] = None
     target_recipient_id: Optional[str] = None
 
 class SyncPayloadRequest(BaseModel):
@@ -94,10 +95,14 @@ class SyncResponse(BaseModel):
 def sync_entries(payload: SyncPayloadRequest, db: Session = Depends(get_db)):
     import main
     Entry = main.Entry
+    Person = main.Person
     try:
         saved = 0
         now_ms = int(time.time() * 1000)
         for item in payload.entries:
+            # شناسهٔ مالک پیام از روی مخاطب/تیم مربوطه استخراج می‌شود تا واکشی بر اساس user_id ممکن باشد
+            owner = db.query(Person).filter(Person.id == item.person_id).first()
+            owner_id = owner.user_id if owner else None
             existing = db.query(Entry).filter(Entry.id == item.id).first()
             if existing:
                 existing.body = item.body
@@ -106,12 +111,15 @@ def sync_entries(payload: SyncPayloadRequest, db: Session = Depends(get_db)):
                 existing.occurred_at = item.occurred_at
                 existing.voice_path = item.voice_path
                 existing.media_path = item.media_path
+                existing.member_id = item.member_id
                 existing.target_recipient_id = item.target_recipient_id
+                if owner_id is not None:
+                    existing.user_id = owner_id
                 existing.updated_at = now_ms
             else:
                 db.add(Entry(
                     id=item.id,
-                    user_id=None,
+                    user_id=owner_id,
                     person_id=item.person_id,
                     body=item.body,
                     kind=item.kind,
@@ -119,6 +127,7 @@ def sync_entries(payload: SyncPayloadRequest, db: Session = Depends(get_db)):
                     occurred_at=item.occurred_at,
                     voice_path=item.voice_path,
                     media_path=item.media_path,
+                    member_id=item.member_id,
                     target_recipient_id=item.target_recipient_id,
                     created_at=now_ms,
                     updated_at=now_ms,
@@ -482,5 +491,104 @@ def sync_tokens(payload: TokenUsageSyncPayload, db: Session = Depends(get_db)):
     except Exception as e:
         db.rollback()
         logger.error(f"Error syncing tokens: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ───────────────────────────────────────────────────────
+# اندپوینت‌های واکشی (Pull) برای سینک اولیهٔ اپ اندروید
+# منبع اصلی داده‌ها PostgreSQL است؛ این اندپوینت‌ها پس از نصب مجدد/پاک‌شدن کش،
+# تمام گفتگوها و پیام‌های کاربر را برای بازگردانی در SQLite محلی برمی‌گردانند.
+# ───────────────────────────────────────────────────────
+
+class PersonResponse(BaseModel):
+    id: str
+    name: str
+    phone: Optional[str] = None
+    role: Optional[str] = None
+    pinned: bool = False
+    avatar: Optional[str] = None
+    is_group: bool = False
+    saved: bool = False
+    created_at: int
+
+class EntryResponse(BaseModel):
+    id: str
+    person_id: str
+    body: str
+    kind: str = "text"
+    channel: str = "manual"
+    occurred_at: int
+    voice_path: Optional[str] = None
+    media_path: Optional[str] = None
+    member_id: Optional[str] = None
+    target_recipient_id: Optional[str] = None
+
+# ۱۰. واکشی تمام مخاطبین و پرونده‌های کاربر
+@router.get("/people/{user_id}", response_model=List[PersonResponse])
+def get_user_people(user_id: str, db: Session = Depends(get_db)):
+    import main
+    Person = main.Person
+    try:
+        rows = (
+            db.query(Person)
+            .filter(Person.user_id == user_id)
+            .order_by(Person.created_at.asc())
+            .all()
+        )
+        logger.info(f"Pull people for user {user_id}: {len(rows)} rows")
+        return [
+            PersonResponse(
+                id=r.id,
+                name=r.name or "",
+                phone=r.phone,
+                role=r.role,
+                pinned=bool(r.pinned),
+                avatar=r.avatar,
+                is_group=bool(r.is_group),
+                saved=bool(r.saved),
+                created_at=r.created_at or 0,
+            )
+            for r in rows
+        ]
+    except Exception as e:
+        logger.error(f"Error pulling people: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ۱۱. واکشی تمام پیام‌ها و یادداشت‌های کاربر
+@router.get("/entries/{user_id}", response_model=List[EntryResponse])
+def get_user_entries(user_id: str, db: Session = Depends(get_db)):
+    import main
+    from sqlalchemy import or_
+    Person = main.Person
+    Entry = main.Entry
+    try:
+        person_ids = [
+            row[0] for row in db.query(Person.id).filter(Person.user_id == user_id).all()
+        ]
+        query = db.query(Entry)
+        if person_ids:
+            # پیام‌های کاربر: چه با user_id مستقیم و چه از طریق مخاطبین/تیم‌های او
+            query = query.filter(or_(Entry.user_id == user_id, Entry.person_id.in_(person_ids)))
+        else:
+            query = query.filter(Entry.user_id == user_id)
+        rows = query.order_by(Entry.occurred_at.asc(), Entry.created_at.asc()).all()
+        logger.info(f"Pull entries for user {user_id}: {len(rows)} rows")
+        return [
+            EntryResponse(
+                id=r.id,
+                person_id=r.person_id,
+                body=r.body or "",
+                kind=r.kind or "text",
+                channel=r.channel or "manual",
+                occurred_at=r.occurred_at or 0,
+                voice_path=r.voice_path,
+                media_path=r.media_path,
+                member_id=r.member_id,
+                target_recipient_id=r.target_recipient_id,
+            )
+            for r in rows
+        ]
+    except Exception as e:
+        logger.error(f"Error pulling entries: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 

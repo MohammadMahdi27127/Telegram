@@ -35,6 +35,16 @@ interface ApiService {
         @Body payload: SyncPeopleRequest
     ): Response<SyncResponse>
 
+    @GET("sync/people/{user_id}")
+    suspend fun getAllUserPeople(
+        @Path("user_id") userId: String
+    ): Response<List<SyncPersonItem>>
+
+    @GET("sync/entries/{user_id}")
+    suspend fun getAllUserEntries(
+        @Path("user_id") userId: String
+    ): Response<List<SyncEntryItem>>
+
     @POST("sync/slips")
     suspend fun syncSlips(
         @Body payload: SyncSlipRequest
@@ -217,6 +227,7 @@ data class SyncEntryItem(
     @SerializedName("occurred_at") val occurredAt: Long,
     @SerializedName("voice_path") val voicePath: String? = null,
     @SerializedName("media_path") val mediaPath: String? = null,
+    @SerializedName("member_id") val memberId: String? = null,
     @SerializedName("target_recipient_id") val targetRecipientId: String? = null
 )
 

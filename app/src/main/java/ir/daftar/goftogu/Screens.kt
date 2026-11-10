@@ -2899,6 +2899,18 @@ fun ChatsScreen(
     var menu by remember { mutableStateOf(false) }
     var alert by remember { mutableStateOf<Pair<String, String>?>(null) }
 
+    // سینک اولیهٔ کامل از سرور در صورت خالی‌بودن دیتابیس محلی (پس از نصب مجدد/پاک‌شدن کش)
+    // تا تاریخچهٔ گفتگوها و پیام‌ها بازگردانده و لیست چت‌ها بلافاصله رفرش شود.
+    var syncingInitial by remember { mutableStateOf(false) }
+    LaunchedEffect(userId) {
+        if (app.db.isLocalDataEmpty(userId)) {
+            syncingInitial = true
+            app.ensureInitialSync(userId)
+            people = app.db.people(userId)
+            syncingInitial = false
+        }
+    }
+
     // فیلتر بر اساس تب فعال و مخفی‌سازی چت‌های بایگانی‌شده در تب‌های عادی
     val filteredPeople = remember(people, filter) {
         when (filter) {
@@ -3246,6 +3258,24 @@ fun ChatsScreen(
             }
             }
             LazyColumn(Modifier.weight(1f), state = listState) {
+                if (syncingInitial) {
+                    item(key = "initial-sync") {
+                        Box(
+                            Modifier.fillMaxWidth().padding(vertical = 24.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                CircularProgressIndicator(color = chatPalette.primary)
+                                Text(
+                                    "در حال بازیابی گفتگوها از سرور…",
+                                    color = palette.subtext,
+                                    fontSize = 13.sp,
+                                    modifier = Modifier.padding(top = 12.dp),
+                                )
+                            }
+                        }
+                    }
+                }
                 if (!contacts && account?.plan == "advanced") {
                     item(key = "ai-chat") {
                         RiseRow("ai", 0, arrived) {

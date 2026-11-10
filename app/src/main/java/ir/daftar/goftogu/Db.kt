@@ -1049,6 +1049,9 @@ val payloadJson = org.json.JSONObject().apply {
     put("kind", kind)
     put("channel", channel)
     put("occurred_at", occurredAt)
+    // شناسهٔ فرستنده در چت تیمی و گیرندهٔ پیام خصوصی برای بازیابی صحیح روی سرور
+    if (memberId != null) put("member_id", memberId)
+    if (targetRecipientId != null) put("target_recipient_id", targetRecipientId)
 }.toString()
 
 enqueue("entry", payloadJson)
@@ -1956,5 +1959,99 @@ writableDatabase.insert("entries", null, ContentValues().apply {
             "id = ?",
             arrayOf(userId),
         )
+    }
+
+    /**
+     * آیا هیچ گفتگو/پیامی برای این کاربر به صورت محلی وجود ندارد؟
+     * برای تشخیص نیاز به «سینک اولیهٔ کامل» پس از نصب مجدد / پاک‌شدن کش استفاده می‌شود.
+     */
+    fun isLocalDataEmpty(userId: String): Boolean {
+        val hasPeople = readableDatabase.rawQuery(
+            "SELECT 1 FROM people WHERE user_id=? LIMIT 1",
+            arrayOf(userId),
+        ).use { it.moveToFirst() }
+        if (hasPeople) return false
+        val hasEntries = readableDatabase.rawQuery(
+            "SELECT 1 FROM entries WHERE user_id=? LIMIT 1",
+            arrayOf(userId),
+        ).use { it.moveToFirst() }
+        return !hasEntries
+    }
+
+    /**
+     * درج/به‌روزرسانی گروهی مخاطبین دریافتی از سرور در یک Transaction واحد.
+     * استفاده از یک تراکنش برای جلوگیری از کندی/فریز در حجم بالا.
+     */
+    fun upsertPeopleLocally(userId: String, people: List<SyncPersonItem>) {
+        if (people.isEmpty()) return
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            people.forEach { p ->
+                val exists = db.rawQuery("SELECT 1 FROM people WHERE id=? LIMIT 1", arrayOf(p.id))
+                    .use { it.moveToFirst() }
+                val cv = ContentValues().apply {
+                    put("user_id", userId)
+                    put("name", p.name)
+                    put("phone", p.phone ?: "")
+                    put("role", p.role ?: "")
+                    put("pinned", if (p.pinned) 1 else 0)
+                    put("is_group", if (p.isGroup) 1 else 0)
+                    put("saved", if (p.saved) 1 else 0)
+                    if (p.avatar == null) putNull("avatar") else put("avatar", p.avatar)
+                }
+                if (exists) {
+                    // فقط ستون‌های سروری به‌روزرسانی می‌شوند تا creator_id و سایر داده‌های محلی حفظ گردند
+                    db.update("people", cv, "id=?", arrayOf(p.id))
+                } else {
+                    cv.put("id", p.id)
+                    cv.put("created_at", p.createdAt)
+                    db.insertWithOnConflict("people", null, cv, SQLiteDatabase.CONFLICT_IGNORE)
+                }
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+    }
+
+    /**
+     * درج/به‌روزرسانی گروهی پیام‌ها و یادداشت‌های دریافتی از سرور در یک Transaction واحد.
+     * استفاده از یک تراکنش برای جلوگیری از کندی/فریز در حجم بالا.
+     */
+    fun upsertEntriesLocally(userId: String, entries: List<SyncEntryItem>) {
+        if (entries.isEmpty()) return
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            val now = System.currentTimeMillis()
+            entries.forEach { e ->
+                val exists = db.rawQuery("SELECT 1 FROM entries WHERE id=? LIMIT 1", arrayOf(e.id))
+                    .use { it.moveToFirst() }
+                val cv = ContentValues().apply {
+                    put("user_id", userId)
+                    put("person_id", e.personId)
+                    put("body", e.body)
+                    put("kind", e.kind)
+                    put("channel", e.channel)
+                    put("occurred_at", e.occurredAt)
+                    put("updated_at", now)
+                    if (e.voicePath == null) putNull("voice_path") else put("voice_path", e.voicePath)
+                    if (e.mediaPath == null) putNull("media_path") else put("media_path", e.mediaPath)
+                    if (e.memberId == null) putNull("member_id") else put("member_id", e.memberId)
+                    if (e.targetRecipientId == null) putNull("target_recipient_id") else put("target_recipient_id", e.targetRecipientId)
+                }
+                if (exists) {
+                    db.update("entries", cv, "id=?", arrayOf(e.id))
+                } else {
+                    cv.put("id", e.id)
+                    cv.put("created_at", if (e.occurredAt > 0) e.occurredAt else now)
+                    db.insertWithOnConflict("entries", null, cv, SQLiteDatabase.CONFLICT_IGNORE)
+                }
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
     }
 }

@@ -217,6 +217,9 @@ class MainActivity : ComponentActivity() {
         val userId = app.sessionId()
         if (!userId.isNullOrBlank()) {
             app.syncUserProfile(userId)
+            // بازگردانی کامل گفتگوها/پیام‌ها از سرور در صورت خالی‌بودن دیتابیس محلی
+            // (پس از نصب مجدد یا پاک‌شدن کش/دیتا) — در پس‌زمینه و غیرمسدودکننده
+            app.runInitialSyncIfNeeded(userId)
         }
 
         setContent {

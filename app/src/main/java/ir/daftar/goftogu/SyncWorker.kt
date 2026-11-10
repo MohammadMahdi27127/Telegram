@@ -80,6 +80,7 @@ class SyncWorker(
                                 occurredAt = json.optLong("occurred_at", System.currentTimeMillis()),
                                 voicePath = json.optString("voice_path").takeIf { it.isNotEmpty() },
                                 mediaPath = json.optString("media_path").takeIf { it.isNotEmpty() },
+                                memberId = json.optString("member_id").takeIf { it.isNotEmpty() },
                                 targetRecipientId = json.optString("target_recipient_id").takeIf { it.isNotEmpty() }
                             )
                         )

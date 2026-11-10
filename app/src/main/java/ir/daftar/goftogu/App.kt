@@ -17,6 +17,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import java.security.MessageDigest
 
 class App : Application() {
@@ -25,6 +27,9 @@ class App : Application() {
 
     // Scope سراسری در پس‌زمینه برای حذف قطعی ANR
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    // قفل سینک اولیه تا در صورت فراخوانی هم‌زمان (MainActivity و صفحهٔ چت‌ها) فقط یک‌بار اجرا شود
+    private val initialSyncMutex = kotlinx.coroutines.sync.Mutex()
 
     override fun onCreate() {
         super.onCreate()
@@ -80,6 +85,88 @@ class App : Application() {
                 Log.e("ProfileSync", "Error syncing user profile: ${e.message}")
             }
         }
+    }
+
+    /**
+     * سینک اولیهٔ کامل — بازگردانی تمامی گفتگوها، پیام‌ها و تیم‌های کاربر از سرور (PostgreSQL)
+     * به دیتابیس محلی SQLite. منبع اصلی داده‌ها سرور است؛ این متد پس از نصب مجدد یا پاک‌شدن
+     * کش/دیتای برنامه، تاریخچهٔ کامل کاربر را برمی‌گرداند.
+     *
+     * عملیات درج به صورت Transaction گروهی انجام می‌شود تا در حجم بالای پیام، برنامه فریز نشود.
+     */
+    suspend fun performFullInitialSync(userId: String) {
+        if (userId.isBlank()) return
+        try {
+            val apiService = NetworkModule.getApiService()
+
+            // ۱. دریافت و ذخیره تمامی گفتگوها/مخاطبین
+            val peopleResponse = apiService.getAllUserPeople(userId)
+            if (peopleResponse.isSuccessful) {
+                val people = peopleResponse.body().orEmpty()
+                withContext(Dispatchers.IO) { db.upsertPeopleLocally(userId, people) }
+                Log.d("InitialSync", "People restored: ${people.size}")
+            } else {
+                Log.w("InitialSync", "Failed to fetch people: ${peopleResponse.code()}")
+            }
+
+            // ۲. دریافت و ذخیره تمامی پیام‌ها و یادداشت‌ها
+            val entriesResponse = apiService.getAllUserEntries(userId)
+            if (entriesResponse.isSuccessful) {
+                val entries = entriesResponse.body().orEmpty()
+                withContext(Dispatchers.IO) { db.upsertEntriesLocally(userId, entries) }
+                Log.d("InitialSync", "Entries restored: ${entries.size}")
+            } else {
+                Log.w("InitialSync", "Failed to fetch entries: ${entriesResponse.code()}")
+            }
+
+            // ۳. دریافت و ذخیره تیم‌ها (هم‌راستا با منطق TeamsScreen)
+            val teamsResponse = apiService.getUserTeams(userId)
+            if (teamsResponse.isSuccessful) {
+                val teams = teamsResponse.body().orEmpty()
+                withContext(Dispatchers.IO) {
+                    val remoteIds = teams.map { it.id }.toSet()
+                    teams.forEach { team ->
+                        db.upsertGroupTeam(
+                            userId = userId,
+                            teamId = team.id,
+                            name = team.name,
+                            description = team.description,
+                            members = team.members,
+                            creatorId = team.creatorId,
+                        )
+                    }
+                    // حذف تیم‌های محلی که دیگر روی سرور برای این کاربر وجود ندارند
+                    db.localTeamIds(userId)
+                        .filter { it !in remoteIds }
+                        .forEach { db.deleteTeamLocally(it) }
+                }
+                Log.d("InitialSync", "Teams restored: ${teams.size}")
+            }
+
+            Log.d("InitialSync", "Full initial sync completed for: $userId")
+        } catch (e: Exception) {
+            Log.e("InitialSync", "Error in full initial sync", e)
+        }
+    }
+
+    /**
+     * اجرای سینک اولیه فقط در صورت خالی‌بودن دیتابیس محلی.
+     * با Mutex سریالی می‌شود تا فراخوانی هم‌زمان از MainActivity و صفحهٔ چت‌ها
+     * به اجرای دوبارهٔ سنگین منجر نشود.
+     */
+    suspend fun ensureInitialSync(userId: String) {
+        if (userId.isBlank()) return
+        initialSyncMutex.withLock {
+            if (!db.isLocalDataEmpty(userId)) return
+            Log.d("InitialSync", "Local DB empty → running full initial sync for: $userId")
+            performFullInitialSync(userId)
+        }
+    }
+
+    /** نسخهٔ غیرمسدودکننده برای فراخوانی از onCreate (بستر پس‌زمینه). */
+    fun runInitialSyncIfNeeded(userId: String) {
+        if (userId.isBlank()) return
+        appScope.launch { ensureInitialSync(userId) }
     }
 }
 
