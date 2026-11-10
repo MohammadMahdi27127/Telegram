@@ -45,6 +45,11 @@ interface ApiService {
         @Path("user_id") userId: String
     ): Response<List<SyncEntryItem>>
 
+    @GET("sync/support-messages/{user_id}")
+    suspend fun getUserSupportMessages(
+        @Path("user_id") userId: String
+    ): Response<List<SyncSupportMessageItem>>
+
     @POST("sync/slips")
     suspend fun syncSlips(
         @Body payload: SyncSlipRequest
@@ -142,6 +147,12 @@ interface ApiService {
         @Path("user_id") userId: String,
         @Body req: UpdateUsernameReq
     ): Response<Map<String, String>>
+
+    @PUT("users/{user_id}/ai-config")
+    suspend fun updateAiConfig(
+        @Path("user_id") userId: String,
+        @Body req: UpdateAiConfigReq
+    ): Response<AiConfigDto>
 
     @POST("users/{user_id}/plan")
     suspend fun updateUserPlan(
@@ -425,8 +436,28 @@ data class UserProfileDto(
     val username: String? = null,
     val plan: String,
     val balance: Int,
+    @SerializedName("plan_purchased_at") val planPurchasedAt: Long? = null,
     @SerializedName("plan_expires_at") val planExpiresAt: Long?,
-    val suspended: Boolean
+    val suspended: Boolean,
+    @SerializedName("ai_provider") val aiProvider: String? = null,
+    @SerializedName("ai_model_name") val aiModelName: String? = null,
+    @SerializedName("ai_api_key") val aiApiKey: String? = null
+)
+
+
+data class UpdateAiConfigReq(
+    @SerializedName("ai_provider") val aiProvider: String? = null,
+    @SerializedName("ai_model_name") val aiModelName: String? = null,
+    @SerializedName("ai_api_key") val aiApiKey: String? = null,
+    @SerializedName("ai_settings_json") val aiSettingsJson: String? = null
+)
+
+data class AiConfigDto(
+    val status: String,
+    @SerializedName("user_id") val userId: String,
+    @SerializedName("ai_provider") val aiProvider: String? = null,
+    @SerializedName("ai_model_name") val aiModelName: String? = null,
+    @SerializedName("ai_api_key") val aiApiKey: String? = null
 )
 
 

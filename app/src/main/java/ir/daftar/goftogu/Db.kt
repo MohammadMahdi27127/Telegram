@@ -28,6 +28,12 @@ data class User(
     val lastQuotaResetMonth: String? = null,
     val tokensUsed: Long = 0L,
     val createdAt: Long = System.currentTimeMillis(),
+    // --- فیلدهای Cloud-Driven (سرورمحور) ---
+    val planPurchasedAt: Long? = null,
+    val aiProvider: String? = null,
+    val aiModelName: String? = null,
+    val aiApiKey: String? = null,
+    val aiSettingsJson: String? = null,
 )
 
 data class Person(
@@ -146,7 +152,7 @@ data class AiMessage(val id: String, val personId: String, val role: String, val
 data class Member(val id: String, val name: String, val userId: String? = null)
 data class Banner(val id: String, val title: String, val body: String, val image: String? = null)
 
-class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 20) {
+class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 21) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
             """CREATE TABLE users (
@@ -156,7 +162,9 @@ class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", 
                 username TEXT, created_at INTEGER,
                 monthly_download_count INTEGER NOT NULL DEFAULT 0,
                 monthly_ai_usage_count INTEGER NOT NULL DEFAULT 0,
-                last_quota_reset_month TEXT, tokens_used INTEGER NOT NULL DEFAULT 0
+                last_quota_reset_month TEXT, tokens_used INTEGER NOT NULL DEFAULT 0,
+                plan_purchased_at INTEGER,
+                ai_provider TEXT, ai_model_name TEXT, ai_api_key TEXT, ai_settings_json TEXT
             )""",
         )
         db.execSQL(
@@ -216,6 +224,12 @@ class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", 
         if ("monthly_ai_usage_count" !in columns) db.execSQL("ALTER TABLE users ADD COLUMN monthly_ai_usage_count INTEGER NOT NULL DEFAULT 0")
         if ("last_quota_reset_month" !in columns) db.execSQL("ALTER TABLE users ADD COLUMN last_quota_reset_month TEXT")
         if ("tokens_used" !in columns) db.execSQL("ALTER TABLE users ADD COLUMN tokens_used INTEGER NOT NULL DEFAULT 0")
+        // --- ستون‌های Cloud-Driven (اشتراک و تنظیمات هوش مصنوعی) ---
+        if ("plan_purchased_at" !in columns) db.execSQL("ALTER TABLE users ADD COLUMN plan_purchased_at INTEGER")
+        if ("ai_provider" !in columns) db.execSQL("ALTER TABLE users ADD COLUMN ai_provider TEXT")
+        if ("ai_model_name" !in columns) db.execSQL("ALTER TABLE users ADD COLUMN ai_model_name TEXT")
+        if ("ai_api_key" !in columns) db.execSQL("ALTER TABLE users ADD COLUMN ai_api_key TEXT")
+        if ("ai_settings_json" !in columns) db.execSQL("ALTER TABLE users ADD COLUMN ai_settings_json TEXT")
         db.execSQL("CREATE TABLE IF NOT EXISTS ai_models (id TEXT PRIMARY KEY, name TEXT, endpoint TEXT, model_id TEXT, api_key TEXT, input_cost REAL, output_cost REAL, active INTEGER NOT NULL DEFAULT 0, created_at INTEGER)")
         val modelColumns = db.rawQuery("PRAGMA table_info(ai_models)", null).use {
             val names = mutableListOf<String>()
@@ -456,7 +470,7 @@ class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", 
         if (existing != null) return existing
 
         // 📌 نوٹ: اگر cache clear ہو تو یہاں default plan="free" ہے
-        // لیکن MainActivity.onCreate() میں syncUserProfile() کال ہو گی
+        // لیکن MainActivity.onCreate() میں refreshAppDataFromServerAsync() کال ہو گی
         // جو سرور سے actual plan fetch کر کے override کرے گی
         val db = writableDatabase
         val cv = ContentValues().apply {
@@ -613,7 +627,7 @@ class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", 
 
     fun user(id: String): User? {
         val cursor = readableDatabase.rawQuery(
-            "SELECT id, phone, name, plan, balance, plan_expires_at, suspended, banner_seen, chat_bg, chat_color, avatar, username, monthly_download_count, monthly_ai_usage_count, last_quota_reset_month, tokens_used, created_at FROM users WHERE id=?",
+            "SELECT id, phone, name, plan, balance, plan_expires_at, suspended, banner_seen, chat_bg, chat_color, avatar, username, monthly_download_count, monthly_ai_usage_count, last_quota_reset_month, tokens_used, created_at, plan_purchased_at, ai_provider, ai_model_name, ai_api_key, ai_settings_json FROM users WHERE id=?",
             arrayOf(id),
         )
         cursor.use {
@@ -637,6 +651,11 @@ class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", 
             val quotaResetIdx = it.getColumnIndex("last_quota_reset_month")
             val tokensUsedIdx = it.getColumnIndex("tokens_used")
             val createdAtIdx = it.getColumnIndex("created_at")
+            val purchasedIdx = it.getColumnIndex("plan_purchased_at")
+            val aiProviderIdx = it.getColumnIndex("ai_provider")
+            val aiModelNameIdx = it.getColumnIndex("ai_model_name")
+            val aiApiKeyIdx = it.getColumnIndex("ai_api_key")
+            val aiSettingsIdx = it.getColumnIndex("ai_settings_json")
             
             val rawPlan = it.getString(planIdx)
             val expires = if (it.isNull(expiresIdx)) null else it.getLong(expiresIdx)
@@ -666,6 +685,11 @@ class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", 
                 if (it.isNull(quotaResetIdx)) null else it.getString(quotaResetIdx),
                 if (it.isNull(tokensUsedIdx)) 0L else it.getLong(tokensUsedIdx),
                 if (it.isNull(createdAtIdx)) System.currentTimeMillis() else it.getLong(createdAtIdx),
+                planPurchasedAt = if (purchasedIdx < 0 || it.isNull(purchasedIdx)) null else it.getLong(purchasedIdx),
+                aiProvider = if (aiProviderIdx < 0 || it.isNull(aiProviderIdx)) null else it.getString(aiProviderIdx),
+                aiModelName = if (aiModelNameIdx < 0 || it.isNull(aiModelNameIdx)) null else it.getString(aiModelNameIdx),
+                aiApiKey = if (aiApiKeyIdx < 0 || it.isNull(aiApiKeyIdx)) null else it.getString(aiApiKeyIdx),
+                aiSettingsJson = if (aiSettingsIdx < 0 || it.isNull(aiSettingsIdx)) null else it.getString(aiSettingsIdx),
             )
             return ensureQuotaReset(user)
         }
@@ -1933,6 +1957,11 @@ writableDatabase.insert("entries", null, ContentValues().apply {
             put("balance", profile.balance)
             put("plan_expires_at", profile.planExpiresAt ?: 0L)
             put("suspended", if (profile.suspended) 1 else 0)
+            // --- فیلدهای Cloud-Driven ---
+            if (profile.planPurchasedAt == null) putNull("plan_purchased_at") else put("plan_purchased_at", profile.planPurchasedAt)
+            if (profile.aiProvider == null) putNull("ai_provider") else put("ai_provider", profile.aiProvider)
+            if (profile.aiModelName == null) putNull("ai_model_name") else put("ai_model_name", profile.aiModelName)
+            if (profile.aiApiKey == null) putNull("ai_api_key") else put("ai_api_key", profile.aiApiKey)
         }
         val updated = writableDatabase.update("users", cv, "id = ?", arrayOf(profile.userId))
         if (updated == 0) {
@@ -1955,6 +1984,24 @@ writableDatabase.insert("entries", null, ContentValues().apply {
             ContentValues().apply {
                 put("plan", plan)
                 put("plan_expires_at", planExpiresAt ?: 0L)
+                put("plan_purchased_at", System.currentTimeMillis())
+            },
+            "id = ?",
+            arrayOf(userId),
+        )
+    }
+
+    /**
+     * ذخیرهٔ تنظیمات هوش مصنوعی کاربر (مدل/پرووایدر/کلید) در دیتابیس محلی.
+     * متناظر با اندپوینت PUT /api/v1/users/{user_id}/ai-config در سرور.
+     */
+    fun setUserAiConfig(userId: String, provider: String?, modelName: String?, apiKey: String?) {
+        writableDatabase.update(
+            "users",
+            ContentValues().apply {
+                if (provider == null) putNull("ai_provider") else put("ai_provider", provider)
+                if (modelName == null) putNull("ai_model_name") else put("ai_model_name", modelName)
+                if (apiKey == null) putNull("ai_api_key") else put("ai_api_key", apiKey)
             },
             "id = ?",
             arrayOf(userId),
@@ -2047,6 +2094,41 @@ writableDatabase.insert("entries", null, ContentValues().apply {
                     cv.put("id", e.id)
                     cv.put("created_at", if (e.occurredAt > 0) e.occurredAt else now)
                     db.insertWithOnConflict("entries", null, cv, SQLiteDatabase.CONFLICT_IGNORE)
+                }
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+    }
+
+    /**
+     * درج/به‌روزرسانی گروهی پیام‌های پشتیبانی دریافتی از سرور در یک Transaction واحد.
+     * با پاک‌شدن کش/نصب مجدد، پیام‌های پشتیبانی نیز از سرور بازیابی می‌شوند.
+     */
+    fun upsertSupportMessagesLocally(userId: String, messages: List<SyncSupportMessageItem>) {
+        if (messages.isEmpty()) return
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            messages.forEach { m ->
+                val exists = db.rawQuery("SELECT 1 FROM support_messages WHERE id=? LIMIT 1", arrayOf(m.id))
+                    .use { it.moveToFirst() }
+                val cv = ContentValues().apply {
+                    put("user_id", if (m.userId.isNotBlank()) m.userId else userId)
+                    put("from_admin", if (m.fromAdmin) 1 else 0)
+                    put("body", m.body)
+                    put("kind", m.kind)
+                    if (m.path == null) putNull("path") else put("path", m.path)
+                    put("read_admin", if (m.readAdmin) 1 else 0)
+                    put("read_user", if (m.readUser) 1 else 0)
+                    put("created_at", m.createdAt)
+                }
+                if (exists) {
+                    db.update("support_messages", cv, "id=?", arrayOf(m.id))
+                } else {
+                    cv.put("id", m.id)
+                    db.insertWithOnConflict("support_messages", null, cv, SQLiteDatabase.CONFLICT_IGNORE)
                 }
             }
             db.setTransactionSuccessful()

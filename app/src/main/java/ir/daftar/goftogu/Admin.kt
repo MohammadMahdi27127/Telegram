@@ -222,6 +222,13 @@ private fun ModelsView(app: App) {
     var input by remember { mutableStateOf("0") }
     var output by remember { mutableStateOf("0") }
     var error by remember { mutableStateOf("") }
+    val userId = app.sessionId() ?: ""
+    fun providerOf(endpoint: String) = when {
+        endpoint.contains("openrouter", ignoreCase = true) -> "openrouter"
+        endpoint.contains("arvancloud", ignoreCase = true) -> "arvancloud"
+        endpoint.contains("gapgpt", ignoreCase = true) -> "gapgpt"
+        else -> "openai"
+    }
     fun selectProvider(id: String) {
         provider = id
         if (id == "openrouter") {
@@ -258,6 +265,12 @@ private fun ModelsView(app: App) {
             try {
                 app.db.addModel(name, endpoint, modelId, key, input.toDoubleOrNull() ?: 0.0, output.toDoubleOrNull() ?: 0.0)
                 models = app.db.models()
+                // تثبیت تنظیمات هوش مصنوعی روی سرور (Cloud-Driven) — سرور منبع حقیقت است
+                app.db.activeModel()?.let { active ->
+                    if (userId.isNotBlank()) {
+                        app.saveAiConfigToServer(userId, providerOf(active.endpoint), active.modelId, active.apiKey)
+                    }
+                }
                 name = ""; modelId = ""; key = ""
                 error = ""
             } catch (e: Exception) { error = e.message ?: "خطا" }
@@ -272,6 +285,10 @@ private fun ModelsView(app: App) {
                         Box(Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(Sky).clickable {
                             app.db.activateModel(model.id)
                             models = app.db.models()
+                            // تثبیت مدل انتخابی کاربر روی سرور (Cloud-Driven)
+                            if (userId.isNotBlank()) {
+                                app.saveAiConfigToServer(userId, providerOf(model.endpoint), model.modelId, model.apiKey)
+                            }
                         }.padding(vertical = 10.dp), contentAlignment = Alignment.Center) {
                             Text("استفاده شود", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                         }

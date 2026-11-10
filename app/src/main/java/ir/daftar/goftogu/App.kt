@@ -28,8 +28,8 @@ class App : Application() {
     // Scope سراسری در پس‌زمینه برای حذف قطعی ANR
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    // قفل سینک اولیه تا در صورت فراخوانی هم‌زمان (MainActivity و صفحهٔ چت‌ها) فقط یک‌بار اجرا شود
-    private val initialSyncMutex = kotlinx.coroutines.sync.Mutex()
+    // قفل رفرش داده تا از اجرای موازی/تکراری رفرش‌های هم‌زمان (onResume + swipe-refresh + اجرای اپ) جلوگیری شود
+    private val refreshMutex = kotlinx.coroutines.sync.Mutex()
 
     override fun onCreate() {
         super.onCreate()
@@ -60,66 +60,73 @@ class App : Application() {
     }
 
     /**
-     * سرور سے کاربر کی پروفائل معلومات (plan, balance، username وغیرہ) کو سنک کریں
-     * یہ method Cache clear ہونے کے بعد plan کو دوبارہ restore کرتا ہے
-     * 
-     * @param userId کاربر کی شناسہ
+     * بازخوانی کامل داده‌ها از سرور (Server-Driven / Cloud-Driven).
+     *
+     * تمام داده‌ها از PostgreSQL سرور واکشی شده و دیتابیس محلی SQLite فقط نقش
+     * کش موقت/آفلاین را بازی می‌کند. ترتیب مراحل:
+     *   ۱. پروفایل و وضعیت اشتراک (plan/plan_purchased_at/plan_expires_at)
+     *   ۲. تنظیمات هوش مصنوعی کاربر (provider/model/api_key)
+     *   ۳. گفتگوها و عناوین (people)
+     *   ۴. پیام‌ها و یادداشت‌ها (entries)
+     *   ۵. پیام‌های پشتیبانی (support_messages)
+     *   ۶. تیم‌ها و پیام‌های تیمی
+     *
+     * @return اطلاعات پروفایل/تنظیمات از سرور برای درج در State رابط کاربری، یا null در خطا.
      */
-    fun syncUserProfile(userId: String) {
-        if (userId.isBlank()) return
-        
-        appScope.launch {
-            try {
-                val apiService = NetworkModule.getApiService()
-                val response = apiService.getUserProfile(userId)
-                
-                if (response.isSuccessful && response.body() != null) {
-                    // لوکال ڈیٹابیس میں پروفائل اپڈیٹ کریں
-                    db.updateUserProfileFromServer(response.body()!!)
-                    Log.d("ProfileSync", "User profile synced successfully for: $userId")
-                } else {
-                    Log.w("ProfileSync", "Failed to fetch user profile: ${response.code()}")
-                }
-            } catch (e: Exception) {
-                // آفلائن mode میں خاموشی سے ناکام ہوں - کریش نہ کریں
-                Log.e("ProfileSync", "Error syncing user profile: ${e.message}")
-            }
-        }
+    suspend fun refreshAppDataFromServer(userId: String): CloudRefreshResult? {
+        if (userId.isBlank()) return null
+        // سریال‌سازی: جلوگیری از اجرای موازی رفرش‌های هم‌زمان (onResume + swipe + اجرای اپ)
+        return refreshMutex.withLock { doRefreshAppDataFromServer(userId) }
     }
 
-    /**
-     * سینک اولیهٔ کامل — بازگردانی تمامی گفتگوها، پیام‌ها و تیم‌های کاربر از سرور (PostgreSQL)
-     * به دیتابیس محلی SQLite. منبع اصلی داده‌ها سرور است؛ این متد پس از نصب مجدد یا پاک‌شدن
-     * کش/دیتای برنامه، تاریخچهٔ کامل کاربر را برمی‌گرداند.
-     *
-     * عملیات درج به صورت Transaction گروهی انجام می‌شود تا در حجم بالای پیام، برنامه فریز نشود.
-     */
-    suspend fun performFullInitialSync(userId: String) {
-        if (userId.isBlank()) return
+    private suspend fun doRefreshAppDataFromServer(userId: String): CloudRefreshResult? {
+        var result: CloudRefreshResult? = null
         try {
             val apiService = NetworkModule.getApiService()
 
-            // ۱. دریافت و ذخیره تمامی گفتگوها/مخاطبین
+            // ۱ و ۲. پروفایل + اشتراک + تنظیمات هوش مصنوعی (Single Source of Truth = سرور)
+            val profileResponse = apiService.getUserProfile(userId)
+            if (profileResponse.isSuccessful && profileResponse.body() != null) {
+                val p = profileResponse.body()!!
+                withContext(Dispatchers.IO) { db.updateUserProfileFromServer(p) }
+                result = CloudRefreshResult(
+                    plan = p.plan,
+                    planPurchasedAt = p.planPurchasedAt,
+                    planExpiresAt = p.planExpiresAt,
+                    aiProvider = p.aiProvider,
+                    aiModelName = p.aiModelName,
+                    aiApiKey = p.aiApiKey,
+                )
+                Log.d("CloudRefresh", "Profile + AI config refreshed from server")
+            } else {
+                Log.w("CloudRefresh", "Failed to fetch profile: ${profileResponse.code()}")
+            }
+
+            // ۳. گفتگوها/مخاطبین
             val peopleResponse = apiService.getAllUserPeople(userId)
             if (peopleResponse.isSuccessful) {
                 val people = peopleResponse.body().orEmpty()
                 withContext(Dispatchers.IO) { db.upsertPeopleLocally(userId, people) }
-                Log.d("InitialSync", "People restored: ${people.size}")
-            } else {
-                Log.w("InitialSync", "Failed to fetch people: ${peopleResponse.code()}")
+                Log.d("CloudRefresh", "People refreshed: ${people.size}")
             }
 
-            // ۲. دریافت و ذخیره تمامی پیام‌ها و یادداشت‌ها
+            // ۴. پیام‌ها و یادداشت‌ها
             val entriesResponse = apiService.getAllUserEntries(userId)
             if (entriesResponse.isSuccessful) {
                 val entries = entriesResponse.body().orEmpty()
                 withContext(Dispatchers.IO) { db.upsertEntriesLocally(userId, entries) }
-                Log.d("InitialSync", "Entries restored: ${entries.size}")
-            } else {
-                Log.w("InitialSync", "Failed to fetch entries: ${entriesResponse.code()}")
+                Log.d("CloudRefresh", "Entries refreshed: ${entries.size}")
             }
 
-            // ۳. دریافت و ذخیره تیم‌ها (هم‌راستا با منطق TeamsScreen)
+            // ۵. پیام‌های پشتیبانی
+            val supportResponse = apiService.getUserSupportMessages(userId)
+            if (supportResponse.isSuccessful) {
+                val messages = supportResponse.body().orEmpty()
+                withContext(Dispatchers.IO) { db.upsertSupportMessagesLocally(userId, messages) }
+                Log.d("CloudRefresh", "Support messages refreshed: ${messages.size}")
+            }
+
+            // ۶. تیم‌ها و اعضای آنها
             val teamsResponse = apiService.getUserTeams(userId)
             if (teamsResponse.isSuccessful) {
                 val teams = teamsResponse.body().orEmpty()
@@ -135,39 +142,91 @@ class App : Application() {
                             creatorId = team.creatorId,
                         )
                     }
-                    // حذف تیم‌های محلی که دیگر روی سرور برای این کاربر وجود ندارند
                     db.localTeamIds(userId)
                         .filter { it !in remoteIds }
                         .forEach { db.deleteTeamLocally(it) }
                 }
-                Log.d("InitialSync", "Teams restored: ${teams.size}")
+                Log.d("CloudRefresh", "Teams refreshed: ${teams.size}")
             }
 
-            Log.d("InitialSync", "Full initial sync completed for: $userId")
+            Log.d("CloudRefresh", "App data refreshed from server for: $userId")
         } catch (e: Exception) {
-            Log.e("InitialSync", "Error in full initial sync", e)
+            Log.e("CloudRefresh", "Error refreshing app data from server", e)
+        }
+        return result
+    }
+
+    /** نسخهٔ غیرمسدودکننده برای فراخوانی از onResume/onCreate؛ نتیجه به ترد اصلی برمی‌گردد. */
+    fun refreshAppDataFromServerAsync(userId: String, onDone: ((CloudRefreshResult?) -> Unit)? = null) {
+        if (userId.isBlank()) return
+        appScope.launch {
+            val result = refreshAppDataFromServer(userId)
+            if (onDone != null) withContext(Dispatchers.Main) { onDone(result) }
         }
     }
 
     /**
-     * اجرای سینک اولیه فقط در صورت خالی‌بودن دیتابیس محلی.
-     * با Mutex سریالی می‌شود تا فراخوانی هم‌زمان از MainActivity و صفحهٔ چت‌ها
-     * به اجرای دوبارهٔ سنگین منجر نشود.
+     * تثبیت تنظیمات هوش مصنوعی روی سرور (PUT /api/v1/users/{user_id}/ai-config)
+     * و سپس اعمال در حافظهٔ محلی. ابتدا سرور (منبع حقیقت) و سپس کش محلی به‌روز می‌شود.
      */
-    suspend fun ensureInitialSync(userId: String) {
+    fun saveAiConfigToServer(
+        userId: String,
+        provider: String?,
+        modelName: String?,
+        apiKey: String?,
+        onDone: ((Boolean) -> Unit)? = null,
+    ) {
         if (userId.isBlank()) return
-        initialSyncMutex.withLock {
-            if (!db.isLocalDataEmpty(userId)) return
-            Log.d("InitialSync", "Local DB empty → running full initial sync for: $userId")
-            performFullInitialSync(userId)
+        appScope.launch {
+            var ok = false
+            try {
+                val response = NetworkModule.getApiService().updateAiConfig(
+                    userId,
+                    UpdateAiConfigReq(aiProvider = provider, aiModelName = modelName, aiApiKey = apiKey),
+                )
+                if (response.isSuccessful) {
+                    ok = true
+                    val dto = response.body()
+                    withContext(Dispatchers.IO) {
+                        db.setUserAiConfig(
+                            userId = userId,
+                            provider = dto?.aiProvider ?: provider,
+                            modelName = dto?.aiModelName ?: modelName,
+                            apiKey = dto?.aiApiKey ?: apiKey,
+                        )
+                    }
+                    Log.d("AiConfig", "AI config persisted on server for: $userId")
+                } else {
+                    Log.w("AiConfig", "Server rejected ai-config: ${response.code()}")
+                }
+            } catch (e: Exception) {
+                Log.e("AiConfig", "Failed to persist ai-config to server", e)
+            }
+            if (onDone != null) withContext(Dispatchers.Main) { onDone(ok) }
         }
     }
+}
 
-    /** نسخهٔ غیرمسدودکننده برای فراخوانی از onCreate (بستر پس‌زمینه). */
-    fun runInitialSyncIfNeeded(userId: String) {
-        if (userId.isBlank()) return
-        appScope.launch { ensureInitialSync(userId) }
-    }
+/**
+ * نتیجهٔ بازخوانی پروفایل/تنظیمات از سرور (Cloud-Driven).
+ * برای محاسبهٔ روزهای باقیماندهٔ اشتراک و اعمال تنظیمات AI در State رابط کاربری.
+ */
+data class CloudRefreshResult(
+    val plan: String,
+    val planPurchasedAt: Long?,
+    val planExpiresAt: Long?,
+    val aiProvider: String?,
+    val aiModelName: String?,
+    val aiApiKey: String?,
+) {
+    /** تعداد روزهای باقیماندهٔ اشتراک بر اساس plan_expires_at سرور؛ null اگر انقضا نامشخص باشد. */
+    val remainingDays: Int?
+        get() {
+            val expires = planExpiresAt ?: return null
+            val now = System.currentTimeMillis()
+            if (expires <= now) return 0
+            return ((expires - now) / (24L * 60 * 60 * 1000)).toInt()
+        }
 }
 
 fun hashPassword(password: String, salt: String): String {

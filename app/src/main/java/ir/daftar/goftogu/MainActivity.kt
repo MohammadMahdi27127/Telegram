@@ -212,14 +212,12 @@ class MainActivity : ComponentActivity() {
             syncRequest
         )
 
-        // کاربر کی profile کو سرور سے سنک کریں (اگر logged in ہو)
-        // یہ cache clear ہونے کے بعد subscription plan کو restore کرتا ہے
+        // بازخوانی کامل داده‌ها از سرور (Cloud-Driven) هنگام اجرای برنامه:
+        // پروفایل/اشتراک + تنظیمات هوش مصنوعی + گفتگوها + پیام‌ها + پشتیبانی + تیم‌ها.
+        // در پس‌زمینه و غیرمسدودکننده؛ دیتابیس محلی فقط نقش کش/آفلاین را دارد.
         val userId = app.sessionId()
         if (!userId.isNullOrBlank()) {
-            app.syncUserProfile(userId)
-            // بازگردانی کامل گفتگوها/پیام‌ها از سرور در صورت خالی‌بودن دیتابیس محلی
-            // (پس از نصب مجدد یا پاک‌شدن کش/دیتا) — در پس‌زمینه و غیرمسدودکننده
-            app.runInitialSyncIfNeeded(userId)
+            app.refreshAppDataFromServerAsync(userId)
         }
 
         setContent {

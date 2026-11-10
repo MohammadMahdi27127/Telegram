@@ -64,6 +64,8 @@ class User(Base):
     name = Column(String)
     plan = Column(String, default="free")
     balance = Column(Integer, default=0)
+    # زمان‌ها به صورت epoch-millis (BIGINT) ذخیره می‌شوند تا با کلاینت اندروید سازگار بمانند
+    plan_purchased_at = Column(BigInteger)
     plan_expires_at = Column(BigInteger)
     suspended = Column(Boolean, default=False)
     banner_seen = Column(Boolean, default=False)
@@ -76,6 +78,12 @@ class User(Base):
     monthly_ai_usage_count = Column(Integer, default=0)
     last_quota_reset_month = Column(String)
     tokens_used = Column(BigInteger, default=0)
+    # --- تنظیمات هوش مصنوعی اختصاصی کاربر (Cloud-Driven) ---
+    ai_provider = Column(String, default="gapgpt")
+    ai_model_name = Column(String, default="gemini-2.5-flash")
+    ai_api_key = Column(String)
+    # به صورت رشتهٔ JSON ذخیره می‌شود (سازگار با هر دو PostgreSQL و SQLite)
+    ai_settings_json = Column(Text)
 
 class Person(Base):
     __tablename__ = "people"
@@ -253,6 +261,12 @@ def init_db():
             # استفاده استاندارد از text() برای سازگاری با SQLAlchemy 2.0+
             db.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS tokens_used BIGINT DEFAULT 0;"))
             db.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS username VARCHAR(64) UNIQUE;"))
+            # --- مایگریشن ستون‌های اشتراک و تنظیمات هوش مصنوعی ---
+            db.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS plan_purchased_at BIGINT;"))
+            db.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS ai_provider VARCHAR(64) DEFAULT 'gapgpt';"))
+            db.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS ai_model_name VARCHAR(128) DEFAULT 'gemini-2.5-flash';"))
+            db.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS ai_api_key VARCHAR(255);"))
+            db.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS ai_settings_json TEXT;"))
             
             db.execute(text("""
                 CREATE TABLE IF NOT EXISTS admin_ai_chats (
@@ -419,8 +433,13 @@ class UserProfileResponse(BaseModel):
     username: Optional[str] = None
     plan: str
     balance: int
+    plan_purchased_at: Optional[int] = None
     plan_expires_at: Optional[int] = None
     suspended: bool
+    # تنظیمات هوش مصنوعی کاربر (منبع اصلی: سرور)
+    ai_provider: Optional[str] = None
+    ai_model_name: Optional[str] = None
+    ai_api_key: Optional[str] = None
 
 @app.get("/api/v1/users/{user_id}/profile", response_model=UserProfileResponse)
 def get_user_profile(user_id: str, db: Session = Depends(lambda: SessionLocal())):
@@ -434,8 +453,56 @@ def get_user_profile(user_id: str, db: Session = Depends(lambda: SessionLocal())
         username=user.username,
         plan=user.plan or "free",
         balance=user.balance or 0,
+        plan_purchased_at=user.plan_purchased_at,
         plan_expires_at=user.plan_expires_at,
-        suspended=user.suspended or False
+        suspended=user.suspended or False,
+        ai_provider=user.ai_provider or "gapgpt",
+        ai_model_name=user.ai_model_name or "gemini-2.5-flash",
+        ai_api_key=user.ai_api_key,
+    )
+
+class AiConfigRequest(BaseModel):
+    ai_provider: Optional[str] = None
+    ai_model_name: Optional[str] = None
+    ai_api_key: Optional[str] = None
+    ai_settings_json: Optional[str] = None
+
+class AiConfigResponse(BaseModel):
+    status: str
+    user_id: str
+    ai_provider: Optional[str] = None
+    ai_model_name: Optional[str] = None
+    ai_api_key: Optional[str] = None
+
+@app.put("/api/v1/users/{user_id}/ai-config", response_model=AiConfigResponse)
+def update_user_ai_config(user_id: str, req: AiConfigRequest, db: Session = Depends(lambda: SessionLocal())):
+    """
+    ذخیرهٔ تنظیمات هوش مصنوعی اختصاصی کاربر (مدل، ارائه‌دهنده، کلید API) در PostgreSQL.
+    این اندپوینت منبع اصلی (Single Source of Truth) تنظیمات AI کاربر است.
+    """
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="کاربر یافت نشد")
+
+    if req.ai_provider is not None:
+        user.ai_provider = req.ai_provider.strip() or "gapgpt"
+    if req.ai_model_name is not None:
+        user.ai_model_name = req.ai_model_name.strip()
+    if req.ai_api_key is not None:
+        user.ai_api_key = req.ai_api_key.strip()
+    if req.ai_settings_json is not None:
+        user.ai_settings_json = req.ai_settings_json
+
+    db.commit()
+    db.refresh(user)
+    logger.info(f"User {user.id} AI config updated (provider={user.ai_provider}, model={user.ai_model_name})")
+
+    return AiConfigResponse(
+        status="ok",
+        user_id=user.id,
+        ai_provider=user.ai_provider,
+        ai_model_name=user.ai_model_name,
+        ai_api_key=user.ai_api_key,
     )
 
 class UpdatePlanRequest(BaseModel):
@@ -446,6 +513,7 @@ class UpdatePlanResponse(BaseModel):
     status: str
     user_id: str
     plan: str
+    plan_purchased_at: Optional[int] = None
     plan_expires_at: Optional[int] = None
 
 # پلن‌های مجاز برای ارتقا/تأیید اشتراک
@@ -467,21 +535,26 @@ def update_user_plan(user_id: str, req: UpdatePlanRequest, db: Session = Depends
 
     duration_days = req.duration_days if (req.duration_days and req.duration_days > 0) else 30
 
+    now_ms = int(time.time() * 1000)
     user.plan = plan
     if plan == "free":
+        user.plan_purchased_at = None
         user.plan_expires_at = None
     else:
-        user.plan_expires_at = int(time.time() * 1000) + duration_days * 24 * 60 * 60 * 1000
+        # تاریخ خرید و تاریخ انقضای دقیق در سرور ثبت می‌شود (منبع اصلی: PostgreSQL)
+        user.plan_purchased_at = now_ms
+        user.plan_expires_at = now_ms + duration_days * 24 * 60 * 60 * 1000
 
     db.commit()
     db.refresh(user)
 
-    logger.info(f"User {user.id} plan updated to '{user.plan}' (expires_at={user.plan_expires_at})")
+    logger.info(f"User {user.id} plan updated to '{user.plan}' (purchased_at={user.plan_purchased_at}, expires_at={user.plan_expires_at})")
 
     return UpdatePlanResponse(
         status="ok",
         user_id=user.id,
         plan=user.plan,
+        plan_purchased_at=user.plan_purchased_at,
         plan_expires_at=user.plan_expires_at,
     )
 

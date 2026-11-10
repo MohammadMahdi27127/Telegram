@@ -592,3 +592,45 @@ def get_user_entries(user_id: str, db: Session = Depends(get_db)):
         logger.error(f"Error pulling entries: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
+class SupportMessageResponse(BaseModel):
+    id: str
+    user_id: str
+    from_admin: bool = False
+    body: str
+    kind: str = "text"
+    path: Optional[str] = None
+    read_admin: bool = False
+    read_user: bool = False
+    created_at: int
+
+# ۱۲. واکشی تمام پیام‌های پشتیبانی کاربر
+@router.get("/support-messages/{user_id}", response_model=List[SupportMessageResponse])
+def get_user_support_messages(user_id: str, db: Session = Depends(get_db)):
+    import main
+    SupportMessage = main.SupportMessage
+    try:
+        rows = (
+            db.query(SupportMessage)
+            .filter(SupportMessage.user_id == user_id)
+            .order_by(SupportMessage.created_at.asc())
+            .all()
+        )
+        logger.info(f"Pull support messages for user {user_id}: {len(rows)} rows")
+        return [
+            SupportMessageResponse(
+                id=r.id,
+                user_id=r.user_id,
+                from_admin=bool(r.from_admin),
+                body=r.body or "",
+                kind=r.kind or "text",
+                path=r.path,
+                read_admin=bool(r.read_admin),
+                read_user=bool(r.read_user),
+                created_at=r.created_at or 0,
+            )
+            for r in rows
+        ]
+    except Exception as e:
+        logger.error(f"Error pulling support messages: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+

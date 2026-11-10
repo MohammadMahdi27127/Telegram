@@ -1712,6 +1712,18 @@ fun SupportChatRoom(app: App, userId: String, asAdmin: Boolean, onBack: () -> Un
     }
     LaunchedEffect(userId) {
         if (asAdmin) app.db.markSupportReadByAdmin(userId) else app.db.markSupportReadByUser(userId)
+        // سینک مستقیم پیام‌های پشتیبانی از سرور (Cloud-Driven): با پاک‌شدن حافظه/نصب مجدد، از سرور بازمی‌گردند.
+        try {
+            val response = NetworkModule.getApiService().getUserSupportMessages(userId)
+            if (response.isSuccessful) {
+                withContext(Dispatchers.IO) {
+                    app.db.upsertSupportMessagesLocally(userId, response.body().orEmpty())
+                }
+                reload()
+            }
+        } catch (_: Exception) {
+            // آفلاین: پیام‌های کش‌شدهٔ محلی نمایش داده می‌شوند
+        }
     }
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) listState.animateScrollToItem(messages.lastIndex)
@@ -2899,15 +2911,33 @@ fun ChatsScreen(
     var menu by remember { mutableStateOf(false) }
     var alert by remember { mutableStateOf<Pair<String, String>?>(null) }
 
-    // سینک اولیهٔ کامل از سرور در صورت خالی‌بودن دیتابیس محلی (پس از نصب مجدد/پاک‌شدن کش)
-    // تا تاریخچهٔ گفتگوها و پیام‌ها بازگردانده و لیست چت‌ها بلافاصله رفرش شود.
+    // بازخوانی کامل از سرور (Cloud-Driven). سرور منبع حقیقت است و SQLite فقط کش موقت/آفلاین.
+    // ۱. اگر دیتابیس لوکال خالی باشد (نصب مجدد/پاک‌شدن کش)، لودینگ «بازیابی ابری» نمایش داده می‌شود.
     var syncingInitial by remember { mutableStateOf(false) }
+    var refreshing by remember { mutableStateOf(false) }
+
+    suspend fun refreshFromServer() {
+        app.refreshAppDataFromServer(userId)
+        people = app.db.people(userId)
+    }
+
     LaunchedEffect(userId) {
         if (app.db.isLocalDataEmpty(userId)) {
             syncingInitial = true
-            app.ensureInitialSync(userId)
+            app.refreshAppDataFromServer(userId)
             people = app.db.people(userId)
             syncingInitial = false
+        } else {
+            // حتی اگر کش محلی موجود است، در پس‌زمینه از سرور همگام می‌شویم.
+            refreshFromServer()
+        }
+    }
+
+    // ۲. رفرش زنده هنگام بازگشت به تب چت‌ها (onResume) تا عناوین و آخرین پیام‌ها از سرور بیایند.
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        scope.launch {
+            refreshing = true
+            try { refreshFromServer() } finally { refreshing = false }
         }
     }
 
@@ -3257,7 +3287,17 @@ fun ChatsScreen(
             OfflineBanner()
             }
             }
-            LazyColumn(Modifier.weight(1f), state = listState) {
+            PullToRefreshBox(
+                isRefreshing = refreshing,
+                onRefresh = {
+                    scope.launch {
+                        refreshing = true
+                        try { refreshFromServer() } finally { refreshing = false }
+                    }
+                },
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+            ) {
+            LazyColumn(Modifier.fillMaxSize(), state = listState) {
                 if (syncingInitial) {
                     item(key = "initial-sync") {
                         Box(
@@ -3509,6 +3549,7 @@ fun ChatsScreen(
                         }
                     }
                 }
+            }
             }
         }
         if (searching) {
