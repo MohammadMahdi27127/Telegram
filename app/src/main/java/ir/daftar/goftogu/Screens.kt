@@ -14,6 +14,8 @@ import java.util.Locale
 import java.util.UUID
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
@@ -48,10 +50,12 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.absoluteOffset
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -70,6 +74,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -95,6 +100,9 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Contacts
 import androidx.compose.material.icons.filled.Crop
+import androidx.compose.material.icons.filled.AspectRatio
+import androidx.compose.material.icons.filled.Brush
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Delete
@@ -136,6 +144,7 @@ import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.FormatSize
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.Person
@@ -161,6 +170,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Divider
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FabPosition
 import androidx.compose.material3.OutlinedButton
@@ -187,9 +197,11 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.zIndex
@@ -200,6 +212,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.Path
@@ -207,10 +220,13 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.window.Dialog
 import java.io.File
 import kotlin.random.Random
@@ -239,6 +255,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.unit.sp
@@ -555,7 +572,7 @@ fun BottomBar(route: String, avatar: String?, name: String, hasStar: Boolean = f
                 Modifier
                     .fillMaxWidth()
                     .background(Color.Transparent)
-                    .padding(horizontal = 24.dp, vertical = 8.dp),
+                    .padding(bottom = 16.dp, start = 16.dp, end = 16.dp),
             ) {
                 Row(
                     Modifier
@@ -678,12 +695,60 @@ fun TeamsScreen(
     val palette = LocalTg.current
     val dark = palette.dark
     
-    // بررسی دسترسی بر اساس plan
+    // بررسی دسترسی بر اساس plan (فقط برای «ساخت تیم» اعمال می‌شود، نه برای دیدن تیم‌هایی که کاربر عضو آن‌هاست)
     val allowedTeamPlans = AppConstants.TEAM_ALLOWED_PLANS
     val isAdmin = user.phone == AppConstants.ADMIN_PHONE
     val hasTeamAccess = user.plan in allowedTeamPlans || isAdmin
 
-    if (!hasTeamAccess) {
+    var teams by remember { mutableStateOf(app.db.teams(userId)) }
+    var creating by remember { mutableStateOf(false) }
+    var refreshing by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    // واکشی تیم‌ها از سرور و ذخیره در دیتابیس لوکال (برای همه کاربران، حتی پلن free)
+    suspend fun fetchTeams() {
+        refreshing = true
+        try {
+            val response = withContext(Dispatchers.IO) {
+                NetworkModule.getApiService().getUserTeams(userId)
+            }
+            if (response.isSuccessful) {
+                val remote = response.body().orEmpty()
+                withContext(Dispatchers.IO) {
+                    val remoteIds = remote.map { it.id }.toSet()
+                    remote.forEach { team ->
+                        app.db.upsertGroupTeam(
+                            userId = userId,
+                            teamId = team.id,
+                            name = team.name,
+                            description = team.description,
+                            members = team.members,
+                            creatorId = team.creatorId,
+                        )
+                    }
+                    // حذف تیم‌های لوکالی که دیگر روی سرور برای این کاربر وجود ندارند
+                    app.db.localTeamIds(userId)
+                        .filter { it !in remoteIds }
+                        .forEach { app.db.deleteTeamLocally(it) }
+                }
+                teams = app.db.teams(userId)
+            }
+        } catch (_: Exception) {
+            // در صورت نبود اتصال، لیست لوکال نمایش داده می‌شود
+        } finally {
+            refreshing = false
+        }
+    }
+
+    // سینک خودکار لیست تیم‌ها هنگام ورود به صفحه (فارغ از پلن کاربر)
+    LaunchedEffect(userId) { fetchTeams() }
+
+    // رفرش مجدد هنگام بازگشت به صفحه (onResume) تا تیم‌های جدیدی که کاربر به آن‌ها اضافه شده بلافاصله لود شوند
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        scope.launch { fetchTeams() }
+    }
+
+    if (teams.isEmpty() && !hasTeamAccess) {
         Box(Modifier.fillMaxSize().background(palette.bg), contentAlignment = Alignment.Center) {
             Card(
                 shape = RoundedCornerShape(28.dp),
@@ -733,60 +798,24 @@ fun TeamsScreen(
             }
         }
     } else {
-        var teams by remember { mutableStateOf(app.db.teams(userId)) }
-        var creating by remember { mutableStateOf(false) }
-        var refreshing by remember { mutableStateOf(false) }
-        val scope = rememberCoroutineScope()
-
-        // واکشی تیم‌ها از سرور و ذخیره آن‌ها در دیتابیس لوکال برای استفاده آفلاین
-        suspend fun fetchTeams() {
-            refreshing = true
-            try {
-                val response = withContext(Dispatchers.IO) {
-                    NetworkModule.getApiService().getUserTeams(userId)
-                }
-                if (response.isSuccessful) {
-                    val remote = response.body().orEmpty()
-                    withContext(Dispatchers.IO) {
-                        val remoteIds = remote.map { it.id }.toSet()
-                        remote.forEach { team ->
-                            app.db.upsertGroupTeam(
-                                userId = userId,
-                                teamId = team.id,
-                                name = team.name,
-                                description = team.description,
-                                members = team.members,
-                                creatorId = team.creatorId,
-                            )
-                        }
-                        // حذف تیم‌های لوکالی که دیگر روی سرور برای این کاربر وجود ندارند
-                        // (مثلاً تیم حذف شده یا کاربر از تیم خارج شده است).
-                        app.db.localTeamIds(userId)
-                            .filter { it !in remoteIds }
-                            .forEach { app.db.deleteTeamLocally(it) }
-                    }
-                    teams = app.db.teams(userId)
-                }
-            } catch (_: Exception) {
-                // در صورت نبود اتصال، لیست لوکال نمایش داده می‌شود
-            } finally {
-                refreshing = false
-            }
-        }
-
-        // سینک خودکار لیست تیم‌ها هنگام ورود به صفحه
-        LaunchedEffect(userId) { fetchTeams() }
-
         Scaffold(
             containerColor = palette.bg,
+            // در چیدمان RTL، FabPosition.Start در سمت راست صفحه رندر می‌شود (هم‌راستا با FAB صفحه چت‌ها)
+            floatingActionButtonPosition = FabPosition.Start,
             floatingActionButton = {
-                FloatingActionButton(
-                    onClick = { creating = true },
-                    containerColor = Blue,
-                    contentColor = Color.White,
-                    shape = CircleShape
-                ) {
-                    Icon(Icons.Filled.Add, "ایجاد تیم جدید")
+                // دکمه ساخت تیم فقط برای کاربران دارای پلن معتبر نمایش داده می‌شود
+                if (hasTeamAccess) {
+                    FloatingActionButton(
+                        onClick = { creating = true },
+                        containerColor = Blue,
+                        contentColor = Color.White,
+                        shape = CircleShape,
+                        modifier = Modifier
+                            .padding(bottom = 80.dp, start = 16.dp)
+                            .shadow(6.dp, CircleShape)
+                    ) {
+                        Icon(Icons.Filled.Add, "ایجاد تیم جدید")
+                    }
                 }
             }
         ) { padding ->
@@ -807,7 +836,17 @@ fun TeamsScreen(
                         if (teams.isEmpty()) {
                             item {
                                 Box(Modifier.fillParentMaxSize(), contentAlignment = Alignment.Center) {
-                                    Text("هنوز تیمی نساخته‌اید", color = palette.subtext)
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text("شما هنوز تیمی نساخته‌اید", color = palette.subtext)
+                                        Button(
+                                            onClick = { creating = true },
+                                            shape = RoundedCornerShape(16.dp),
+                                            colors = ButtonDefaults.buttonColors(containerColor = Blue),
+                                            modifier = Modifier.padding(top = 16.dp)
+                                        ) {
+                                            Text("ساخت تیم جدید", fontWeight = FontWeight.Bold)
+                                        }
+                                    }
                                 }
                             }
                         } else {
@@ -1448,36 +1487,109 @@ private fun SupportBadge(size: androidx.compose.ui.unit.Dp) {
 private fun supportClock(millis: Long): String =
     persianDigits(SimpleDateFormat("HH:mm", Locale.US).format(Date(millis)))
 
-private val inlineMarkdownPattern = Regex("""(\*\*|\*|_|~|`)(.+?)\1""")
+private val inlineMarkdownPattern = Regex("""(\*\*\*|\*\*|\*|~~|~|__|_|`)(.+?)\1""")
 
-private fun parseMarkdown(rawText: String): androidx.compose.ui.text.AnnotatedString {
-    if (rawText.none { it == '*' || it == '_' || it == '~' || it == '`' }) {
-        return androidx.compose.ui.text.AnnotatedString(rawText)
-    }
-
+/** فرمت‌بندی درون‌خطی Markdown (بولد/ایتالیک/خط‌خورده/کد). */
+private fun inlineMarkdownAnnotated(line: String): androidx.compose.ui.text.AnnotatedString {
+    if (line.isEmpty()) return androidx.compose.ui.text.AnnotatedString(line)
     return buildAnnotatedString {
         var cursor = 0
-        inlineMarkdownPattern.findAll(rawText).forEach { match ->
-            append(rawText.substring(cursor, match.range.first))
+        inlineMarkdownPattern.findAll(line).forEach { match ->
+            append(line.substring(cursor, match.range.first))
             val delimiter = match.groupValues[1]
             val content = match.groupValues[2]
             val style = when (delimiter) {
-                "*", "**" -> SpanStyle(fontWeight = FontWeight.Bold)
+                "***", "**", "*", "__" -> SpanStyle(fontWeight = FontWeight.Bold)
                 "_" -> SpanStyle(fontStyle = FontStyle.Italic)
-                "~" -> SpanStyle(textDecoration = TextDecoration.LineThrough)
-                "`" -> SpanStyle(
-                    fontFamily = FontFamily.Monospace,
-                    background = Color(0x22000000),
-                )
+                "~~", "~" -> SpanStyle(textDecoration = TextDecoration.LineThrough)
+                "`" -> SpanStyle(fontFamily = FontFamily.Monospace, background = Color(0x22000000))
                 else -> SpanStyle()
             }
-            pushStyle(style)
-            append(content)
-            pop()
+            withStyle(style) { append(content) }
             cursor = match.range.last + 1
         }
-        append(rawText.substring(cursor))
+        append(line.substring(cursor))
     }
+}
+
+private fun parseMarkdown(rawText: String): androidx.compose.ui.text.AnnotatedString {
+    if (inlineMarkdownPattern.find(rawText) == null) return androidx.compose.ui.text.AnnotatedString(rawText)
+    return inlineMarkdownAnnotated(rawText)
+}
+
+// --- موتور Markdown بلوکی ---------------------------------------------------
+
+private sealed interface MdBlock {
+    data class Heading(val level: Int, val text: String) : MdBlock
+    data class Bullet(val text: String) : MdBlock
+    data class Para(val text: String) : MdBlock
+    data class Code(val text: String) : MdBlock
+    data class Table(val header: List<String>, val rows: List<List<String>>) : MdBlock
+    object Divider : MdBlock
+}
+
+private fun mdIsDivider(line: String): Boolean {
+    val t = line.trim()
+    if (t.length < 3) return false
+    val c = t.first()
+    if (c != '-' && c != '*' && c != '_') return false
+    return t.all { it == c || it == ' ' } && t.count { it == c } >= 3
+}
+
+private fun mdSplitRow(line: String): List<String> =
+    line.trim().trim('|').split('|').map { it.trim() }
+
+private fun mdIsTableSeparator(line: String): Boolean {
+    val t = line.trim()
+    if (!t.contains('-')) return false
+    val cells = t.trim('|').split('|')
+    return cells.isNotEmpty() && cells.all { cell ->
+        val c = cell.trim()
+        c.isNotEmpty() && c.contains('-') && c.all { it == '-' || it == ':' || it == ' ' }
+    }
+}
+
+/** تفکیک متن به بلوک‌ها؛ یک‌بار در remember کش می‌شود تا اسکرول بدون لگ بماند. */
+private fun parseMarkdownBlocks(source: String): List<MdBlock> {
+    if (source.isBlank()) return emptyList()
+    val lines = source.replace("\r\n", "\n").replace('\r', '\n').split("\n")
+    val blocks = ArrayList<MdBlock>()
+    var i = 0
+    while (i < lines.size) {
+        val raw = lines[i]
+        val t = raw.trim()
+        when {
+            t.startsWith("```") -> {
+                val sb = StringBuilder()
+                i++
+                while (i < lines.size && !lines[i].trim().startsWith("```")) {
+                    if (sb.isNotEmpty()) sb.append('\n')
+                    sb.append(lines[i])
+                    i++
+                }
+                if (i < lines.size) i++ // پرش از فنس بسته
+                blocks.add(MdBlock.Code(sb.toString()))
+            }
+            mdIsDivider(t) -> { blocks.add(MdBlock.Divider); i++ }
+            i + 1 < lines.size && t.contains('|') && mdIsTableSeparator(lines[i + 1]) -> {
+                val header = mdSplitRow(t)
+                i += 2
+                val rows = ArrayList<List<String>>()
+                while (i < lines.size && lines[i].contains('|') && lines[i].trim().isNotEmpty()) {
+                    rows.add(mdSplitRow(lines[i]))
+                    i++
+                }
+                blocks.add(MdBlock.Table(header, rows))
+            }
+            t.startsWith("### ") -> { blocks.add(MdBlock.Heading(3, t.removePrefix("### ").trim())); i++ }
+            t.startsWith("## ") -> { blocks.add(MdBlock.Heading(2, t.removePrefix("## ").trim())); i++ }
+            t.startsWith("# ") -> { blocks.add(MdBlock.Heading(1, t.removePrefix("# ").trim())); i++ }
+            t.startsWith("- ") || t.startsWith("* ") -> { blocks.add(MdBlock.Bullet(t.drop(2).trim())); i++ }
+            t.isEmpty() -> i++
+            else -> { blocks.add(MdBlock.Para(raw)); i++ }
+        }
+    }
+    return blocks
 }
 
 @Composable
@@ -2777,6 +2889,7 @@ fun ChatsScreen(
     onComposerHandled: () -> Unit = {},
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var people by remember { mutableStateOf(app.db.people(userId)) }
     var creating by remember { mutableStateOf(false) }
     var draft by remember { mutableStateOf("") }
@@ -2817,6 +2930,7 @@ fun ChatsScreen(
     }
     val palette = LocalTg.current
     val dark = palette.dark
+    val chatPalette = LocalChatPalette.current
     val listState = rememberLazyListState()
     val arrived = remember { mutableStateListOf<String>() }
     val scrolled by remember { derivedStateOf { listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 4 } }
@@ -2825,7 +2939,7 @@ fun ChatsScreen(
     val headerInk = if (dark) Color.White else Color.Black
     Scaffold(
         containerColor = palette.bg,
-        floatingActionButtonPosition = FabPosition.End,
+        floatingActionButtonPosition = FabPosition.Start,
         floatingActionButton = {
             val fabScale by animateFloatAsState(if (creating) 0.9f else 1f, tween(200), label = "fab")
             val fabPop = remember { Animatable(0.6f) }
@@ -2845,7 +2959,7 @@ fun ChatsScreen(
                     }
                 },
                 shape = CircleShape,
-                containerColor = Color(0xFF00897B),
+                containerColor = chatPalette.primary,
                 contentColor = Color.White,
                 elevation = FloatingActionButtonDefaults.elevation(
                     defaultElevation = 0.dp,
@@ -2860,7 +2974,7 @@ fun ChatsScreen(
                         scaleY = scale
                         alpha = fabFade.value
                     }
-                    .padding(bottom = 24.dp, end = 24.dp)
+                    .padding(bottom = 80.dp, start = 16.dp)
                     .size(56.dp)
                     .shadow(6.dp, CircleShape)
             ) {
@@ -3136,18 +3250,18 @@ fun ChatsScreen(
                     item(key = "ai-chat") {
                         RiseRow("ai", 0, arrived) {
                         Column(Modifier.fillMaxWidth().clickable(onClick = onAi)) {
-                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                Box(Modifier.padding(horizontal = 16.dp, vertical = 10.dp).size(52.dp).clip(CircleShape).background(Blue), contentAlignment = Alignment.Center) {
+                            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Box(Modifier.size(44.dp).clip(CircleShape).background(Blue), contentAlignment = Alignment.Center) {
                                     Icon(Icons.Filled.AutoAwesome, null, tint = Color.White)
                                 }
-                                Column(Modifier.weight(1f).padding(vertical = 10.dp)) {
-                                    Text("چت با هوش مصنوعی", color = if (dark) Color.White else Color(0xFF111827), fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
-                                    Text("یکی از گفتگوها را انتخاب کن", color = Color(0xFF6B7280), fontSize = 14.sp)
+                                Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+                                    Text("چت با هوش مصنوعی", color = if (dark) Color.White else Color(0xFF111827), fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                                    Text("یکی از گفتگوها را انتخاب کن", color = Color(0xFF94A3B8), fontSize = 12.sp)
                                 }
-                                Spacer(Modifier.width(16.dp))
+                                Spacer(Modifier.width(4.dp))
                             }
                             if (shown.isNotEmpty()) {
-                                Box(Modifier.padding(start = 76.dp, end = 16.dp).fillMaxWidth().height(0.5.dp).background(rowLine))
+                                Box(Modifier.padding(start = 72.dp, end = 16.dp).fillMaxWidth().height(0.5.dp).background(rowLine))
                             }
                         }
                         }
@@ -3167,23 +3281,23 @@ fun ChatsScreen(
                             elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 8.dp)
+                                .padding(horizontal = 12.dp, vertical = 4.dp)
                                 .combinedClickable(
                                     onClick = { open(person.id) },
                                     onLongClick = { showContextMenu = true }
                                 )
                         ) {
                             Row(
-                                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+                                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                PersonAvatar(person.name, person.avatar, size = 52.dp)
+                                PersonAvatar(person.name, person.avatar, size = 44.dp)
                                 Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
                                     Text(
                                         person.name,
                                         color = if (dark) Color.White else Color(0xFF1E293B),
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 15.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 14.sp,
                                         maxLines = 1
                                     )
                                     val subtitle = if (contacts) {
@@ -3194,8 +3308,8 @@ fun ChatsScreen(
                                     }
                                     Text(
                                         subtitle,
-                                        color = if (dark) Color(0xFF94A3B8) else Color(0xFF64748B),
-                                        fontSize = 13.sp,
+                                        color = if (dark) Color(0xFF94A3B8) else Color(0xFF94A3B8),
+                                        fontSize = 12.sp,
                                         maxLines = 1,
                                     )
                                 }
@@ -3234,37 +3348,59 @@ fun ChatsScreen(
                                 )
                                 Divider(color = if (dark) Color.White.copy(0.1f) else Color.Black.copy(0.1f), thickness = 1.dp, modifier = Modifier.fillMaxWidth())
                                 
-                                // Archive/Unarchive button
-                                Button(
-                                    onClick = {
-                                        val isArchiving = !person.archived
-                                        app.db.updatePersonArchived(person.id, isArchiving)
-                                        people = app.db.people(userId)
-                                        showContextMenu = false
-                                        snackbarMessage = if (isArchiving) "گفتگو بایگانی شد" else "گفتگو از بایگانی خارج شد"
-                                        snackbarVisible = true
-                                    },
-                                    shape = RoundedCornerShape(12.dp),
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = if (dark) Color(0xFF334155) else Color(0xFFF1F5F9),
-                                        contentColor = if (dark) Color(0xFF94A3B8) else Color(0xFF64748B)
-                                    ),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Text(
-                                        if (person.archived) "خروج از بایگانی" else "بایگانی گفتگو",
-                                        fontSize = 14.sp,
-                                        fontWeight = FontWeight.Medium
-                                    )
+                                // Archive/Unarchive button (فقط برای چت‌های شخصی)
+                                if (!person.isGroup) {
+                                    Button(
+                                        onClick = {
+                                            val isArchiving = !person.archived
+                                            app.db.updatePersonArchived(person.id, isArchiving)
+                                            people = app.db.people(userId)
+                                            showContextMenu = false
+                                            snackbarMessage = if (isArchiving) "گفتگو بایگانی شد" else "گفتگو از بایگانی خارج شد"
+                                            snackbarVisible = true
+                                        },
+                                        shape = RoundedCornerShape(12.dp),
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = if (dark) Color(0xFF334155) else Color(0xFFF1F5F9),
+                                            contentColor = if (dark) Color(0xFF94A3B8) else Color(0xFF64748B)
+                                        ),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text(
+                                            if (person.archived) "خروج از بایگانی" else "بایگانی گفتگو",
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
                                 }
                                 
-                                // Delete button
+                                // Delete / Leave button
+                                val isTeamOwner = person.isGroup && app.db.teamCreatorId(person.id) == userId
                                 Button(
                                     onClick = {
                                         showContextMenu = false
-                                        deletedPersonId = person.id
-                                        snackbarMessage = "گفتگو حذف شد"
-                                        snackbarVisible = true
+                                        if (person.isGroup) {
+                                            scope.launch {
+                                                val res = runCatching {
+                                                    withContext(Dispatchers.IO) {
+                                                        if (isTeamOwner) NetworkModule.getApiService().deleteTeam(person.id, userId)
+                                                        else NetworkModule.getApiService().leaveTeam(person.id, userId, userId)
+                                                    }
+                                                }.getOrNull()
+                                                if (res != null && res.isSuccessful) {
+                                                    app.db.deleteTeamLocally(person.id)
+                                                    people = app.db.people(userId)
+                                                    snackbarMessage = if (isTeamOwner) "تیم حذف شد" else "از تیم خارج شدید"
+                                                } else {
+                                                    snackbarMessage = if (isTeamOwner) "خطا در حذف تیم" else "خطا در ترک تیم"
+                                                }
+                                                snackbarVisible = true
+                                            }
+                                        } else {
+                                            deletedPersonId = person.id
+                                            snackbarMessage = "گفتگو حذف شد"
+                                            snackbarVisible = true
+                                        }
                                     },
                                     shape = RoundedCornerShape(12.dp),
                                     colors = ButtonDefaults.buttonColors(
@@ -3274,7 +3410,11 @@ fun ChatsScreen(
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
                                     Text(
-                                        "حذف گفتگو",
+                                        when {
+                                            isTeamOwner -> "حذف تیم"
+                                            person.isGroup -> "ترک تیم"
+                                            else -> "حذف گفتگو"
+                                        },
                                         fontSize = 14.sp,
                                         fontWeight = FontWeight.Medium
                                     )
@@ -3303,32 +3443,37 @@ fun ChatsScreen(
                         }
                     }
                     
-                    // Delete with Undo - Snackbar
-                    if (deletedPersonId == person.id && snackbarVisible) {
+                    // Delete / Team action - Snackbar
+                    if (snackbarVisible) {
                         LaunchedEffect(deletedPersonId) {
+                            val isDeletePending = deletedPersonId == person.id
                             val result = snackbarHostState.showSnackbar(
                                 message = snackbarMessage,
-                                actionLabel = "بازگردانی",
+                                actionLabel = if (isDeletePending) "بازگردانی" else null,
                                 duration = SnackbarDuration.Long,
                                 withDismissAction = true
                             )
-                            
-                            when (result) {
-                                SnackbarResult.ActionPerformed -> {
-                                    // Undo delete - restoration would require additional logic
-                                    snackbarVisible = false
-                                    deletedPersonId = null
-                                }
-                                SnackbarResult.Dismissed -> {
-                                    // Actually delete after snackbar timeout
-                                    try {
-                                        app.db.deletePerson(person.id)
-                                        people = app.db.people(userId)
-                                    } catch (e: Exception) {
-                                        snackbarMessage = "خطا در حذف: ${e.message ?: "نامشخص"}"
+                            if (!isDeletePending) {
+                                // پیام‌های عملیات تیم (حذف/ترک) فقط اطلاع‌رسانی هستند
+                                snackbarVisible = false
+                            } else {
+                                when (result) {
+                                    SnackbarResult.ActionPerformed -> {
+                                        // Undo delete - restoration would require additional logic
+                                        snackbarVisible = false
+                                        deletedPersonId = null
                                     }
-                                    snackbarVisible = false
-                                    deletedPersonId = null
+                                    SnackbarResult.Dismissed -> {
+                                        // Actually delete after snackbar timeout
+                                        try {
+                                            app.db.deletePerson(person.id)
+                                            people = app.db.people(userId)
+                                        } catch (e: Exception) {
+                                            snackbarMessage = "خطا در حذف: ${e.message ?: "نامشخص"}"
+                                        }
+                                        snackbarVisible = false
+                                        deletedPersonId = null
+                                    }
                                 }
                             }
                         }
@@ -3568,15 +3713,27 @@ private fun SheetField(value: String, onChange: (String) -> Unit, label: String,
     }
 }
 
-private fun listStamp(ms: Long): String {
+/** فرمت زمان نسبی فارسی برای آخرین پیام (چند لحظه پیش، X دقیقه پیش، X ساعت پیش، دیروز، X روز پیش، X ماه پیش). */
+private fun timeAgoFa(ms: Long): String {
     if (ms <= 0L) return ""
-    val now = java.util.Calendar.getInstance()
-    val day = java.util.Calendar.getInstance().apply { timeInMillis = ms }
-    val same = now.get(java.util.Calendar.YEAR) == day.get(java.util.Calendar.YEAR) && now.get(java.util.Calendar.DAY_OF_YEAR) == day.get(java.util.Calendar.DAY_OF_YEAR)
-    if (same) return SimpleDateFormat("HH:mm", Locale.US).format(Date(ms))
-    if (now.timeInMillis - ms < 7L * 24 * 60 * 60 * 1000) return SimpleDateFormat("EEE", Locale.US).format(Date(ms))
-    return SimpleDateFormat("MM/dd", Locale.US).format(Date(ms))
+    val diff = System.currentTimeMillis() - ms
+    // زمان آینده یا نامشخص: ساعت خام همان روز
+    if (diff < 0L) return persianDigits(SimpleDateFormat("HH:mm", Locale.US).format(Date(ms)))
+    val minutes = diff / 60_000L
+    val hours = diff / 3_600_000L
+    val days = diff / 86_400_000L
+    return when {
+        minutes < 1L -> "چند لحظه پیش"
+        minutes < 60L -> "${persianDigits(minutes.toString())} دقیقه پیش"
+        hours < 24L -> "${persianDigits(hours.toString())} ساعت پیش"
+        days == 1L -> "دیروز"
+        days < 30L -> "${persianDigits(days.toString())} روز پیش"
+        days < 365L -> "${persianDigits((days / 30L).toString())} ماه پیش"
+        else -> "${persianDigits((days / 365L).toString())} سال پیش"
+    }
 }
+
+private fun listStamp(ms: Long): String = timeAgoFa(ms)
 
 private val media = listOf(
     "phone" to "📞 تماس تلفنی",
@@ -3630,6 +3787,71 @@ private fun jalaliDayLabel(millis: Long): String {
 private fun jalaliShort(millis: Long): String {
     val (y, m, d) = jalaliOf(millis)
     return persianDigits(String.format(Locale.US, "%04d/%02d/%02d", y, m, d))
+}
+
+/** تاریخ شمسی سبک برای انتخاب‌گر بازه. */
+private data class JalaliDate(val year: Int, val month: Int, val day: Int) {
+    fun toFormattedString(): String = String.format(Locale.US, "%04d/%02d/%02d", year, month, day)
+}
+
+/**
+ * تبدیل تاریخ شمسی به میلی‌ثانیه.
+ * الگوریتم استاندارد ریاضی جلالی ← میلادی (بدون وابستگی خارجی).
+ * اگر endOfDay=true باشد، انتهای همان روز (۰۰:۰۰ روز بعد منهای ۱ms) برگردانده می‌شود.
+ */
+private fun jalaliToEpochMillis(year: Int, month: Int, day: Int, endOfDay: Boolean = false): Long {
+    val jy = (year + 1595).toLong()
+    var days = -355668L + (365L * jy) + ((jy / 33L) * 8L) + (((jy % 33L) + 3L) / 4L) + day.toLong()
+    days += if (month < 7) (month - 1) * 31L else ((month - 7) * 30L) + 186L
+
+    var gy = 400L * (days / 146097L)
+    days %= 146097L
+    if (days > 36524L) {
+        days -= 1
+        gy += 100L * (days / 36524L)
+        days %= 36524L
+        if (days >= 365L) days += 1
+    }
+    gy += 4L * (days / 1461L)
+    days %= 1461L
+    if (days > 365L) {
+        gy += (days - 1) / 365L
+        days = (days - 1) % 365L
+    }
+
+    var gd = (days + 1).toInt()
+    val leap = (gy % 4L == 0L && gy % 100L != 0L) || (gy % 400L == 0L)
+    val monthDays = intArrayOf(0, 31, if (leap) 29 else 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
+    var gm = 0
+    while (gm < 13 && gd > monthDays[gm]) {
+        gd -= monthDays[gm]
+        gm++
+    }
+
+    val cal = java.util.Calendar.getInstance()
+    cal.clear()
+    if (endOfDay) {
+        cal.set(gy.toInt(), gm - 1, gd, 23, 59, 59)
+        cal.set(java.util.Calendar.MILLISECOND, 999)
+    } else {
+        cal.set(gy.toInt(), gm - 1, gd, 0, 0, 0)
+        cal.set(java.util.Calendar.MILLISECOND, 0)
+    }
+    return cal.timeInMillis
+}
+
+/** بررسی کبیسه بودن سال شمسی با مقایسه طول سال (سازگار با jalaliToEpochMillis). */
+private fun isJalaliLeapYear(year: Int): Boolean {
+    val start = jalaliToEpochMillis(year, 1, 1, false)
+    val next = jalaliToEpochMillis(year + 1, 1, 1, false)
+    return (next - start) / 86_400_000L == 366L
+}
+
+/** تعداد روزهای یک ماه شمسی (۱ تا ۳۱) با احتساب کبیسه اسفند. */
+private fun daysInJalaliMonth(year: Int, month: Int): Int = when {
+    month <= 6 -> 31
+    month <= 11 -> 30
+    else -> if (isJalaliLeapYear(year)) 30 else 29
 }
 
 private fun dayKey(millis: Long): Long = millis / 86_400_000L
@@ -3732,13 +3954,13 @@ private fun RangeChips(selected: Int, dark: Boolean, onSelect: (Int) -> Unit) {
                 }
             }
         }
-        val onAll = selected == 5
+        val onAll = selected == 6
         Text(
             "همۀ گفتگوها",
             color = if (onAll) Color.White else if (dark) Color(0xFFD1D5DB) else Color(0xFF4B5563),
             fontSize = 12.sp,
             textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth().padding(top = 6.dp).clip(RoundedCornerShape(12.dp)).background(if (onAll) Blue else chipBg).clickable { onSelect(5) }.padding(vertical = 8.dp),
+            modifier = Modifier.fillMaxWidth().padding(top = 6.dp).clip(RoundedCornerShape(12.dp)).background(if (onAll) Blue else chipBg).clickable { onSelect(6) }.padding(vertical = 8.dp),
         )
     }
 }
@@ -3772,6 +3994,8 @@ private fun ChatTopBar(
     onAll: () -> Unit,
     onNotes: () -> Unit,
     onDeleteIdentity: () -> Unit,
+    isGroup: Boolean = false,
+    isCreator: Boolean = false,
 ) {
     val dark = LocalDark.current
     val palette = LocalTg.current
@@ -3829,15 +4053,17 @@ private fun ChatTopBar(
                             )
                     ) {
                         DropdownMenuItem(
-                            text = { Text("مشخصات هویت") }, 
+                            text = { Text(if (isGroup) "اطلاعات تیم" else "مشخصات هویت") }, 
                             leadingIcon = { Icon(Icons.Filled.Info, null) },
                             onClick = { menu = false; onInfo() }
                         )
-                        DropdownMenuItem(
-                            text = { Text("ویرایش هویت") }, 
-                            leadingIcon = { Icon(Icons.Filled.Edit, null) },
-                            onClick = { menu = false; onEditIdentity() }
-                        )
+                        if (!isGroup || isCreator) {
+                            DropdownMenuItem(
+                                text = { Text(if (isGroup) "ویرایش تیم" else "ویرایش هویت") }, 
+                                leadingIcon = { Icon(Icons.Filled.Edit, null) },
+                                onClick = { menu = false; onEditIdentity() }
+                            )
+                        }
                         DropdownMenuItem(
                             text = { Text("خلاصه‌سازی") }, 
                             leadingIcon = { Icon(Icons.Filled.AutoAwesome, null) },
@@ -3872,7 +4098,16 @@ private fun ChatTopBar(
                         val deleteInteraction = remember { MutableInteractionSource() }
                         val deletePressed by deleteInteraction.collectIsPressedAsState()
                         DropdownMenuItem(
-                            text = { Text("حذف هویت", color = Color(0xFFE53935)) },
+                            text = {
+                                Text(
+                                    when {
+                                        isGroup && isCreator -> "حذف تیم"
+                                        isGroup -> "ترک تیم"
+                                        else -> "حذف هویت"
+                                    },
+                                    color = Color(0xFFE53935),
+                                )
+                            },
                             leadingIcon = { Icon(Icons.Filled.Delete, null, tint = Color(0xFFE53935)) },
                             onClick = { menu = false; onDeleteIdentity() },
                             modifier = Modifier
@@ -3928,6 +4163,7 @@ private fun IdentitySheet(
     onSendMessage: () -> Unit,
     onEdit: () -> Unit,
     onReports: () -> Unit,
+    onAvatarPick: (() -> Unit)? = null,
 ) {
     val dark = LocalDark.current
     val context = LocalContext.current
@@ -3942,7 +4178,13 @@ private fun IdentitySheet(
             Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 28.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            PersonAvatar(name, avatar, size = 96.dp)
+            Box(
+                Modifier
+                    .then(if (onAvatarPick != null) Modifier.clip(CircleShape).clickable(onClick = onAvatarPick) else Modifier),
+                contentAlignment = Alignment.Center,
+            ) {
+                PersonAvatar(name, avatar, size = 96.dp)
+            }
             Text(name, color = ink, fontWeight = FontWeight.Bold, fontSize = 20.sp, modifier = Modifier.padding(top = 12.dp))
             if (showPhone) {
                 Text(if (phone.isBlank()) "شماره ثبت نشده" else persianDigits(phone), color = muted, fontSize = 12.sp, modifier = Modifier.padding(top = 3.dp))
@@ -3984,7 +4226,7 @@ private fun IdentitySheet(
                     Text(persianDigits(entries.size.toString()), color = ink, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                 }
             }
-            Row(Modifier.fillMaxWidth().padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth().padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 IdentityAction("ارسال پیام", Icons.AutoMirrored.Filled.Send, true) { toast = "نویسنده پیام پایین صفحه فعال است"; onSendMessage() }
                 IdentityAction("ویرایش مخاطب", Icons.Filled.Edit, false) { onEdit() }
                 IdentityAction("مشاهده گزارش‌ها", Icons.Filled.Download, false) { onReports() }
@@ -4004,22 +4246,21 @@ private fun androidx.compose.foundation.layout.RowScope.IdentityAction(
     primary: Boolean,
     onClick: () -> Unit,
 ) {
-    Column(
+    val dark = LocalDark.current
+    Box(
         Modifier
             .weight(1f)
+            .height(52.dp)
             .clip(RoundedCornerShape(16.dp))
-            .background(if (primary) Blue else if (LocalDark.current) Color(0xFF1E293B) else Color(0xFFF7F8FC))
-            .clickable(onClick = onClick)
-            .padding(vertical = 12.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
+            .background(if (primary) Blue else if (dark) Color(0xFF1E293B) else Color(0xFFF7F8FC))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
     ) {
-        Icon(icon, label, tint = if (primary) Color.White else if (LocalDark.current) Color.White else Color(0xFF334155), modifier = Modifier.size(18.dp))
-        Text(
-            label,
-            color = if (primary) Color.White else if (LocalDark.current) Color.White else Color(0xFF334155),
-            fontSize = 11.sp,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.padding(top = 6.dp),
+        Icon(
+            icon,
+            contentDescription = label,
+            tint = if (primary || dark) Color.White else Color(0xFF334155),
+            modifier = Modifier.size(24.dp),
         )
     }
 }
@@ -4206,6 +4447,189 @@ private fun AiSummaryDialog(
 }
 
 @Composable
+private fun DateStepper(
+    title: String,
+    value: String,
+    dark: Boolean,
+    modifier: Modifier = Modifier,
+    onUp: () -> Unit,
+    onDown: () -> Unit,
+) {
+    val ink = if (dark) Color.White else Color(0xFF111827)
+    val sub = if (dark) Color(0xFF9CA3AF) else Color(0xFF6B7280)
+    val bg = if (dark) Color(0xFF1C2738) else Color(0xFFF1F2F6)
+    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(title, fontSize = 10.sp, color = sub)
+        Spacer(Modifier.height(4.dp))
+        Surface(shape = RoundedCornerShape(14.dp), color = bg, modifier = Modifier.fillMaxWidth()) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(
+                    Modifier.fillMaxWidth().height(30.dp).clip(RoundedCornerShape(14.dp)).clickable { onUp() },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Filled.KeyboardArrowUp, "افزایش", tint = Blue, modifier = Modifier.size(20.dp))
+                }
+                Text(
+                    value,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = ink,
+                    maxLines = 1,
+                    modifier = Modifier.padding(vertical = 4.dp),
+                )
+                Box(
+                    Modifier.fillMaxWidth().height(30.dp).clip(RoundedCornerShape(14.dp)).clickable { onDown() },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Filled.KeyboardArrowDown, "کاهش", tint = Blue, modifier = Modifier.size(20.dp))
+                }
+            }
+        }
+    }
+}
+
+/**
+ * دیالوگ انتخاب بازه تاریخ کاملاً شمسی (جلالی) با انتخاب‌گر چرخانِ سال/ماه/روز.
+ * بدون کتابخانه خارجی؛ خروجی میلی‌ثانیه‌ای برای فیلتر گزارش.
+ */
+@Composable
+private fun PersianDateRangePickerDialog(
+    initialStartYear: Int,
+    initialStartMonth: Int,
+    initialStartDay: Int,
+    initialEndYear: Int,
+    initialEndMonth: Int,
+    initialEndDay: Int,
+    dark: Boolean,
+    onDismissRequest: () -> Unit,
+    onConfirm: (startDateMillis: Long, endDateMillis: Long, label: String) -> Unit,
+) {
+    var sy by remember { mutableIntStateOf(initialStartYear) }
+    var sm by remember { mutableIntStateOf(initialStartMonth) }
+    var sd by remember { mutableIntStateOf(initialStartDay) }
+    var ey by remember { mutableIntStateOf(initialEndYear) }
+    var em by remember { mutableIntStateOf(initialEndMonth) }
+    var ed by remember { mutableIntStateOf(initialEndDay) }
+    var error by remember { mutableStateOf("") }
+
+    val ink = if (dark) Color.White else Color(0xFF111827)
+    val sub = if (dark) Color(0xFF9CA3AF) else Color(0xFF6B7280)
+    val minYear = 1300
+    val maxYear = 1500
+
+    fun clampDay() {
+        sd = sd.coerceIn(1, daysInJalaliMonth(sy, sm))
+        ed = ed.coerceIn(1, daysInJalaliMonth(ey, em))
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismissRequest,
+        shape = RoundedCornerShape(24.dp),
+        containerColor = themeDialogContainer(),
+        title = {
+            Column {
+                Text("انتخاب بازه تاریخ", fontWeight = FontWeight.Bold, color = ink)
+                Text("تقویم هجری شمسی", fontSize = 12.sp, color = sub, modifier = Modifier.padding(top = 2.dp))
+            }
+        },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                Text("تاریخ شروع (از)", fontWeight = FontWeight.Bold, color = ink, fontSize = 13.sp)
+                Row(
+                    Modifier.fillMaxWidth().padding(top = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    DateStepper(
+                        title = "روز",
+                        value = persianDigits(sd.toString()),
+                        dark = dark,
+                        modifier = Modifier.weight(1f),
+                        onUp = { sd = if (sd >= daysInJalaliMonth(sy, sm)) 1 else sd + 1 },
+                        onDown = { sd = if (sd <= 1) daysInJalaliMonth(sy, sm) else sd - 1 },
+                    )
+                    DateStepper(
+                        title = "ماه",
+                        value = jalaliMonths[sm - 1],
+                        dark = dark,
+                        modifier = Modifier.weight(2f),
+                        onUp = { sm = if (sm >= 12) 1 else sm + 1; clampDay() },
+                        onDown = { sm = if (sm <= 1) 12 else sm - 1; clampDay() },
+                    )
+                    DateStepper(
+                        title = "سال",
+                        value = persianDigits(sy.toString()),
+                        dark = dark,
+                        modifier = Modifier.weight(1.4f),
+                        onUp = { sy = (sy + 1).coerceAtMost(maxYear); clampDay() },
+                        onDown = { sy = (sy - 1).coerceAtLeast(minYear); clampDay() },
+                    )
+                }
+
+                Text(
+                    "تاریخ پایان (تا)",
+                    fontWeight = FontWeight.Bold,
+                    color = ink,
+                    fontSize = 13.sp,
+                    modifier = Modifier.padding(top = 16.dp),
+                )
+                Row(
+                    Modifier.fillMaxWidth().padding(top = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    DateStepper(
+                        title = "روز",
+                        value = persianDigits(ed.toString()),
+                        dark = dark,
+                        modifier = Modifier.weight(1f),
+                        onUp = { ed = if (ed >= daysInJalaliMonth(ey, em)) 1 else ed + 1 },
+                        onDown = { ed = if (ed <= 1) daysInJalaliMonth(ey, em) else ed - 1 },
+                    )
+                    DateStepper(
+                        title = "ماه",
+                        value = jalaliMonths[em - 1],
+                        dark = dark,
+                        modifier = Modifier.weight(2f),
+                        onUp = { em = if (em >= 12) 1 else em + 1; clampDay() },
+                        onDown = { em = if (em <= 1) 12 else em - 1; clampDay() },
+                    )
+                    DateStepper(
+                        title = "سال",
+                        value = persianDigits(ey.toString()),
+                        dark = dark,
+                        modifier = Modifier.weight(1.4f),
+                        onUp = { ey = (ey + 1).coerceAtMost(maxYear); clampDay() },
+                        onDown = { ey = (ey - 1).coerceAtLeast(minYear); clampDay() },
+                    )
+                }
+
+                if (error.isNotEmpty()) {
+                    Text(error, color = Color.Red, fontSize = 12.sp, modifier = Modifier.padding(top = 10.dp))
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val startMillis = jalaliToEpochMillis(sy, sm, sd, endOfDay = false)
+                    val endMillis = jalaliToEpochMillis(ey, em, ed, endOfDay = true)
+                    if (startMillis > endMillis) {
+                        error = "تاریخ شروع نباید بعد از تاریخ پایان باشد"
+                    } else {
+                        val label = "از ${jalaliShort(startMillis)} تا ${jalaliShort(endMillis)}"
+                        onConfirm(startMillis, endMillis, label)
+                    }
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = Blue, contentColor = Color.White),
+                shape = RoundedCornerShape(14.dp),
+            ) {
+                Text("تأیید بازه")
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismissRequest) { Text("انصراف", color = sub) } },
+    )
+}
+
+@Composable
 private fun ExportReportDialog(
     app: App,
     user: User,
@@ -4219,9 +4643,19 @@ private fun ExportReportDialog(
     val scope = rememberCoroutineScope()
     var range by remember { mutableIntStateOf(0) }
     var excel by remember { mutableStateOf(true) }
+    var showCustomDatePicker by remember { mutableStateOf(false) }
+    var customStartDateMillis by remember { mutableStateOf<Long?>(null) }
+    var customEndDateMillis by remember { mutableStateOf<Long?>(null) }
+    var customDateLabel by remember { mutableStateOf<String?>(null) }
     val ink = if (dark) Color.White else Color(0xFF111827)
     val sub = if (dark) Color(0xFF9CA3AF) else Color(0xFF6B7280)
-    val filtered = entries.filter { it.occurredAt >= rangeStart(range) }.sortedBy { it.occurredAt }
+    val isCustomRange = range == 5
+    val filtered = entries.filter { entry ->
+        val start = customStartDateMillis
+        val end = customEndDateMillis
+        if (isCustomRange && start != null && end != null) entry.occurredAt in start..end
+        else entry.occurredAt >= rangeStart(range)
+    }.sortedBy { it.occurredAt }
 
     val quotaReached = user.plan == "free" && user.monthlyDownloadCount >= 5
     val remaining = if (user.plan == "free") 5 - user.monthlyDownloadCount else -1
@@ -4246,7 +4680,11 @@ private fun ExportReportDialog(
         }
         onDismiss()
     }
-    val stamp = if (filtered.isEmpty()) "بدون گزاره" else "${jalaliShort(filtered.first().occurredAt)} تا ${jalaliShort(filtered.last().occurredAt)} · ${persianDigits(filtered.size.toString())} گزاره"
+    val stamp = when {
+        isCustomRange && customDateLabel != null -> "$customDateLabel · ${persianDigits(filtered.size.toString())} گزاره"
+        filtered.isEmpty() -> "بدون گزاره"
+        else -> "${jalaliShort(filtered.first().occurredAt)} تا ${jalaliShort(filtered.last().occurredAt)} · ${persianDigits(filtered.size.toString())} گزاره"
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         shape = RoundedCornerShape(24.dp),
@@ -4259,7 +4697,15 @@ private fun ExportReportDialog(
         },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
-                RangeChips(selected = range, dark = dark, onSelect = { range = it })
+                RangeChips(selected = range, dark = dark, onSelect = { idx ->
+                    if (idx == 5) {
+                        // «اختیاری» → باز کردن دیالوگ انتخاب بازه تاریخ شمسی
+                        range = 5
+                        showCustomDatePicker = true
+                    } else {
+                        range = idx
+                    }
+                })
                 Text(stamp, fontSize = 12.sp, color = sub, modifier = Modifier.padding(top = 10.dp))
                 if (user.plan == "free") {
                     Text("سقف دانلود ماهانه (${persianDigits(user.monthlyDownloadCount.toString())} از ۵) تکمیل شده است. برای دانلود نامحدود ارتقا دهید.", color = if (quotaReached) Color.Red else Blue, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
@@ -4283,6 +4729,31 @@ private fun ExportReportDialog(
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("انصراف", color = sub) } },
     )
+
+    // دیالوگ انتخاب بازه تاریخ شمسی (فقط هنگام انتخاب گزینه «اختیاری»)
+    if (showCustomDatePicker) {
+        val nowTriple = jalaliOf(System.currentTimeMillis())
+        val defaultStartTriple = jalaliOf(System.currentTimeMillis() - 30 * 86_400_000L)
+        val startTriple = customStartDateMillis?.let { jalaliOf(it) } ?: defaultStartTriple
+        val endTriple = customEndDateMillis?.let { jalaliOf(it) } ?: nowTriple
+        PersianDateRangePickerDialog(
+            initialStartYear = startTriple.first,
+            initialStartMonth = startTriple.second,
+            initialStartDay = startTriple.third,
+            initialEndYear = endTriple.first,
+            initialEndMonth = endTriple.second,
+            initialEndDay = endTriple.third,
+            dark = dark,
+            onDismissRequest = { showCustomDatePicker = false },
+            onConfirm = { startMs, endMs, label ->
+                customStartDateMillis = startMs
+                customEndDateMillis = endMs
+                customDateLabel = label
+                range = 5
+                showCustomDatePicker = false
+            },
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -4365,6 +4836,7 @@ fun ThreadScreen(app: App, userId: String, personId: String, back: () -> Unit, o
     // شناسه کاربرِ گیرندهٔ انتخاب‌شده برای پیام خصوصی (null = ارسال به همه اعضا)
     fun selectedRecipientId(): String? = members.firstOrNull { it.id == memberId }?.userId
     var photoCrop by remember { mutableStateOf<Bitmap?>(null) }
+    var personAvatarCrop by remember { mutableStateOf<Bitmap?>(null) }
     var toast by remember { mutableStateOf("") }
     LaunchedEffect(toast) {
         if (toast.isNotEmpty()) {
@@ -4448,20 +4920,22 @@ fun ThreadScreen(app: App, userId: String, personId: String, back: () -> Unit, o
     }
     val personPhoto = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
-        runCatching {
-            val path = savePersonAvatar(context, uri, personId)
-            app.db.setPersonAvatar(personId, path)
-            person = app.db.people(userId).find { it.id == personId }
-        }.onFailure { infoError = it.message ?: "عکس ذخیره نشد" }
+        scope.launch {
+            val bitmap = withContext(Dispatchers.IO) { runCatching { decodeSampledBitmap(context, uri, 1024) }.getOrNull() }
+            if (bitmap == null) infoError = "عکس خوانده نشد" else personAvatarCrop = bitmap
+        }
     }
     val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val isTeam = person?.isGroup == true
+    val isTeamCreator = isTeam && app.db.teamCreatorId(personId) == userId
+    val teamSubtitle = if (members.isNotEmpty()) "${persianDigits(members.size.toString())} عضو" else "گزارش تیم"
     Box(Modifier.fillMaxSize()) {
         ChatBackdrop(user)
         Column(Modifier.fillMaxSize()) {
         ChatTopBar(
             title = personTitle,
             avatar = person?.avatar,
-            subtitle = "گزارش هویت",
+            subtitle = if (isTeam) teamSubtitle else "گزارش هویت",
             searchOpen = searchOpen,
             query = query,
             onQuery = { query = it },
@@ -4479,7 +4953,9 @@ fun ThreadScreen(app: App, userId: String, personId: String, back: () -> Unit, o
             onSearch = { searchOpen = !searchOpen; if (!searchOpen) query = "" },
             onAll = { notesOnly = false; query = "" },
             onNotes = { notesOnly = true },
-            onDeleteIdentity = { confirmDelete = true },
+            onDeleteIdentity = { if (isTeam) confirmTeamExit = true else confirmDelete = true },
+            isGroup = isTeam,
+            isCreator = isTeamCreator,
         )
         if (summary.isNotEmpty()) {
             Text(summary, Modifier.fillMaxWidth().background(Color.White).padding(12.dp), color = Color(0xFF334155))
@@ -4644,42 +5120,57 @@ fun ThreadScreen(app: App, userId: String, personId: String, back: () -> Unit, o
                 onSendMessage = { profileOpen = false },
                 onEdit = { profileOpen = false; info = true },
                 onReports = { profileOpen = false; summaryOpen = true },
+                onAvatarPick = { personPhoto.launch("image/*") },
             )
         }
         if (info) {
             val ink = if (LocalDark.current) Color.White else Color(0xFF111827)
+            val isGroupInfo = person?.isGroup == true
+            val isCreatorInfo = isGroupInfo && app.db.teamCreatorId(personId) == userId
             ModalBottomSheet(onDismissRequest = { info = false }, sheetState = sheet, containerColor = themeDialogContainer()) {
                 Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp).padding(bottom = 28.dp)) {
-                    Text("اطلاعات کاربر", fontWeight = FontWeight.Bold, fontSize = 20.sp)
-                    if (person?.isGroup == true) {
+                    Text(if (isGroupInfo) "اطلاعات تیم" else "اطلاعات کاربر", fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                    // ۲) آواتار و فیلدهای نام/توضیحات
+                    Box(Modifier.padding(vertical = 8.dp).clickable { personPhoto.launch("image/*") }) {
+                        PersonAvatar(editName.ifBlank { personTitle }, person?.avatar, size = 72.dp)
+                    }
+                    OutlinedTextField(editName, { editName = it }, Modifier.fillMaxWidth(), label = { Text(if (isGroupInfo) "نام تیم" else "نام") })
+                    OutlinedTextField(editRole, { editRole = it }, Modifier.fillMaxWidth(), label = { Text(if (isGroupInfo) "توضیحات تیم" else "سمت") })
+                    if (!isGroupInfo) {
+                        OutlinedTextField(editPhone, { editPhone = it }, Modifier.fillMaxWidth(), label = { Text("شماره موبایل") })
+                    }
+                    if (infoError.isNotEmpty()) Text(infoError, color = Color.Red)
+                    // ۳) اعضای تیم
+                    if (isGroupInfo) {
                         Text("اعضای تیم", fontWeight = FontWeight.Bold, fontSize = 16.sp, modifier = Modifier.padding(top = 12.dp))
                         members.forEach { m ->
                             Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                                 PersonAvatar(m.name, null, size = 32.dp)
                                 Text(m.name, color = ink, fontSize = 14.sp, modifier = Modifier.padding(start = 8.dp))
+                                val userIdText = m.userId.orEmpty()
+                                if (userIdText.isNotBlank()) {
+                                    Text(userIdText, color = Color(0xFF9CA3AF), fontSize = 10.sp, maxLines = 1, modifier = Modifier.padding(start = 8.dp).weight(1f))
+                                }
                             }
                         }
                     }
-                    Box(Modifier.padding(vertical = 8.dp).clickable { personPhoto.launch("image/*") }) {
-                        PersonAvatar(editName.ifBlank { personTitle }, person?.avatar, size = 72.dp)
-                    }
-                    OutlinedTextField(editName, { editName = it }, Modifier.fillMaxWidth(), label = { Text("نام") })
-                    OutlinedTextField(editRole, { editRole = it }, Modifier.fillMaxWidth(), label = { Text(if (person?.isGroup == true) "توضیحات تیم" else "سمت") })
-                    if (person?.isGroup == false) {
-                        OutlinedTextField(editPhone, { editPhone = it }, Modifier.fillMaxWidth(), label = { Text("شماره موبایل") })
-                    }
-                    if (infoError.isNotEmpty()) Text(infoError, color = Color.Red)
-                    Button(onClick = {
-                        try {
-                            app.db.updatePerson(personId, editName, editPhone, editRole)
-                            person = app.db.people(userId).find { it.id == personId }
-                            infoError = ""
-                            info = false
-                        } catch (e: Exception) { infoError = e.message ?: "خطا" }
-                    }, Modifier.padding(top = 8.dp)) { Text("ذخیره") }
+                    // ۴) ذخیره تغییرات (فقط سازنده تیم مجاز است)
+                    Button(
+                        onClick = {
+                            try {
+                                app.db.updatePerson(personId, editName, editPhone, editRole)
+                                person = app.db.people(userId).find { it.id == personId }
+                                infoError = ""
+                                info = false
+                            } catch (e: Exception) { infoError = e.message ?: "خطا" }
+                        },
+                        enabled = !isGroupInfo || isCreatorInfo,
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    ) { Text("ذخیره تغییرات") }
+                    // ۵) شمارنده رسانه مشترک
                     InfoLine("رسانه مشترک", entries.size.toString())
-                    if (person?.isGroup == true) {
-                        val isCreator = app.db.teamCreatorId(personId) == userId
+                    // ۶) حذف/خروج
+                    if (isGroupInfo) {
                         OutlinedButton(
                             onClick = { confirmTeamExit = true },
                             enabled = !teamExitBusy,
@@ -4688,7 +5179,7 @@ fun ThreadScreen(app: App, userId: String, personId: String, back: () -> Unit, o
                             modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
                         ) {
                             Text(
-                                if (isCreator) "حذف کامل تیم" else "ترک تیم",
+                                if (isCreatorInfo) "حذف کامل تیم" else "خروج از تیم",
                                 fontWeight = FontWeight.Bold,
                             )
                         }
@@ -4757,14 +5248,15 @@ fun ThreadScreen(app: App, userId: String, personId: String, back: () -> Unit, o
             )
         }
         photoCrop?.let { bitmap ->
-            PhotoSendPreview(bitmap, onCancel = { photoCrop = null }) { saved ->
+            PhotoSendPreview(bitmap, title = personTitle, onCancel = { photoCrop = null }) { saved, caption ->
                 try {
                     val dest = File(context.filesDir, "photo-${System.currentTimeMillis()}.jpg")
                     dest.outputStream().use { saved.compress(Bitmap.CompressFormat.JPEG, 90, it) }
                     if (saved !== bitmap) saved.recycle()
-                    app.db.addEntry(user, personId, "عکس", "photo", channel, System.currentTimeMillis(), mediaPath = dest.absolutePath, memberId = memberId, targetRecipientId = selectedRecipientId())
+                    val body = caption.ifBlank { "عکس" }
+                    app.db.addEntry(user, personId, body, "photo", channel, System.currentTimeMillis(), mediaPath = dest.absolutePath, memberId = memberId, targetRecipientId = selectedRecipientId())
                     if (!isDeviceOnline(context)) app.db.enqueue("entry", "عکس")
-                    dispatchTeamMessage("عکس")
+                    dispatchTeamMessage(body)
                     allEntries = app.db.entries(personId)
                     photoCrop = null
                 } catch (e: Exception) {
@@ -4787,6 +5279,22 @@ fun ThreadScreen(app: App, userId: String, personId: String, back: () -> Unit, o
                 onFile = { filePicker.launch(arrayOf("*/*")) },
                 onVideo = { attachMenu = false; videoPicker.launch("video/*") },
             )
+        }
+        personAvatarCrop?.let { bitmap ->
+            CropDialog(bitmap, onCancel = { personAvatarCrop = null }) { saved ->
+                try {
+                    val dest = File(context.filesDir, "person-$personId.jpg")
+                    dest.outputStream().use { saved.compress(Bitmap.CompressFormat.JPEG, 90, it) }
+                    if (saved !== bitmap) saved.recycle()
+                    app.db.setPersonAvatar(personId, dest.absolutePath)
+                    person = app.db.people(userId).find { it.id == personId }
+                    infoError = ""
+                    personAvatarCrop = null
+                    toast = "عکس مخاطب ذخیره شد"
+                } catch (e: Exception) {
+                    infoError = e.message ?: "عکس ذخیره نشد"
+                }
+            }
         }
         if (toast.isNotEmpty()) {
             Text(toast, color = Color.White, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 96.dp).clip(RoundedCornerShape(16.dp)).background(Color(0xCC2B2B2F)).padding(horizontal = 16.dp, vertical = 10.dp))
@@ -5101,11 +5609,12 @@ private fun AiThread(app: App, userId: String, person: Person, palette: TgPalett
             Text(toast, color = Color.White, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 84.dp).clip(RoundedCornerShape(16.dp)).background(Color(0xE617212B)).padding(horizontal = 14.dp, vertical = 8.dp))
         }
         preview?.let { bitmap ->
-            PhotoSendPreview(bitmap, onCancel = { preview = null }) { saved ->
+            PhotoSendPreview(bitmap, title = person.name, onCancel = { preview = null }) { saved, caption ->
                 val dest = File(context.filesDir, "ai-${System.currentTimeMillis()}.jpg")
                 dest.outputStream().use { saved.compress(Bitmap.CompressFormat.JPEG, 90, it) }
                 if (saved !== bitmap) saved.recycle()
                 image = dest.absolutePath
+                if (caption.isNotBlank()) input = caption
                 preview = null
             }
         }
@@ -5193,11 +5702,12 @@ private fun AiContextSheet(app: App, userId: String, personId: String, personNam
         }
     }
     preview?.let { bitmap ->
-        PhotoSendPreview(bitmap, onCancel = { preview = null }) { saved ->
+        PhotoSendPreview(bitmap, title = personName, onCancel = { preview = null }) { saved, caption ->
             val dest = File(context.filesDir, "ai-${System.currentTimeMillis()}.jpg")
             dest.outputStream().use { saved.compress(Bitmap.CompressFormat.JPEG, 90, it) }
             if (saved !== bitmap) saved.recycle()
             image = dest.absolutePath
+            if (caption.isNotBlank()) input = caption
             preview = null
         }
     }
@@ -5268,47 +5778,96 @@ private fun AiBubble(turn: AiMessage, palette: TgPalette, onCopy: () -> Unit, on
 }
 
 @Composable
-private fun MarkdownText(source: String, color: Color) {
-    val blocks = remember(source) { source.split("```") }
-    Column {
-        blocks.forEachIndexed { index, block ->
-            if (index % 2 == 1) {
-                Text(block.trim(), color = color, fontFamily = FontFamily.Monospace, fontSize = 13.sp, modifier = Modifier.padding(vertical = 4.dp).fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Color(0x14000000)).padding(8.dp))
-            } else {
-                block.lines().forEach { line ->
-                    val trimmed = line.trim()
-                    val shown = when {
-                        trimmed.startsWith("- ") -> "• ${trimmed.drop(2)}"
-                        trimmed.startsWith("* ") -> "• ${trimmed.drop(2)}"
-                        else -> line
+private fun MarkdownText(
+    source: String,
+    color: Color,
+    fontSize: androidx.compose.ui.unit.TextUnit = 15.sp,
+    lineHeight: androidx.compose.ui.unit.TextUnit = 22.sp,
+    modifier: Modifier = Modifier,
+) {
+    val blocks = remember(source) { parseMarkdownBlocks(source) }
+    Column(modifier.fillMaxWidth()) {
+        blocks.forEach { block ->
+            when (block) {
+                is MdBlock.Heading -> Text(
+                    inlineMarkdownAnnotated(block.text),
+                    color = color,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = when (block.level) {
+                        1 -> (fontSize.value * 1.45f).sp
+                        2 -> (fontSize.value * 1.25f).sp
+                        else -> (fontSize.value * 1.10f).sp
+                    },
+                    lineHeight = lineHeight,
+                    modifier = Modifier.padding(vertical = 2.dp),
+                )
+                is MdBlock.Bullet -> Row(
+                    Modifier.fillMaxWidth().padding(vertical = 1.dp),
+                    verticalAlignment = Alignment.Top,
+                ) {
+                    Text("•", color = color, fontSize = fontSize, lineHeight = lineHeight, modifier = Modifier.padding(end = 6.dp))
+                    Text(inlineMarkdownAnnotated(block.text), color = color, fontSize = fontSize, lineHeight = lineHeight, modifier = Modifier.weight(1f))
+                }
+                is MdBlock.Para -> Text(
+                    inlineMarkdownAnnotated(block.text),
+                    color = color,
+                    fontSize = fontSize,
+                    lineHeight = lineHeight,
+                )
+                is MdBlock.Divider -> HorizontalDivider(
+                    Modifier.padding(vertical = 6.dp),
+                    color = color.copy(alpha = 0.20f),
+                )
+                is MdBlock.Code -> Text(
+                    block.text,
+                    color = Color(0xFFE6EDF3),
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = (fontSize.value - 1f).coerceAtLeast(11f).sp,
+                    lineHeight = ((fontSize.value - 1f).coerceAtLeast(11f) * 1.5f).sp,
+                    modifier = Modifier
+                        .padding(vertical = 4.dp)
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color(0xFF1E2430))
+                        .padding(10.dp),
+                )
+                is MdBlock.Table -> {
+                    val cols = maxOf(block.header.size, block.rows.maxOfOrNull { it.size } ?: 0)
+                    val cellWidth = 96.dp
+                    Row(
+                        Modifier
+                            .padding(vertical = 4.dp)
+                            .horizontalScroll(rememberScrollState())
+                            .clip(RoundedCornerShape(8.dp))
+                            .border(1.dp, color.copy(alpha = 0.22f), RoundedCornerShape(8.dp)),
+                    ) {
+                        Column {
+                            Row(Modifier.background(color.copy(alpha = 0.10f))) {
+                                for (c in 0 until cols) TableCell(block.header.getOrNull(c).orEmpty(), color, true, cellWidth)
+                            }
+                            block.rows.forEachIndexed { index, row ->
+                                Row(Modifier.background(if (index % 2 == 1) color.copy(alpha = 0.05f) else Color.Transparent)) {
+                                    for (c in 0 until cols) TableCell(row.getOrNull(c).orEmpty(), color, false, cellWidth)
+                                }
+                            }
+                        }
                     }
-                    if (shown.isNotBlank()) Text(inlineMarkdown(shown), color = color, fontSize = 15.sp, modifier = Modifier.padding(vertical = 1.dp))
                 }
             }
         }
     }
 }
 
-private fun inlineMarkdown(line: String) = buildAnnotatedString {
-    var rest = line
-    while (rest.isNotEmpty()) {
-        val bold = rest.indexOf("**")
-        val code = rest.indexOf("`")
-        val next = listOf(bold, code).filter { it >= 0 }.minOrNull()
-        if (next == null) { append(rest); break }
-        append(rest.substring(0, next))
-        if (next == bold) {
-            val end = rest.indexOf("**", next + 2)
-            if (end < 0) { append(rest.substring(next)); break }
-            withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append(rest.substring(next + 2, end)) }
-            rest = rest.substring(end + 2)
-        } else {
-            val end = rest.indexOf("`", next + 1)
-            if (end < 0) { append(rest.substring(next)); break }
-            withStyle(SpanStyle(fontFamily = FontFamily.Monospace, background = Color(0x22000000))) { append(rest.substring(next + 1, end)) }
-            rest = rest.substring(end + 1)
-        }
-    }
+@Composable
+private fun TableCell(text: String, color: Color, bold: Boolean, width: androidx.compose.ui.unit.Dp) {
+    Text(
+        inlineMarkdownAnnotated(text),
+        color = color,
+        fontWeight = if (bold) FontWeight.Bold else FontWeight.Normal,
+        fontSize = 13.sp,
+        lineHeight = 18.sp,
+        modifier = Modifier.width(width).padding(horizontal = 10.dp, vertical = 7.dp),
+    )
 }
 
 private fun askAboutChat(app: App, userId: String, personId: String, turns: List<AiMessage>): String {
@@ -5422,7 +5981,6 @@ private fun JournalBubble(entry: Entry, title: String, currentUserId: String, me
     val note = entry.kind == "note"
     val chatTheme = LocalChatPalette.current
     val bubble = when {
-        entry.kind == "voice" -> Color(0xFF1F8F4E)
         note -> if (palette.dark) Color(0xFF3B3524) else Color(0xFFFFF7D6)
         palette.dark -> palette.outgoing
         else -> chatTheme.outgoingBubble
@@ -5430,9 +5988,10 @@ private fun JournalBubble(entry: Entry, title: String, currentUserId: String, me
     val chatFont = LocalChatFont.current
     val bodySize = chatFont.sp
     val bodyLine = (chatFont * 1.5f).sp
-    val formattedBody = remember(entry.body) { parseMarkdown(entry.body) }
-    val ink = if (entry.kind == "voice") Color.White else if (palette.dark && !note) Color.White else palette.text
+    val ink = if (palette.dark && !note) Color.White else palette.text
     val shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomEnd = 16.dp, bottomStart = 4.dp)
+    val photo = entry.kind == "photo" && entry.mediaPath != null
+    val timeText = persianDigits(SimpleDateFormat("HH:mm", Locale.US).format(Date(entry.occurredAt)))
     
     Row(
         Modifier.fillMaxWidth(),
@@ -5477,9 +6036,14 @@ private fun JournalBubble(entry: Entry, title: String, currentUserId: String, me
                         },
                     )
                     .combinedClickable(onClick = {}, onLongClick = { open = !open })
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                    .padding(
+                        horizontal = if (photo) 0.dp else 14.dp,
+                        vertical = if (photo) 0.dp else 10.dp,
+                    ),
         ) {
-            if (entry.pinned) Text("سنجاق", color = Blue, fontSize = 11.sp)
+            // عکس لبه‌به‌لبه است؛ فراداده‌ها (سنجاق/خصوصی/نام عضو) پدینگ خودشان را می‌گیرند
+            val metaOuter = if (photo) Modifier.padding(start = 12.dp, end = 12.dp, top = 8.dp) else Modifier
+            if (entry.pinned) Text("سنجاق", color = Blue, fontSize = 11.sp, modifier = metaOuter)
             if (entry.targetRecipientId != null) {
                 val mine = entry.userId == currentUserId
                 val label = if (mine) {
@@ -5492,38 +6056,58 @@ private fun JournalBubble(entry: Entry, title: String, currentUserId: String, me
                     color = Blue,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
-                    modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(Blue.copy(alpha = 0.14f)).padding(horizontal = 6.dp, vertical = 2.dp),
+                    modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(Blue.copy(alpha = 0.14f)).padding(horizontal = 6.dp, vertical = 2.dp).then(metaOuter),
                 )
             } else {
-                entry.memberName?.let { Text(it, color = Blue, fontSize = 12.sp, fontWeight = FontWeight.Bold) }
+                entry.memberName?.let { Text(it, color = Blue, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = metaOuter) }
             }
+
+            // ردیف هدر حباب: برچسب نوع گفتگو + ساعت (برای عکس، ساعت روی تصویر رندر می‌شود)
+            if (!photo) {
+                val showLabel = entry.kind != "voice" && entry.kind != "file" && entry.kind != "video"
+                Row(
+                    Modifier.fillMaxWidth().padding(bottom = 2.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (showLabel) {
+                        Text(
+                            if (note) "یادداشت من" else mediumLabel(entry.channel),
+                            color = if (note) Color(0xFF8D6E00) else Blue,
+                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold),
+                        )
+                    } else {
+                        Spacer(Modifier.weight(1f))
+                    }
+                    Text(timeText, fontSize = 10.sp, color = palette.subtext)
+                }
+            }
+
             if (entry.kind == "voice" && entry.voicePath != null) {
                 VoiceMessage(entry.voicePath)
             } else if (entry.kind == "file" && entry.mediaPath != null) {
                 FileMessage(entry.body, entry.mediaPath, ink)
-            } else if (entry.kind == "photo" && entry.mediaPath != null) {
+            } else if (photo) {
                 Box {
-                    MediaPreview(entry.mediaPath, entry.kind) { viewer = true }
+                    MediaPreview(entry.mediaPath!!, entry.kind) { viewer = true }
                     Text(
-                        persianDigits(SimpleDateFormat("HH:mm", Locale.US).format(Date(entry.occurredAt))),
+                        timeText,
                         color = Color.White,
                         fontSize = 11.sp,
                         modifier = Modifier.align(Alignment.BottomEnd).padding(6.dp).clip(RoundedCornerShape(8.dp)).background(Color(0x99000000)).padding(horizontal = 6.dp, vertical = 2.dp),
                     )
                 }
-                if (entry.body.isNotBlank() && entry.body != "عکس") Text(formattedBody, color = ink, fontSize = bodySize, lineHeight = bodyLine, modifier = Modifier.padding(top = 6.dp))
+                if (entry.body.isNotBlank() && entry.body != "عکس") {
+                    Box(Modifier.padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 10.dp)) {
+                        MarkdownText(entry.body, ink, bodySize, bodyLine)
+                    }
+                }
             } else {
                 entry.mediaPath?.let { path -> MediaPreview(path, entry.kind) }
-                if (entry.kind != "photo" && entry.kind != "video") {
-                    Text(
-                        if (note) "یادداشت من" else mediumLabel(entry.channel),
-                        color = if (note) Color(0xFF8D6E00) else Blue,
-                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, fontWeight = FontWeight.Bold),
-                    )
+                if (entry.body.isNotBlank() && entry.body != "عکس") {
+                    MarkdownText(entry.body, ink, bodySize, bodyLine, Modifier.padding(top = 2.dp))
                 }
-                if (entry.body.isNotBlank() && entry.body != "عکس") Text(formattedBody, color = ink, fontSize = bodySize, lineHeight = bodyLine, modifier = Modifier.padding(top = 4.dp))
             }
-            if (entry.kind != "photo") Text(persianDigits(SimpleDateFormat("HH:mm", Locale.US).format(Date(entry.occurredAt))), fontSize = 11.sp, color = if (entry.kind == "voice") Color.White.copy(alpha = 0.8f) else palette.subtext, modifier = Modifier.align(Alignment.End).padding(top = 4.dp))
         }
     }
     if (viewer && entry.mediaPath != null) {
@@ -5533,6 +6117,9 @@ private fun JournalBubble(entry: Entry, title: String, currentUserId: String, me
 
 @Composable
 private fun VoiceMessage(path: String) {
+    val palette = LocalTg.current
+    val accent = LocalChatPalette.current.primary
+    val ink = if (palette.dark) Color.White else palette.text
     var player by remember(path) { mutableStateOf<android.media.MediaPlayer?>(null) }
     var playing by remember(path) { mutableStateOf(false) }
     var progress by remember(path) { mutableStateOf(0f) }
@@ -5549,44 +6136,68 @@ private fun VoiceMessage(path: String) {
             delay(80)
         }
     }
-    val bars = listOf(8, 14, 6, 16, 10, 18, 7, 13, 9, 15, 6, 12, 17, 8, 11)
-    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable {
-        val current = player
-        if (playing && current != null) {
-            current.pause()
-            playing = false
-            return@clickable
-        }
-        if (current != null) {
-            current.start()
-            playing = true
-            return@clickable
-        }
-        runCatching {
-            android.media.MediaPlayer().apply {
-                setDataSource(path)
-                setOnCompletionListener {
-                    playing = false
-                    progress = 1f
-                    seekTo(0)
-                }
-                prepare()
-                start()
-                player = this
-                playing = true
+    val bars = listOf(8, 14, 6, 16, 10, 18, 7, 13, 9, 15, 6, 12, 17, 8, 11, 10, 14, 9)
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp).clickable {
+            val current = player
+            if (playing && current != null) {
+                current.pause()
+                playing = false
+                return@clickable
             }
+            if (current != null) {
+                current.start()
+                playing = true
+                return@clickable
+            }
+            runCatching {
+                android.media.MediaPlayer().apply {
+                    setDataSource(path)
+                    setOnCompletionListener {
+                        playing = false
+                        progress = 1f
+                        seekTo(0)
+                    }
+                    prepare()
+                    start()
+                    player = this
+                    playing = true
+                }
+            }
+        },
+    ) {
+        Box(Modifier.size(40.dp).clip(CircleShape).background(accent), contentAlignment = Alignment.Center) {
+            Icon(
+                if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                if (playing) "توقف" else "پخش",
+                tint = Color.White,
+                modifier = Modifier.size(22.dp),
+            )
         }
-    }) {
-        Box(Modifier.size(36.dp).clip(CircleShape).background(Color(0xFF39D353)), contentAlignment = Alignment.Center) {
-            Icon(if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, if (playing) "توقف" else "پخش", tint = Color.White)
-        }
-        Row(Modifier.padding(start = 8.dp).weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+        Row(
+            Modifier.padding(start = 10.dp).weight(1f),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(3.dp),
+        ) {
             bars.forEachIndexed { index, bar ->
                 val played = progress >= index / bars.size.toFloat()
-                Box(Modifier.width(3.dp).height(bar.dp).clip(RoundedCornerShape(2.dp)).background(if (played) Color.White else Color.White.copy(alpha = 0.35f)))
+                Box(
+                    Modifier
+                        .width(3.dp)
+                        .height(bar.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(if (played) accent else ink.copy(alpha = 0.28f)),
+                )
             }
         }
-        Text(voiceLength(path), color = Color.White, fontSize = 12.sp)
+        Text(
+            persianDigits(voiceLength(path)),
+            color = ink.copy(alpha = 0.85f),
+            fontSize = 12.sp,
+            fontFamily = FontFamily.Monospace,
+            modifier = Modifier.padding(start = 8.dp),
+        )
     }
 }
 
@@ -6040,7 +6651,14 @@ fun ProfileScreen(
     val ink = if (dark) Color.White else Color(0xFF111827)
     val chatTheme = LocalChatPalette.current
     val paid = current.plan == "plus" || current.plan == "smart" || current.plan == "basic" || current.plan == "advanced"
-    val daysLeft = current.planExpiresAt?.let { ((it - System.currentTimeMillis()) / 86_400_000L).coerceAtLeast(0) } ?: 0
+    val subExpiresAt = current.planExpiresAt
+    val daysLeft = subExpiresAt?.let { ((it - System.currentTimeMillis()) / 86_400_000L).coerceAtLeast(0) } ?: 0
+    val subscriptionStatus = when {
+        !paid -> "اشتراک فعالی ندارید"
+        subExpiresAt == null -> "اشتراک فعال"
+        subExpiresAt <= System.currentTimeMillis() -> "اشتراک فعالی ندارید"
+        else -> "${persianDigits(daysLeft.coerceAtLeast(1).toString())} روز باقیمانده"
+    }
     val pulse = rememberInfiniteTransition(label = "cam")
     val camScale by pulse.animateFloat(0.92f, 1.08f, infiniteRepeatable(tween(900), RepeatMode.Reverse), label = "cam-scale")
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).background(page), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -6068,29 +6686,13 @@ fun ProfileScreen(
                     Text(current.phone, color = Color(0xFF707579), fontSize = 13.sp, modifier = Modifier.padding(top = 2.dp))
                     Text("@" + (current.username ?: "—"), color = chatTheme.primary, fontSize = 13.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 2.dp))
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    IconButton(onClick = { 
-                        // سرور سے پروفائل ریفریش کریں
-                        scope.launch {
-                            try {
-                                app.syncUserProfile(userId)
-                                user = app.db.getOrCreateUser(userId)
-                                message = "پروفائل نیا شد"
-                            } catch (e: Exception) {
-                                message = "خطا: ${e.message}"
-                            }
-                        }
-                    }) { 
-                        Icon(Icons.Filled.Refresh, "ریفریش پروفائل", tint = Color(0xFF6B7280))
-                    }
-                    IconButton(onClick = { name = current.name; username = current.username ?: ""; editProfile = true }) { 
-                        Icon(Icons.Filled.Edit, "ویرایش پروفایل", tint = Blue) 
-                    }
+                IconButton(onClick = { name = current.name; username = current.username ?: ""; editProfile = true }) { 
+                    Icon(Icons.Filled.Edit, "ویرایش پروفایل", tint = Blue) 
                 }
             }
         }
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            StatusCapsule(Modifier.weight(1f).clickable { pricing() }, Icons.Filled.Wallet, Color(0xFF10B981), "موجودی", "${formatToman(current.balance)} تومان", themeContainer(), dark)
+            StatusCapsule(Modifier.weight(1f).clickable { pricing() }, Icons.Filled.Wallet, Color(0xFF10B981), "اشتراک", subscriptionStatus, themeContainer(), dark)
             StatusCapsule(Modifier.weight(1f).clickable { pricing() }, Icons.Filled.Star, Blue, "پلن فعلی", planDisplay(current.plan), themeContainer(), dark)
         }
         if (message.isNotEmpty()) Text(message, color = chatTheme.primary, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
@@ -6103,7 +6705,7 @@ fun ProfileScreen(
             SettingRow("تنظیمات گفتگو", "پس‌زمینه، اندازه قلم و ترکیب رنگ", Icons.Filled.Chat, Color(0xFFE0F7FA), Color(0xFF00ACC1)) { chatSettingsOpen = !chatSettingsOpen }
             AnimatedVisibility(chatSettingsOpen) { ChatSettingsSection(dark, ink, chatFont, chatPalette) { wallpapersOpen = true } }
             RowDivider(dark)
-            SettingRow("کیف پول و اشتراک", "${formatToman(current.balance)} تومان", Icons.Filled.Wallet, Color(0xFFE8F5E9), Color(0xFF2E7D32), onClick = pricing)
+            SettingRow("کیف پول و اشتراک", subscriptionStatus, Icons.Filled.Wallet, Color(0xFFE8F5E9), Color(0xFF2E7D32), onClick = pricing)
             RowDivider(dark)
             SettingRow("پرداخت‌های من", "مشاهده فیش‌ها و سوابق", Icons.Filled.Receipt, Color(0xFFF3E5F5), Color(0xFF7B1FA2), onClick = onPayments)
             RowDivider(dark)
@@ -6680,86 +7282,581 @@ private fun IconTile(icon: androidx.compose.ui.graphics.vector.ImageVector, tile
     }
 }
 
+/** ابزار فعال در لایه ویرایش صفحه پیش‌نمایش تصویر. */
+private enum class PhotoTool { None, Crop, Draw, Tune }
+
+/**
+ * صفحه تمام‌صفحه و مینیمال پیش‌نمایش تصویر پیش از ارسال (سبک تلگرام).
+ * تصویر روی پس‌زمینه مشکی خالص رندر می‌شود و ابزارهای ویرایش (برش، نقاشی، نور)
+ * به صورت لایه ثانویه روی خود تصویر فعال می‌شوند، نه منوی متنی شلوغ.
+ */
 @Composable
-private fun PhotoSendPreview(bitmap: Bitmap, onCancel: () -> Unit, onSend: (Bitmap) -> Unit) {
-    var rotation by remember { mutableStateOf(0f) }
-    var cropping by remember { mutableStateOf(false) }
-    var aspect by remember { mutableStateOf(0f) }
-    var scale by remember { mutableStateOf(1f) }
-    var offset by remember { mutableStateOf(Offset.Zero) }
-    var view by remember { mutableStateOf(1) }
-    val frameRatio = when (aspect) {
-        1f -> 1f
-        4f / 3f -> 4f / 3f
-        16f / 9f -> 16f / 9f
-        else -> if (rotation % 180f == 0f) bitmap.width / bitmap.height.toFloat() else bitmap.height / bitmap.width.toFloat()
+private fun PhotoSendPreview(
+    bitmap: Bitmap,
+    title: String = "پیام‌های ذخیره شده",
+    onCancel: () -> Unit,
+    onSend: (Bitmap, String) -> Unit,
+) {
+    val accent = LocalChatPalette.current.primary
+    var working by remember { mutableStateOf(bitmap) }
+    var tool by remember { mutableStateOf(PhotoTool.None) }
+    var caption by remember { mutableStateOf("") }
+
+    // لایه برش و چرخش
+    var rotation by remember { mutableStateOf(0f) }              // چرخش پله‌ای ۹۰ درجه
+    var fineAngle by remember { mutableStateOf(0f) }             // چرخش دقیق (۴۵- تا ۴۵+)
+    var cropScale by remember { mutableStateOf(1f) }
+    var cropOffset by remember { mutableStateOf(Offset.Zero) }
+    var frameW by remember { mutableStateOf(1) }
+    var frameH by remember { mutableStateOf(1) }
+    var cropRect by remember { mutableStateOf<Rect?>(null) }     // کادر برش (نرمال ۰..۱ نسبت به ناحیه)
+    var cropAspect by remember { mutableStateOf<Float?>(null) }  // نسبت ابعاد قفل‌شده (null = آزاد)
+    var cropAreaW by remember { mutableStateOf(0) }
+    var cropAreaH by remember { mutableStateOf(0) }
+    var showAspectMenu by remember { mutableStateOf(false) }
+
+    // لایه تنظیم نور
+    var brightness by remember { mutableStateOf(0f) }
+
+    // لایه نقاشی (نقاط بر حسب پیکسل تصویر نگه‌داری می‌شوند)
+    var strokes by remember(working) { mutableStateOf(listOf<List<Offset>>()) }
+    var current by remember { mutableStateOf(listOf<Offset>()) }
+
+    fun resetTools() {
+        rotation = 0f
+        fineAngle = 0f
+        cropScale = 1f
+        cropOffset = Offset.Zero
+        cropRect = null
+        cropAspect = null
+        showAspectMenu = false
+        brightness = 0f
+        strokes = listOf()
+        current = listOf()
     }
+
+    fun applyTool() {
+        working = when (tool) {
+            PhotoTool.Crop -> exportCroppedPhoto(
+                working,
+                rotation + fineAngle,
+                frameW / frameH.coerceAtLeast(1).toFloat(),
+                cropScale,
+                cropOffset,
+                frameW,
+            )
+            PhotoTool.Tune -> applyBrightness(working, brightness)
+            PhotoTool.Draw -> bakeStrokes(working, strokes, accent.toArgb())
+            PhotoTool.None -> working
+        }
+        resetTools()
+        tool = PhotoTool.None
+    }
+
     Dialog(onDismissRequest = onCancel, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
-        Column(Modifier.fillMaxSize().background(Color(0xE6000000)).padding(16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = onCancel) { Text("انصراف", color = Color.White) }
-                Text("پیش‌نمایش تصویر", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp, modifier = Modifier.weight(1f), textAlign = TextAlign.Center)
-                TextButton(onClick = { rotation = 0f; cropping = false; scale = 1f; offset = Offset.Zero; aspect = 0f }) { Text("بازنشانی", color = Color.White) }
-            }
-            Box(Modifier.weight(1f).fillMaxWidth().padding(vertical = 12.dp), contentAlignment = Alignment.Center) {
-                if (!cropping) {
-                    Image(
-                        bitmap.asImageBitmap(),
-                        null,
-                        Modifier.fillMaxWidth().heightIn(max = 520.dp).graphicsLayer { rotationZ = rotation },
-                        contentScale = ContentScale.Fit,
-                    )
-                } else {
+        Box(Modifier.fillMaxSize().background(Color.Black)) {
+            /* ---------- سطح تصویر ---------- */
+            when (tool) {
+                PhotoTool.Crop -> BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    val dens = LocalDensity.current
+                    val areaW = constraints.maxWidth.toFloat()
+                    val areaH = constraints.maxHeight.toFloat()
+
+                    // مقداردهی اولیه کادر برش بر اساس نسبت تصویر (فقط یک‌بار در هر ورود به ابزار)
+                    LaunchedEffect(tool, working, areaW, areaH) {
+                        cropAreaW = areaW.toInt()
+                        cropAreaH = areaH.toInt()
+                        if (cropRect == null && areaW > 1f && areaH > 1f) {
+                            cropRect = defaultCropRect(working, rotation, areaW, areaH)
+                        }
+                    }
+
+                    val cr = cropRect ?: Rect(0.06f, 0.2f, 0.94f, 0.8f)
+                    val boxWpx = cr.width * areaW
+                    val boxHpx = cr.height * areaH
+                    val centerX = (cr.left + cr.right) / 2f * areaW
+                    val centerY = (cr.top + cr.bottom) / 2f * areaH
+
+                    fun dragHandle(corner: Int, delta: Offset) {
+                        val cur = cropRect ?: return
+                        cropRect = resizeCropRect(cur, corner, delta, areaW, areaH, cropAspect)
+                    }
+
                     Box(
-                        Modifier.fillMaxWidth(0.92f).aspectRatio(frameRatio.coerceIn(0.4f, 2.2f)).clip(RoundedCornerShape(12.dp)).border(2.dp, Color.White, RoundedCornerShape(12.dp)).background(Color.Black).onSizeChanged { view = it.width }.pointerInput(bitmap) {
-                            detectTransformGestures { _, pan, zoom, _ ->
-                                scale = (scale * zoom).coerceIn(1f, 4f)
-                                offset += pan
-                            }
-                        },
-                        contentAlignment = Alignment.Center,
+                        Modifier
+                            .size(with(dens) { boxWpx.toDp() }, with(dens) { boxHpx.toDp() })
+                            .absoluteOffset(
+                                x = with(dens) { (centerX - areaW / 2f).toDp() },
+                                y = with(dens) { (centerY - areaH / 2f).toDp() },
+                            )
+                            .onSizeChanged { frameW = it.width; frameH = it.height },
                     ) {
-                        Image(bitmap.asImageBitmap(), null, Modifier.fillMaxSize().graphicsLayer {
-                            scaleX = scale
-                            scaleY = scale
-                            translationX = offset.x
-                            translationY = offset.y
-                            rotationZ = rotation
-                        }, contentScale = ContentScale.Crop)
+                        // لایه حرکت/بزرگ‌نمایی تصویر (زیر دستگیره‌ها)
+                        Box(
+                            Modifier.fillMaxSize().pointerInput(working, rotation) {
+                                detectTransformGestures { _, pan, zoom, _ ->
+                                    cropScale = (cropScale * zoom).coerceIn(1f, 5f)
+                                    cropOffset += pan
+                                }
+                            },
+                        )
+                        Box(Modifier.fillMaxSize().clip(RoundedCornerShape(2.dp))) {
+                            Image(
+                                working.asImageBitmap(),
+                                null,
+                                Modifier.fillMaxSize().graphicsLayer {
+                                    scaleX = cropScale
+                                    scaleY = cropScale
+                                    translationX = cropOffset.x
+                                    translationY = cropOffset.y
+                                    rotationZ = rotation + fineAngle
+                                },
+                                contentScale = ContentScale.Crop,
+                            )
+                        }
+                        CropFrame(Modifier.fillMaxSize())
+                        // دستگیره‌های لمسی چهار گوشه برای تغییر اندازه کادر برش
+                        // (با جهت‌دهی LTR محلی تا Start/End همیشه با گوشه فیزیکی چپ/راست منطبق باشد)
+                        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                            listOf(
+                                Alignment.TopStart to 0,
+                                Alignment.TopEnd to 1,
+                                Alignment.BottomStart to 2,
+                                Alignment.BottomEnd to 3,
+                            ).forEach { (alignment, corner) ->
+                                Box(
+                                    Modifier.align(alignment).size(44.dp).pointerInput(corner) {
+                                        detectDragGestures { change, drag ->
+                                            change.consume()
+                                            dragHandle(corner, drag)
+                                        }
+                                    },
+                                )
+                            }
+                        }
                     }
                 }
-            }
-            if (cropping) {
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf(0f to "آزاد", 1f to "۱:۱", 4f / 3f to "۴:۳", 16f / 9f to "۱۶:۹").forEach { (value, label) ->
-                        val on = aspect == value
-                        Text(label, color = if (on) Color.White else Color(0xFFD1D5DB), fontSize = 12.sp, modifier = Modifier.clip(CircleShape).background(if (on) Blue else Color(0xFF243042)).clickable { aspect = value }.padding(horizontal = 12.dp, vertical = 6.dp))
+                PhotoTool.Draw -> Box(Modifier.fillMaxSize()) {
+                    Image(working.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+                    Canvas(
+                        Modifier.fillMaxSize().pointerInput(working) {
+                            val areaW = size.width.toFloat()
+                            val areaH = size.height.toFloat()
+                            detectDragGestures(
+                                onDragStart = { current = listOf(toBitmapPoint(it, areaW, areaH, working.width, working.height)) },
+                                onDragEnd = {
+                                    if (current.isNotEmpty()) strokes = strokes + listOf(current)
+                                    current = listOf()
+                                },
+                                onDragCancel = { current = listOf() },
+                                onDrag = { change, _ ->
+                                    current = current + toBitmapPoint(change.position, areaW, areaH, working.width, working.height)
+                                    change.consume()
+                                },
+                            )
+                        },
+                    ) {
+                        val s = minOf(size.width / working.width, size.height / working.height)
+                        val left = (size.width - working.width * s) / 2f
+                        val top = (size.height - working.height * s) / 2f
+                        val strokeW = (working.width / 45f) * s
+                        (strokes + listOf(current)).forEach { line ->
+                            for (i in line.indices) {
+                                val from = line[i]
+                                val to = if (i + 1 < line.size) line[i + 1] else from
+                                drawLine(
+                                    accent,
+                                    Offset(left + from.x * s, top + from.y * s),
+                                    Offset(left + to.x * s, top + to.y * s),
+                                    strokeWidth = strokeW,
+                                    cap = StrokeCap.Round,
+                                )
+                            }
+                        }
                     }
                 }
+                else -> Image(
+                    working.asImageBitmap(),
+                    null,
+                    Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Fit,
+                    colorFilter = if (tool == PhotoTool.Tune) ColorFilter.colorMatrix(androidx.compose.ui.graphics.ColorMatrix(brightnessFilter(brightness).array)) else null,
+                )
             }
-            Row(Modifier.fillMaxWidth().padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                TextButton(onClick = { rotation = (rotation + 90f) % 360f }) {
-                    Icon(Icons.AutoMirrored.Filled.RotateRight, null, tint = Color.White)
-                    Text("چرخش", color = Color.White)
-                }
-                TextButton(onClick = { cropping = !cropping }) {
-                    Icon(Icons.Filled.Crop, null, tint = if (cropping) Blue else Color.White)
-                    Text(if (cropping) "برش روشن" else "برش تصویر", color = if (cropping) Blue else Color.White)
-                }
-                Button(onClick = { onSend(exportSendPhoto(bitmap, rotation, cropping, aspect, scale, offset, view)) }, shape = CircleShape, colors = ButtonDefaults.buttonColors(containerColor = Blue, contentColor = LocalAppTheme.current.onButtonColor)) {
-                    Icon(Icons.AutoMirrored.Filled.Send, null, tint = Color.White)
-                    Text("ارسال", modifier = Modifier.padding(start = 6.dp))
+
+            /* ---------- نوار بالایی (شفاف با گرادینت تیره) ---------- */
+            Row(
+                Modifier.fillMaxWidth().align(Alignment.TopCenter)
+                    .background(Brush.verticalGradient(listOf(Color(0xCC000000), Color(0x00000000))))
+                    .statusBarsPadding().padding(horizontal = 6.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(onClick = onCancel) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "بازگشت", tint = Color.White) }
+                Text(title, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp, maxLines = 1, modifier = Modifier.weight(1f).padding(horizontal = 6.dp))
+                Box(
+                    Modifier.size(40.dp).clip(CircleShape).background(accent).clickable { onSend(working, caption.trim()) },
+                    contentAlignment = Alignment.Center,
+                ) { Icon(Icons.Filled.Check, "تأیید و ارسال", tint = Color.White, modifier = Modifier.size(22.dp)) }
+            }
+
+            /* ---------- نوار پایینی (کپشن + اکشن‌ها یا لایه ابزار) ---------- */
+            Column(
+                Modifier.fillMaxWidth().align(Alignment.BottomCenter)
+                    .background(Brush.verticalGradient(listOf(Color(0x00000000), Color(0xCC000000))))
+                    .navigationBarsPadding().padding(horizontal = 12.dp, vertical = 10.dp),
+            ) {
+                if (tool == PhotoTool.None) {
+                    Row(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(Color(0x33FFFFFF)).padding(horizontal = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(Modifier.weight(1f).padding(vertical = 12.dp)) {
+                            if (caption.isEmpty()) Text("توضیحات را اضافه کنید...", color = Color(0x99FFFFFF), fontSize = 14.sp)
+                            BasicTextField(
+                                caption,
+                                { caption = it },
+                                Modifier.fillMaxWidth(),
+                                textStyle = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 14.sp),
+                                cursorBrush = SolidColor(Color.White),
+                                maxLines = 4,
+                            )
+                        }
+                        IconButton(onClick = {}) { Icon(Icons.Filled.CameraAlt, "افزودن استیکر", tint = Color(0xCCFFFFFF)) }
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                        Box(
+                            Modifier.size(52.dp).clip(CircleShape).background(accent).clickable { onSend(working, caption.trim()) },
+                            contentAlignment = Alignment.Center,
+                        ) { Icon(Icons.AutoMirrored.Filled.Send, "ارسال", tint = Color.White, modifier = Modifier.size(24.dp)) }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            PhotoToolButton(Icons.Filled.Crop, "برش و چرخش") { tool = PhotoTool.Crop }
+                            PhotoToolButton(Icons.Filled.Brush, "نقاشی") { tool = PhotoTool.Draw }
+                            PhotoToolButton(Icons.Filled.Tune, "تنظیم نور") { tool = PhotoTool.Tune }
+                        }
+                    }
+                } else if (tool == PhotoTool.Tune) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        PhotoToolButton(Icons.Filled.Close, "انصراف") { resetTools(); tool = PhotoTool.None }
+                        Slider(
+                            brightness,
+                            { brightness = it },
+                            Modifier.weight(1f).padding(horizontal = 10.dp),
+                            valueRange = -1f..1f,
+                            colors = SliderDefaults.colors(thumbColor = accent, activeTrackColor = accent, inactiveTrackColor = Color(0x55FFFFFF)),
+                        )
+                        PhotoToolButton(Icons.Filled.Check, "اعمال", primary = true, accent = accent) { applyTool() }
+                    }
+                } else if (tool == PhotoTool.Crop) {
+                    /* ---------- ادیتور برش به سبک تلگرام: خط‌کش زاویه + اکشن‌ها ---------- */
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        // سمت راست خط‌کش: چرخش پله‌ای ۹۰ درجه
+                        PhotoToolButton(Icons.AutoMirrored.Filled.RotateRight, "چرخش ۹۰ درجه") { rotation = (rotation + 90f) % 360f }
+                        // وسط: خط‌کش چرخش دقیق
+                        AngleRuler(
+                            value = fineAngle,
+                            onValue = { fineAngle = it },
+                            accent = accent,
+                            modifier = Modifier.weight(1f).height(60.dp).padding(horizontal = 10.dp),
+                        )
+                        // سمت چپ خط‌کش: منوی سریع نسبت ابعاد
+                        Box {
+                            PhotoToolButton(Icons.Filled.AspectRatio, "نسبت ابعاد") { showAspectMenu = true }
+                            DropdownMenu(
+                                expanded = showAspectMenu,
+                                onDismissRequest = { showAspectMenu = false },
+                                modifier = Modifier.background(Color(0xFF1C1C1E)),
+                            ) {
+                                listOf<Pair<String, Float?>>(
+                                    "آزاد" to null,
+                                    "۱:۱" to 1f,
+                                    "۴:۳" to 4f / 3f,
+                                    "۱۶:۹" to 16f / 9f,
+                                ).forEach { (label, ratio) ->
+                                    DropdownMenuItem(
+                                        text = { Text(label, color = Color.White, fontSize = 14.sp) },
+                                        onClick = {
+                                            cropAspect = ratio
+                                            if (ratio != null && cropAreaW > 0 && cropAreaH > 0) {
+                                                cropRect = fitCropRect(cropRect, ratio, cropAreaW.toFloat(), cropAreaH.toFloat())
+                                            }
+                                            showAspectMenu = false
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                        // سمت راست (RTL): ثبت برش
+                        Text(
+                            "بریدن",
+                            color = Color(0xFFFF6D00),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp,
+                            modifier = Modifier.clip(RoundedCornerShape(10.dp)).clickable { applyTool() }.padding(horizontal = 14.dp, vertical = 8.dp),
+                        )
+                        // سمت چپ (RTL): لغو
+                        Text(
+                            "لغو",
+                            color = Color.White,
+                            fontSize = 16.sp,
+                            modifier = Modifier.clip(RoundedCornerShape(10.dp)).clickable { resetTools(); tool = PhotoTool.None }.padding(horizontal = 14.dp, vertical = 8.dp),
+                        )
+                    }
+                } else {
+                    /* ---------- نوار ابزار نقاشی ---------- */
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        PhotoToolButton(Icons.Filled.Close, "انصراف") { resetTools(); tool = PhotoTool.None }
+                        Spacer(Modifier.weight(1f))
+                        PhotoToolButton(Icons.Filled.Refresh, "پاک کردن نقاشی") { strokes = listOf(); current = listOf() }
+                        Spacer(Modifier.width(8.dp))
+                        PhotoToolButton(Icons.Filled.Check, "اعمال", primary = true, accent = accent) { applyTool() }
+                    }
                 }
             }
         }
     }
 }
 
-private fun exportSendPhoto(src: Bitmap, rotation: Float, cropping: Boolean, aspect: Float, scale: Float, offset: Offset, view: Int): Bitmap {
+/** دکمه دایره‌ای فقط-آیکون برای نوار ابزار صفحه پیش‌نمایش. */
+@Composable
+private fun PhotoToolButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    primary: Boolean = false,
+    accent: Color = Color(0xFF2AABEE),
+    onClick: () -> Unit,
+) {
+    Box(
+        Modifier.size(if (primary) 48.dp else 44.dp).clip(CircleShape)
+            .background(if (primary) accent else Color(0x33FFFFFF))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, label, tint = Color.White, modifier = Modifier.size(if (primary) 22.dp else 20.dp))
+    }
+}
+
+/** خط‌کش چرخش دقیق به سبک ادیتور تلگرام: نمایش درجه در مرکز و کشیدن پیوسته (۴۵- تا ۴۵+). */
+@Composable
+private fun AngleRuler(
+    value: Float,
+    onValue: (Float) -> Unit,
+    accent: Color,
+    modifier: Modifier = Modifier,
+) {
+    val range = 45f
+    val pxPerDeg = with(LocalDensity.current) { 3.6.dp.toPx() }
+    val currentValue by rememberUpdatedState(value)
+    Box(
+        modifier.pointerInput(Unit) {
+            detectDragGestures { change, drag ->
+                change.consume()
+                onValue((currentValue - drag.x / pxPerDeg).coerceIn(-range, range))
+            }
+        },
+    ) {
+        Canvas(Modifier.fillMaxSize()) {
+            val centerX = size.width / 2f
+            val baseY = size.height * 0.86f
+            val majorLen = size.height * 0.34f
+            val minorLen = size.height * 0.18f
+            val half = (size.width / 2f / pxPerDeg).toInt() + 2
+            val startDeg = value.toInt() - half
+            val endDeg = value.toInt() + half
+            for (d in startDeg..endDeg) {
+                val x = centerX + (d - value) * pxPerDeg
+                if (x < 0f || x > size.width) continue
+                val major = d % 5 == 0
+                drawLine(
+                    color = Color(0x88FFFFFF),
+                    start = Offset(x, baseY - if (major) majorLen else minorLen),
+                    end = Offset(x, baseY),
+                    strokeWidth = if (major) 1.5.dp.toPx() else 1.dp.toPx(),
+                )
+            }
+            // نشانگر مرکزی ثابت به رنگ تم
+            drawLine(
+                accent,
+                Offset(centerX, baseY - majorLen - 6.dp.toPx()),
+                Offset(centerX, baseY),
+                strokeWidth = 2.dp.toPx(),
+                cap = StrokeCap.Round,
+            )
+        }
+        Text(
+            "${persianDigits(value.roundToInt().toString())}°",
+            color = Color.White,
+            fontSize = 12.sp,
+            modifier = Modifier.align(Alignment.TopCenter).padding(top = 4.dp),
+        )
+    }
+}
+
+/** کادر برش پیش‌فرض بر اساس نسبت تصویر، در مرکز ناحیه با حاشیه. */
+private fun defaultCropRect(src: Bitmap, rotation: Float, areaW: Float, areaH: Float): Rect {
+    val imgRatio =
+        if (rotation % 180f == 0f) src.width / src.height.toFloat()
+        else src.height / src.width.toFloat()
+    val margin = 0.08f
+    var w = areaW * (1f - 2f * margin)
+    var h = w / imgRatio
+    val maxH = areaH * (1f - 2f * margin)
+    if (h > maxH) {
+        h = maxH
+        w = h * imgRatio
+    }
+    val left = (areaW - w) / 2f
+    val top = (areaH - h) / 2f
+    return Rect(left / areaW, top / areaH, (left + w) / areaW, (top + h) / areaH)
+}
+
+/** تغییر اندازه کادر برش با کشیدن یک گوشه (۰=چپ‌بالا، ۱=راست‌بالا، ۲=چپ‌پایین، ۳=راست‌پایین). */
+private fun resizeCropRect(
+    cur: Rect,
+    corner: Int,
+    delta: Offset,
+    areaW: Float,
+    areaH: Float,
+    lockedAspect: Float?,
+): Rect {
+    var l = cur.left * areaW
+    var t = cur.top * areaH
+    var r = cur.right * areaW
+    var b = cur.bottom * areaH
+    when (corner) {
+        0 -> { l += delta.x; t += delta.y }
+        1 -> { r += delta.x; t += delta.y }
+        2 -> { l += delta.x; b += delta.y }
+        else -> { r += delta.x; b += delta.y }
+    }
+    val minPx = 96f
+    l = l.coerceIn(0f, areaW - minPx)
+    r = r.coerceIn(minPx, areaW)
+    t = t.coerceIn(0f, areaH - minPx)
+    b = b.coerceIn(minPx, areaH)
+    if (r - l < minPx) {
+        if (corner == 0 || corner == 2) l = r - minPx else r = l + minPx
+    }
+    if (b - t < minPx) {
+        if (corner == 0 || corner == 1) t = b - minPx else b = t + minPx
+    }
+    if (lockedAspect != null) {
+        var w = r - l
+        var h = b - t
+        if (w / h > lockedAspect) w = h * lockedAspect else h = w / lockedAspect
+        if (corner == 0 || corner == 2) l = (r - w).coerceAtLeast(0f) else r = (l + w).coerceAtMost(areaW)
+        if (corner == 0 || corner == 1) t = (b - h).coerceAtLeast(0f) else b = (t + h).coerceAtMost(areaH)
+    }
+    return Rect(l / areaW, t / areaH, r / areaW, b / areaH)
+}
+
+/** جای‌گذاری کادر برش موجود در نسبت ابعاد انتخاب‌شده، حول همان مرکز. */
+private fun fitCropRect(cur: Rect?, aspect: Float, areaW: Float, areaH: Float): Rect {
+    val base = cur ?: Rect(0.06f, 0.06f, 0.94f, 0.94f)
+    val cx = (base.left + base.right) / 2f * areaW
+    val cy = (base.top + base.bottom) / 2f * areaH
+    var w = areaW * 0.86f
+    var h = w / aspect
+    if (h > areaH * 0.86f) {
+        h = areaH * 0.86f
+        w = h * aspect
+    }
+    val l = (cx - w / 2f).coerceIn(0f, areaW - w)
+    val t = (cy - h / 2f).coerceIn(0f, areaH - h)
+    return Rect(l / areaW, t / areaH, (l + w) / areaW, (t + h) / areaH)
+}
+
+/** کادر برش با خطوط راهنمای یک‌سوم و براکت گوشه‌ها. */
+@Composable
+private fun CropFrame(modifier: Modifier) {
+    Canvas(modifier) {
+        val guide = Color(0x66FFFFFF)
+        val thin = 1.dp.toPx()
+        for (i in 1..2) {
+            val x = size.width * i / 3f
+            val y = size.height * i / 3f
+            drawLine(guide, Offset(x, 0f), Offset(x, size.height), strokeWidth = thin)
+            drawLine(guide, Offset(0f, y), Offset(size.width, y), strokeWidth = thin)
+        }
+        val arm = 22.dp.toPx()
+        val thick = 3.dp.toPx()
+        val corners = listOf(
+            Offset(0f, 0f) to Offset(1f, 1f),
+            Offset(size.width, 0f) to Offset(-1f, 1f),
+            Offset(0f, size.height) to Offset(1f, -1f),
+            Offset(size.width, size.height) to Offset(-1f, -1f),
+        )
+        corners.forEach { (o, d) ->
+            drawLine(Color.White, o, Offset(o.x + d.x * arm, o.y), strokeWidth = thick)
+            drawLine(Color.White, o, Offset(o.x, o.y + d.y * arm), strokeWidth = thick)
+        }
+    }
+}
+
+/** تبدیل نقطه لمس (مختصات صفحه) به مختصات تصویر با در نظر گرفتن ContentScale.Fit. */
+private fun toBitmapPoint(p: Offset, areaW: Float, areaH: Float, w: Int, h: Int): Offset {
+    val s = minOf(areaW / w, areaH / h)
+    val left = (areaW - w * s) / 2f
+    val top = (areaH - h * s) / 2f
+    return Offset(
+        ((p.x - left) / s).coerceIn(0f, w.toFloat()),
+        ((p.y - top) / s).coerceIn(0f, h.toFloat()),
+    )
+}
+
+/** ماتریس رنگ تنظیم نور (مقدار ۱- تا ۱+). */
+private fun brightnessFilter(value: Float): android.graphics.ColorMatrix {
+    val s = (1f + value * 0.5f).coerceAtLeast(0f)
+    val t = value * 70f
+    return android.graphics.ColorMatrix(
+        floatArrayOf(
+            s, 0f, 0f, 0f, t,
+            0f, s, 0f, 0f, t,
+            0f, 0f, s, 0f, t,
+            0f, 0f, 0f, 1f, 0f,
+        ),
+    )
+}
+
+private fun applyBrightness(src: Bitmap, value: Float): Bitmap {
+    if (value == 0f) return src
+    val out = Bitmap.createBitmap(src.width, src.height, Bitmap.Config.ARGB_8888)
+    val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        colorFilter = android.graphics.ColorMatrixColorFilter(brightnessFilter(value))
+    }
+    android.graphics.Canvas(out).drawBitmap(src, 0f, 0f, paint)
+    return out
+}
+
+/** سوزاندن خطوط نقاشی روی نسخه‌ای قابل‌تغییر از تصویر. */
+private fun bakeStrokes(src: Bitmap, strokes: List<List<Offset>>, color: Int): Bitmap {
+    if (strokes.isEmpty()) return src
+    val out = src.copy(Bitmap.Config.ARGB_8888, true) ?: return src
+    val canvas = android.graphics.Canvas(out)
+    val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        this.color = color
+        style = android.graphics.Paint.Style.STROKE
+        strokeCap = android.graphics.Paint.Cap.ROUND
+        strokeJoin = android.graphics.Paint.Join.ROUND
+        strokeWidth = src.width / 45f
+    }
+    strokes.forEach { line ->
+        for (i in line.indices) {
+            val from = line[i]
+            val to = if (i + 1 < line.size) line[i + 1] else from
+            canvas.drawLine(from.x, from.y, to.x, to.y, paint)
+        }
+    }
+    return out
+}
+
+/** اعمال چرخش و برش روی تصویر بر اساس کادر انتخاب‌شده در لایه برش. */
+private fun exportCroppedPhoto(src: Bitmap, rotation: Float, ratio: Float, scale: Float, offset: Offset, view: Int): Bitmap {
     val turn = android.graphics.Matrix().apply { postRotate(rotation) }
     val rotated = if (rotation % 360f == 0f) src else Bitmap.createBitmap(src, 0, 0, src.width, src.height, turn, true)
-    if (!cropping) return rotated
-    val ratio = if (aspect <= 0f) rotated.width / rotated.height.toFloat() else aspect
     val outW = 1080
     val outH = (outW / ratio).toInt().coerceAtLeast(1)
     val out = Bitmap.createBitmap(outW, outH, Bitmap.Config.ARGB_8888)

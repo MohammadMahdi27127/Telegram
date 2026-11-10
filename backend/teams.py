@@ -216,7 +216,11 @@ def get_user_teams(user_id: str, db: Session = Depends(get_db)):
             .filter(TeamMember.user_id == user_id)
             .all()
         )
-        
+
+        logger.info(
+            f"[GET /teams/user/{user_id}] found {len(teams)} team(s) for user_id={user_id}"
+        )
+
         result = []
         for team in teams:
             # دریافت تعداد اعضا
