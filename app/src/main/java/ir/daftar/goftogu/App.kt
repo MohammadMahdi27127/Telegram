@@ -31,6 +31,48 @@ class App : Application() {
     // قفل رفرش داده تا از اجرای موازی/تکراری رفرش‌های هم‌زمان (onResume + swipe-refresh + اجرای اپ) جلوگیری شود
     private val refreshMutex = kotlinx.coroutines.sync.Mutex()
 
+    // زمان آخرین همگام‌سازی موفق (epoch-millis) برای جلوگیری از بمباران درخواست‌ها در چرخهٔ ON_RESUME
+    @Volatile
+    var lastFullSyncTimestamp: Long = 0L
+        private set
+
+    /** علامت‌گذاری پایان موفق یک همگام‌سازی کامل (برای محاسبهٔ کول‌داون رفرش خودکار). */
+    fun markSyncCompleted() {
+        lastFullSyncTimestamp = System.currentTimeMillis()
+    }
+
+    /**
+     * بررسی نیاز به همگام‌سازی خودکار: اگر کمتر از بازهٔ مشخص‌شده از آخرین سینک موفق گذشته باشد
+     * (کول‌داون پیش‌فرض ۶۰ ثانیه)، مقدار false برمی‌گردد تا درخواست لغو شود.
+     */
+    fun shouldTriggerAutoSync(cooldownMillis: Long = 60_000L): Boolean {
+        val now = System.currentTimeMillis()
+        return (now - lastFullSyncTimestamp) >= cooldownMillis
+    }
+
+    /**
+     * بکفیل یکبارهٔ سرور برای هر کاربر: مخاطبین/پیام‌های موجود محلی که پیش‌تر بدون user_id
+     * روی سرور ثبت شده‌اند، با مالک صحیح دوباره push می‌شوند تا واکشی ابری آن‌ها را برگرداند.
+     * فقط یک‌بار به‌ازای هر کاربر (کلید در SharedPreferences) اجرا می‌شود.
+     */
+    fun backfillOutboxIfNeeded(userId: String) {
+        if (userId.isBlank()) return
+        val prefs = getSharedPreferences("session", Context.MODE_PRIVATE)
+        val key = "outbox_backfill_done_$userId"
+        if (prefs.getBoolean(key, false)) return
+        // اگر دادهٔ محلی خالی است، ابتدا باید از سرور بازیابی شود؛ بکفیل لازم نیست
+        if (db.isLocalDataEmpty(userId)) return
+        appScope.launch {
+            try {
+                val queued = db.backfillOutboxForUser(userId)
+                withContext(Dispatchers.Main) { prefs.edit().putBoolean(key, true).apply() }
+                Log.d("CloudRefresh", "Outbox backfill queued ($queued records) for: $userId")
+            } catch (e: Exception) {
+                Log.e("CloudRefresh", "Outbox backfill failed", e)
+            }
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
 
@@ -150,6 +192,8 @@ class App : Application() {
             }
 
             Log.d("CloudRefresh", "App data refreshed from server for: $userId")
+            // ثبت زمان پایان موفق سینک برای محاسبهٔ کول‌داون رفرش خودکار
+            markSyncCompleted()
         } catch (e: Exception) {
             Log.e("CloudRefresh", "Error refreshing app data from server", e)
         }

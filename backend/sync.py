@@ -4,6 +4,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from sqlalchemy import or_, cast, String
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,7 @@ def get_db():
 class SyncEntryItem(BaseModel):
     id: str
     person_id: str
+    user_id: Optional[str] = None  # مالک پیام (برای واکشی ابری مستقل از ترتیب سینک)
     body: str
     kind: str = "text"
     channel: str = "manual"
@@ -37,6 +39,7 @@ class SyncPayloadRequest(BaseModel):
 # مدل‌های مخاطبین و گروه‌ها
 class SyncPersonItem(BaseModel):
     id: str
+    user_id: Optional[str] = None  # مالک پرونده (برای انتساب صحیح در واکشی ابری)
     name: str
     phone: Optional[str] = None
     role: Optional[str] = None
@@ -100,9 +103,12 @@ def sync_entries(payload: SyncPayloadRequest, db: Session = Depends(get_db)):
         saved = 0
         now_ms = int(time.time() * 1000)
         for item in payload.entries:
-            # شناسهٔ مالک پیام از روی مخاطب/تیم مربوطه استخراج می‌شود تا واکشی بر اساس user_id ممکن باشد
-            owner = db.query(Person).filter(Person.id == item.person_id).first()
-            owner_id = owner.user_id if owner else None
+            # مالک پیام: اگر کلاینت user_id فرستاده باشد اولویت دارد؛ در غیر این صورت
+            # از روی مخاطب/تیم مربوطه استخراج می‌شود تا واکشی بر اساس user_id ممکن باشد
+            owner_id = item.user_id
+            if not owner_id:
+                owner = db.query(Person).filter(Person.id == item.person_id).first()
+                owner_id = owner.user_id if owner else None
             existing = db.query(Entry).filter(Entry.id == item.id).first()
             if existing:
                 existing.body = item.body
@@ -158,9 +164,13 @@ def sync_people(payload: SyncPeoplePayload, db: Session = Depends(get_db)):
                 existing.avatar = item.avatar
                 existing.is_group = item.is_group
                 existing.saved = item.saved
+                # فقط در صورت ارسال مالک، user_id را به‌روز کن (تا مقدار قبلی پاک نشود)
+                if item.user_id:
+                    existing.user_id = item.user_id
             else:
                 db.add(Person(
                     id=item.id,
+                    user_id=item.user_id,
                     name=item.name,
                     phone=item.phone,
                     role=item.role,
@@ -528,14 +538,21 @@ class EntryResponse(BaseModel):
 def get_user_people(user_id: str, db: Session = Depends(get_db)):
     import main
     Person = main.Person
+    clean_user_id = str(user_id).strip()
     try:
+        # شمارش کل رکوردهای موجود برای دیباگ سریع در لاگ سرور
+        total_in_db = db.query(Person).count()
+        # مقایسه مقاوم در برابر تفاوت نوع داده (UUID/رشته) با cast به رشته
         rows = (
             db.query(Person)
-            .filter(Person.user_id == user_id)
+            .filter(cast(Person.user_id, String) == clean_user_id)
             .order_by(Person.created_at.asc())
             .all()
         )
-        logger.info(f"Pull people for user {user_id}: {len(rows)} rows")
+        logger.info(
+            f"[SYNC-DEBUG] people | user={clean_user_id} | "
+            f"total_in_db={total_in_db} | found={len(rows)}"
+        )
         return [
             PersonResponse(
                 id=r.id,
@@ -558,21 +575,30 @@ def get_user_people(user_id: str, db: Session = Depends(get_db)):
 @router.get("/entries/{user_id}", response_model=List[EntryResponse])
 def get_user_entries(user_id: str, db: Session = Depends(get_db)):
     import main
-    from sqlalchemy import or_
     Person = main.Person
     Entry = main.Entry
+    clean_user_id = str(user_id).strip()
     try:
+        total_in_db = db.query(Entry).count()
+        # شناسه‌های چت متعلق به کاربر (با cast مقاوم در برابر نوع داده)
         person_ids = [
-            row[0] for row in db.query(Person.id).filter(Person.user_id == user_id).all()
+            row[0] for row in
+            db.query(Person.id).filter(cast(Person.user_id, String) == clean_user_id).all()
         ]
-        query = db.query(Entry)
+        # پیام‌ها: چه با user_id مستقیم و چه منتسب به چت‌های کاربر
+        conditions = [cast(Entry.user_id, String) == clean_user_id]
         if person_ids:
-            # پیام‌های کاربر: چه با user_id مستقیم و چه از طریق مخاطبین/تیم‌های او
-            query = query.filter(or_(Entry.user_id == user_id, Entry.person_id.in_(person_ids)))
-        else:
-            query = query.filter(Entry.user_id == user_id)
-        rows = query.order_by(Entry.occurred_at.asc(), Entry.created_at.asc()).all()
-        logger.info(f"Pull entries for user {user_id}: {len(rows)} rows")
+            conditions.append(cast(Entry.person_id, String).in_(person_ids))
+        rows = (
+            db.query(Entry)
+            .filter(or_(*conditions))
+            .order_by(Entry.occurred_at.asc(), Entry.created_at.asc())
+            .all()
+        )
+        logger.info(
+            f"[SYNC-DEBUG] entries | user={clean_user_id} | "
+            f"total_in_db={total_in_db} | person_ids={len(person_ids)} | found={len(rows)}"
+        )
         return [
             EntryResponse(
                 id=r.id,

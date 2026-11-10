@@ -74,6 +74,7 @@ class SyncWorker(
                             SyncEntryItem(
                                 id = json.getString("id"),
                                 personId = json.getString("person_id"),
+                                userId = json.optString("user_id").takeIf { it.isNotEmpty() },
                                 body = json.getString("body"),
                                 kind = json.optString("kind", "text"),
                                 channel = json.optString("channel", "manual"),
@@ -179,6 +180,7 @@ class SyncWorker(
                         people.add(
                             SyncPersonItem(
                                 id = json.getString("id"),
+                                userId = json.optString("user_id").takeIf { it.isNotEmpty() },
                                 name = json.getString("name"),
                                 phone = json.optString("phone").takeIf { it.isNotEmpty() },
                                 role = json.optString("role").takeIf { it.isNotEmpty() },

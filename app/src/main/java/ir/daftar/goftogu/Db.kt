@@ -846,6 +846,8 @@ class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", 
         // افزودن به صف outbox برای ارسال به سرور دارکوب
         val personJson = org.json.JSONObject().apply {
             put("id", id)
+            // مالک پرونده — برای انتساب صحیح در واکشی ابری ضروری است
+            put("user_id", userId)
             put("name", name.trim())
             put("phone", mobile)
             put("role", role.trim())
@@ -1069,6 +1071,8 @@ val now = System.currentTimeMillis()
 val payloadJson = org.json.JSONObject().apply {
     put("id", entryId)
     put("person_id", personId)
+    // مالک پیام — برای واکشی ابری مستقل از ترتیب سینک افراد/پیام‌ها
+    put("user_id", user.id)
     put("body", body.trim())
     put("kind", kind)
     put("channel", channel)
@@ -2135,5 +2139,93 @@ writableDatabase.insert("entries", null, ContentValues().apply {
         } finally {
             db.endTransaction()
         }
+    }
+
+    /**
+     * بکفیل یکبارهٔ سرور: تمام مخاطبین و پیام‌های موجود در SQLite محلی را همراه با `user_id` صحیح
+     * در صف outbox قرار می‌دهد تا رکوردهای یتیمِ قبلی (که بدون مالک روی PostgreSQL ثبت شده بودند)
+     * اصلاح شوند. کل درج در یک Transaction انجام و در انتها فقط یک درخواست Sync صف می‌شود.
+     *
+     * @return تعداد رکوردهای صف‌شده
+     */
+    fun backfillOutboxForUser(userId: String): Int {
+        if (userId.isBlank()) return 0
+        val db = writableDatabase
+        val now = System.currentTimeMillis()
+        var queued = 0
+        db.beginTransaction()
+        try {
+            // ۱. مخاطبین/پرونده‌ها
+            db.rawQuery(
+                "SELECT id, name, phone, role, pinned, avatar, is_group, saved, created_at FROM people WHERE user_id=?",
+                arrayOf(userId),
+            ).use { c ->
+                while (c.moveToNext()) {
+                    val payload = org.json.JSONObject().apply {
+                        put("id", c.getString(0))
+                        put("user_id", userId)
+                        put("name", c.getString(1) ?: "")
+                        c.getString(2)?.let { put("phone", it) }
+                        c.getString(3)?.let { put("role", it) }
+                        put("pinned", c.getInt(4) == 1)
+                        c.getString(5)?.let { put("avatar", it) }
+                        put("is_group", c.getInt(6) == 1)
+                        put("saved", c.getInt(7) == 1)
+                        put("created_at", c.getLong(8))
+                    }.toString()
+                    insertOutboxRaw(db, "person", payload, now)
+                    queued++
+                }
+            }
+            // ۲. پیام‌ها/یادداشت‌ها
+            db.rawQuery(
+                "SELECT id, person_id, body, kind, channel, occurred_at, voice_path, media_path, member_id, target_recipient_id FROM entries WHERE user_id=?",
+                arrayOf(userId),
+            ).use { c ->
+                while (c.moveToNext()) {
+                    val payload = org.json.JSONObject().apply {
+                        put("id", c.getString(0))
+                        put("person_id", c.getString(1))
+                        put("user_id", userId)
+                        put("body", c.getString(2) ?: "")
+                        put("kind", c.getString(3) ?: "text")
+                        put("channel", c.getString(4) ?: "manual")
+                        put("occurred_at", c.getLong(5))
+                        c.getString(6)?.let { put("voice_path", it) }
+                        c.getString(7)?.let { put("media_path", it) }
+                        c.getString(8)?.let { put("member_id", it) }
+                        c.getString(9)?.let { put("target_recipient_id", it) }
+                    }.toString()
+                    insertOutboxRaw(db, "entry", payload, now)
+                    queued++
+                }
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+        // یک درخواست همگام‌سازی واحد برای کل رکوردهای صف‌شده
+        if (queued > 0) {
+            try {
+                val immediateSync = androidx.work.OneTimeWorkRequestBuilder<SyncWorker>().build()
+                androidx.work.WorkManager.getInstance(context).enqueue(immediateSync)
+            } catch (_: Exception) {}
+        }
+        return queued
+    }
+
+    /** درج خام در outbox بدون صف‌کردن سینک (برای استفادهٔ گروهی در یک Transaction). */
+    private fun insertOutboxRaw(db: SQLiteDatabase, kind: String, payload: String, now: Long) {
+        db.insertWithOnConflict(
+            "outbox",
+            null,
+            ContentValues().apply {
+                put("id", UUID.randomUUID().toString())
+                put("kind", kind)
+                put("payload", payload)
+                put("created_at", now)
+            },
+            SQLiteDatabase.CONFLICT_IGNORE,
+        )
     }
 }

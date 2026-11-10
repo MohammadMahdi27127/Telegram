@@ -232,6 +232,7 @@ data class SyncResponse(
 data class SyncEntryItem(
     @SerializedName("id") val id: String,
     @SerializedName("person_id") val personId: String,
+    @SerializedName("user_id") val userId: String? = null,
     @SerializedName("body") val body: String,
     @SerializedName("kind") val kind: String,
     @SerializedName("channel") val channel: String,
@@ -249,6 +250,7 @@ data class SyncPayloadRequest(
 // --- مدل‌های مخاطبین و گروه‌ها ---
 data class SyncPersonItem(
     @SerializedName("id") val id: String,
+    @SerializedName("user_id") val userId: String? = null,
     @SerializedName("name") val name: String,
     @SerializedName("phone") val phone: String? = null,
     @SerializedName("role") val role: String? = null,

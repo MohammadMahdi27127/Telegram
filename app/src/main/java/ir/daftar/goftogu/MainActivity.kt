@@ -218,6 +218,8 @@ class MainActivity : ComponentActivity() {
         val userId = app.sessionId()
         if (!userId.isNullOrBlank()) {
             app.refreshAppDataFromServerAsync(userId)
+            // بکفیل یکباره: اصلاح رکوردهای یتیم سرور (بدون user_id) با دادهٔ محلی
+            app.backfillOutboxIfNeeded(userId)
         }
 
         setContent {

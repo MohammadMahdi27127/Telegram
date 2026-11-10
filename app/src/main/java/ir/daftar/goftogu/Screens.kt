@@ -2927,17 +2927,22 @@ fun ChatsScreen(
             app.refreshAppDataFromServer(userId)
             people = app.db.people(userId)
             syncingInitial = false
-        } else {
-            // حتی اگر کش محلی موجود است، در پس‌زمینه از سرور همگام می‌شویم.
+        } else if (app.shouldTriggerAutoSync()) {
+            // حتی اگر کش محلی موجود است، در پس‌زمینه از سرور همگام می‌شویم (با احترام به کول‌داون).
             refreshFromServer()
         }
     }
 
-    // ۲. رفرش زنده هنگام بازگشت به تب چت‌ها (onResume) تا عناوین و آخرین پیام‌ها از سرور بیایند.
+    // ۲. رفرش زنده هنگام بازگشت به تب چت‌ها (onResume) — فقط اگر دیتابیس کاملاً خالی باشد
+    // یا از آخرین سینک موفق بیش از ۶۰ ثانیه گذشته باشد؛ تا از بمباران درخواست‌ها جلوگیری شود.
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
-        scope.launch {
-            refreshing = true
-            try { refreshFromServer() } finally { refreshing = false }
+        val isDbEmpty = app.db.isLocalDataEmpty(userId)
+        val canAutoSync = app.shouldTriggerAutoSync(cooldownMillis = 60_000L)
+        if (isDbEmpty || canAutoSync) {
+            scope.launch {
+                refreshing = true
+                try { refreshFromServer() } finally { refreshing = false }
+            }
         }
     }
 
