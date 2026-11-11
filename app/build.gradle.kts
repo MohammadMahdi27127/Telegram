@@ -3,24 +3,27 @@ import java.util.Properties
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
-//    id("org.jetbrains.kotlin.plugin.compose")
+    id("org.jetbrains.kotlin.plugin.compose")
 }
 
 android {
     namespace = "ir.daftar.goftogu"
     compileSdk = 36
+
     defaultConfig {
         applicationId = "ir.daftar.goftogu"
         minSdk = 26
         targetSdk = 36
         versionCode = 14
         versionName = "2.3"
+
         val local = Properties()
         val localFile = rootProject.file("local.properties")
         if (localFile.exists()) localFile.inputStream().use { local.load(it) }
         val openRouterKey = local.getProperty("OPENROUTER_KEY", "")
         buildConfigField("String", "OPENROUTER_KEY", "\"$openRouterKey\"")
     }
+
     signingConfigs {
         create("release") {
             val store = rootProject.file("keystore.properties")
@@ -34,23 +37,28 @@ android {
             }
         }
     }
+
     buildTypes {
         release {
+            // R8 remains disabled until release minification is validated against
+            // the app's reflection/serialization usage in a dedicated QA pass.
             isMinifyEnabled = false
             signingConfig = signingConfigs.getByName("release")
         }
     }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions { jvmTarget = "17" }
+
+    kotlinOptions {
+        jvmTarget = "17"
+    }
+
     buildFeatures {
         compose = true
         buildConfig = true
-    }
-    composeOptions {
-        kotlinCompilerExtensionVersion = "1.5.14"
     }
 }
 
