@@ -8,10 +8,10 @@ COPY package*.json ./
 # build layer, then install from it with npm ci. Commit a generated package-lock.json
 # in a follow-up so dependency resolution is reproducible across separate builds.
 RUN if [ -f package-lock.json ]; then \
-      npm ci --ignore-scripts --no-audit --no-fund; \
+      npm ci --no-audit --no-fund; \
     else \
       npm install --package-lock-only --ignore-scripts --no-audit --no-fund \
-      && npm ci --ignore-scripts --no-audit --no-fund; \
+      && npm ci --no-audit --no-fund; \
     fi
 
 COPY . .
