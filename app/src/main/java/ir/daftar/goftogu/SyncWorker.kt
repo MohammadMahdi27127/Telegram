@@ -73,6 +73,7 @@ class SyncWorker(
                         entries.add(
                             SyncEntryItem(
                                 id = json.getString("id"),
+                                userId = json.optString("user_id").takeIf { it.isNotEmpty() },
                                 personId = json.getString("person_id"),
                                 body = json.getString("body"),
                                 kind = json.optString("kind", "text"),
@@ -80,6 +81,7 @@ class SyncWorker(
                                 occurredAt = json.optLong("occurred_at", System.currentTimeMillis()),
                                 voicePath = json.optString("voice_path").takeIf { it.isNotEmpty() },
                                 mediaPath = json.optString("media_path").takeIf { it.isNotEmpty() },
+                                memberId = json.optString("member_id").takeIf { it.isNotEmpty() },
                                 targetRecipientId = json.optString("target_recipient_id").takeIf { it.isNotEmpty() }
                             )
                         )
@@ -178,6 +180,7 @@ class SyncWorker(
                         people.add(
                             SyncPersonItem(
                                 id = json.getString("id"),
+                                userId = json.optString("user_id").takeIf { it.isNotEmpty() },
                                 name = json.getString("name"),
                                 phone = json.optString("phone").takeIf { it.isNotEmpty() },
                                 role = json.optString("role").takeIf { it.isNotEmpty() },

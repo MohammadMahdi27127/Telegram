@@ -17,7 +17,14 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.security.MessageDigest
+
+/** سقف تعداد صفحات سینک دلتا در هر فراخوانی (هر صفحه حداکثر ۲۰۰ رویداد). */
+private const val MAX_SYNC_PAGES = 20
+
+/** اندازهٔ هر صفحه از پیام‌های تیم در حالت اسنپ‌شات (باید با limit سرور هم‌خوان باشد). */
+private const val SNAPSHOT_TEAM_PAGE_SIZE = 100
 
 class App : Application() {
     lateinit var db: Db
@@ -78,6 +85,112 @@ class App : Application() {
             } catch (e: Exception) {
                 // آفلائن mode میں خاموشی سے ناکام ہوں - کریش نہ کریں
                 Log.e("ProfileSync", "Error syncing user profile: ${e.message}")
+            }
+        }
+    }
+
+    /** خواندن آخرین شماره توالی رویدادهای سینک (PTS) برای کاربر از SharedPreferences */
+    fun getLocalPts(userId: String): Long {
+        if (userId.isBlank()) return 0L
+        val prefs = getSharedPreferences("sync_pts_prefs", Context.MODE_PRIVATE)
+        return prefs.getLong("pts_$userId", 0L)
+    }
+
+    /** ذخیره آخرین شماره توالی رویدادهای سینک (PTS) کاربر در SharedPreferences */
+    fun saveLocalPts(userId: String, pts: Long) {
+        if (userId.isBlank()) return
+        val prefs = getSharedPreferences("sync_pts_prefs", Context.MODE_PRIVATE)
+        prefs.edit().putLong("pts_$userId", pts).apply()
+    }
+
+    /** ثبت زمان پایان آخرین سینک موفق. */
+    fun markSyncCompleted() {
+        getSharedPreferences("sync_pts_prefs", Context.MODE_PRIVATE)
+            .edit().putLong("last_sync_at", System.currentTimeMillis()).apply()
+    }
+
+    /** زمان آخرین سینک موفق (میلی‌ثانیه) یا صفر در صورت نبود سابقه. */
+    fun lastSyncAt(): Long =
+        getSharedPreferences("sync_pts_prefs", Context.MODE_PRIVATE).getLong("last_sync_at", 0L)
+
+    /**
+     * دریافت تجمیعی تغییرات از سرور (اسنپ‌شات کامل یا دلتای مبتنی بر PTS) و اعمال اتمیک آن روی دیتابیس لوکال.
+     * - اگر داده لوکال کاربر خالی باشد، PTS صفر فرستاده می‌شود تا اسنپ‌شات کامل برگردد.
+     * - در صورت hasMore، صفحات بعدی تا سقف [MAX_SYNC_PAGES] ادامه داده می‌شوند.
+     * - در پایان زمان سینک ثبت و [onComplete] روی ترد اصلی فراخوانی می‌شود.
+     */
+    fun fetchUpdatesDifferenceAsync(userId: String, onComplete: ((Boolean) -> Unit)? = null) {
+        if (userId.isBlank()) {
+            onComplete?.invoke(false)
+            return
+        }
+
+        appScope.launch {
+            try {
+                val api = NetworkModule.getApiService()
+                val isDbEmpty = runCatching { db.isLocalDataEmpty(userId) }.getOrDefault(false)
+                var currentPts = if (isDbEmpty) 0L else getLocalPts(userId)
+                var inSnapshot = currentPts <= 0L
+                var snapshotOffset = 0
+                var applied = false
+
+                var page = 0
+                while (page < MAX_SYNC_PAGES) {
+                    page++
+                    val response = api.getSyncDifference(
+                        SyncDifferenceRequest(
+                            userId = userId,
+                            pts = currentPts,
+                            limit = 200,
+                            offset = snapshotOffset
+                        )
+                    )
+                    val diff = response.body()
+                    if (!response.isSuccessful || diff == null) {
+                        Log.w("SyncPTS", "Difference sync failed for $userId: HTTP ${response.code()}")
+                        break
+                    }
+
+                    // اعمال اتمیک داده‌ها در دیتابیس لوکال (استراتژی Merge)
+                    db.applyDifferenceLocally(
+                        userId = userId,
+                        dialogs = diff.dialogs,
+                        entries = diff.entries,
+                        teamMessages = diff.teamMessages,
+                        supportMessages = diff.supportMessages
+                    )
+
+                    // اتصال خودکار تنظیم مدل هوش مصنوعی دریافتی از سرور به مدل فعال لوکال
+                    diff.aiConfig?.let { ai ->
+                        runCatching { db.ensureServerAiModel(ai.provider, ai.modelName, ai.endpoint) }
+                    }
+
+                    applied = true
+
+                    // فاز اسنپ‌شات: پیام‌های تیم با offset صفحه‌بندی می‌شوند و PTS فقط پس از پایان ثبت می‌شود.
+                    if (inSnapshot) {
+                        if (diff.hasMore) {
+                            snapshotOffset += SNAPSHOT_TEAM_PAGE_SIZE
+                            continue
+                        }
+                        inSnapshot = false
+                        currentPts = diff.newPts
+                        saveLocalPts(userId, currentPts)
+                        break
+                    }
+
+                    // فاز دلتا: PTS از سرور گرفته و در صورت وجود صفحهٔ بعد ادامه می‌دهیم.
+                    currentPts = diff.newPts
+                    saveLocalPts(userId, currentPts)
+                    if (!diff.hasMore) break
+                }
+
+                if (applied) markSyncCompleted()
+
+                withContext(Dispatchers.Main) { onComplete?.invoke(applied) }
+            } catch (e: Exception) {
+                Log.e("SyncPTS", "Difference sync failed for $userId", e)
+                withContext(Dispatchers.Main) { onComplete?.invoke(false) }
             }
         }
     }

@@ -3,6 +3,7 @@ import logging
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
@@ -21,6 +22,7 @@ def get_db():
 # مدل‌های ورودی پیام‌ها
 class SyncEntryItem(BaseModel):
     id: str
+    user_id: Optional[str] = None
     person_id: str
     body: str
     kind: str = "text"
@@ -28,6 +30,7 @@ class SyncEntryItem(BaseModel):
     occurred_at: int
     voice_path: Optional[str] = None
     media_path: Optional[str] = None
+    member_id: Optional[str] = None
     target_recipient_id: Optional[str] = None
 
 class SyncPayloadRequest(BaseModel):
@@ -36,6 +39,7 @@ class SyncPayloadRequest(BaseModel):
 # مدل‌های مخاطبین و گروه‌ها
 class SyncPersonItem(BaseModel):
     id: str
+    user_id: Optional[str] = None
     name: str
     phone: Optional[str] = None
     role: Optional[str] = None
@@ -89,15 +93,173 @@ class SyncResponse(BaseModel):
     message: Optional[str] = None
     saved_count: int
 
+# تابع کمکی ثبت رویداد سینک (PTS) برای هر کاربر
+def record_sync_event(
+    db: Session,
+    user_id: str,
+    entity_type: str,
+    entity_id: str,
+    payload: dict,
+    action: str = "upsert"
+) -> int:
+    """درج یک رویداد سینک (PTS) برای کاربر. در صورت نبود user_id معتبر، صفر برمی‌گرداند."""
+    import main
+    clean_uid = str(user_id).strip() if user_id is not None else ""
+    if not clean_uid or clean_uid == "None":
+        return 0
+    event = main.UserSyncEvent(
+        user_id=clean_uid,
+        entity_type=entity_type,
+        entity_id=str(entity_id),
+        action=action,
+        payload=payload,
+        created_at=int(time.time() * 1000)
+    )
+    db.add(event)
+    return 1
+
+# مدل‌های درخواست/پاسخ همگام‌سازی دلتا (getDifference)
+class SyncDifferenceRequest(BaseModel):
+    user_id: str
+    pts: int = 0          # آخرین شماره ترتیبی کلاینت (0 یعنی دریافت اسنپ‌شات کامل)
+    limit: int = 200      # سقف رویدادهای بازگردانده شده در هر درخواست
+    offset: int = 0       # آفست صفحه‌بندی پیام‌های تیم در حالت اسنپ‌شات
+
+class SyncDifferenceResponse(BaseModel):
+    new_pts: int
+    has_more: bool = False
+    dialogs: List[dict] = []
+    entries: List[dict] = []
+    team_messages: List[dict] = []
+    support_messages: List[dict] = []
+    ai_config: Optional[dict] = None
+
+# اندپوینت تجمیعی همگام‌سازی دلتا (مشابه updates.getDifference تلگرام)
+@router.post("/difference", response_model=SyncDifferenceResponse)
+def get_sync_difference(req: SyncDifferenceRequest, db: Session = Depends(get_db)):
+    clean_uid = str(req.user_id).strip() if req.user_id is not None else ""
+    if not clean_uid or clean_uid == "None":
+        raise HTTPException(status_code=400, detail="user_id is required")
+
+    logger.info(f"Sync difference requested: user_id={clean_uid} pts={req.pts} limit={req.limit}")
+
+    from main import UserSyncEvent, Person, Entry, SupportMessage, TeamMessage, TeamMember, AiModel
+
+    # ۱. پیدا کردن سقف رویدادهای کاربر
+    latest_event = db.query(UserSyncEvent.id).filter(
+        UserSyncEvent.user_id == clean_uid
+    ).order_by(UserSyncEvent.id.desc()).first()
+    max_pts = latest_event[0] if latest_event else 0
+
+    # بررسی تنظیمات هوش مصنوعی (مدل فعال سراسری سیستم)
+    active_model = db.query(AiModel).filter(AiModel.active == True).first()
+    ai_cfg = {
+        "provider": "openrouter",
+        "model_name": active_model.name if active_model else "gemini-2.5-flash",
+        "endpoint": active_model.endpoint if active_model else ""
+    } if active_model else None
+
+    # سناریو الف: کلاینت کش ندارد یا اولین بار است وارد می‌شود (pts == 0) -> اسنپ‌شات کامل
+    if req.pts <= 0:
+        people = db.query(Person).filter(Person.user_id == clean_uid).all()
+        person_ids = [p.id for p in people]
+
+        entries = []
+        if person_ids:
+            entries = db.query(Entry).filter(
+                or_(Entry.user_id == clean_uid, Entry.person_id.in_(person_ids))
+            ).order_by(Entry.occurred_at.asc()).all()
+        else:
+            entries = db.query(Entry).filter(Entry.user_id == clean_uid).all()
+
+        support = db.query(SupportMessage).filter(SupportMessage.user_id == clean_uid).all()
+
+        # دریافت پیام‌های تیم‌هایی که کاربر عضو آن‌هاست
+        user_teams = db.query(TeamMember.team_id).filter(TeamMember.user_id == clean_uid).all()
+        team_ids = [t[0] for t in user_teams]
+        team_msgs = []
+        snapshot_has_more = False
+        if team_ids:
+            # آخرین ۱۰۰ پیام تیم را با ترتیب نزولی می‌خوانیم، سپس برای ارسال به ترتیب زمانی صعودی معکوس می‌کنیم
+            latest_team_msgs = db.query(TeamMessage).filter(
+                TeamMessage.team_id.in_(team_ids),
+                or_(TeamMessage.recipient_id.is_(None), TeamMessage.recipient_id == clean_uid, TeamMessage.sender_id == clean_uid)
+            ).order_by(TeamMessage.created_at.desc()).offset(req.offset).limit(100).all()
+            team_msgs = list(reversed(latest_team_msgs))
+            # اگر سقف پر شده باشد یعنی صفحات/پیام‌های قدیمی‌تری هم وجود دارد
+            snapshot_has_more = len(latest_team_msgs) >= 100
+
+        logger.info(
+            f"Sync difference snapshot: user_id={clean_uid} new_pts={max_pts} "
+            f"dialogs={len(people)} entries={len(entries)} teams={len(team_ids)} "
+            f"team_messages={len(team_msgs)} support={len(support)}"
+        )
+
+        return SyncDifferenceResponse(
+            new_pts=max_pts,
+            has_more=snapshot_has_more,
+            dialogs=[{"id": p.id, "user_id": p.user_id, "name": p.name, "phone": p.phone, "role": p.role, "pinned": p.pinned, "created_at": p.created_at, "avatar": p.avatar, "is_group": p.is_group, "saved": p.saved} for p in people],
+            entries=[{"id": e.id, "user_id": e.user_id, "person_id": e.person_id, "body": e.body, "kind": e.kind, "channel": e.channel, "occurred_at": e.occurred_at, "voice_path": e.voice_path, "media_path": e.media_path, "member_id": e.member_id, "target_recipient_id": e.target_recipient_id} for e in entries],
+            team_messages=[{"id": m.id, "team_id": m.team_id, "sender_id": m.sender_id, "content": m.content, "recipient_id": m.recipient_id, "created_at": m.created_at} for m in team_msgs],
+            support_messages=[{"id": s.id, "user_id": s.user_id, "from_admin": s.from_admin, "body": s.body, "kind": s.kind, "created_at": s.created_at} for s in support],
+            ai_config=ai_cfg
+        )
+
+    # سناریو ب: همگام‌سازی دلتا رویدادمحور بر اساس PTS (pts > 0)
+    events_query = db.query(UserSyncEvent).filter(
+        UserSyncEvent.user_id == clean_uid,
+        UserSyncEvent.id > req.pts
+    ).order_by(UserSyncEvent.id.asc()).limit(req.limit + 1).all()
+
+    has_more = len(events_query) > req.limit
+    events = events_query[:req.limit]
+
+    dialogs, entries, team_messages, support_messages = [], [], [], []
+    current_pts = req.pts
+
+    for ev in events:
+        current_pts = max(current_pts, ev.id)
+        p = ev.payload or {}
+        if ev.entity_type == "dialog":
+            dialogs.append(p)
+        elif ev.entity_type == "entry":
+            entries.append(p)
+        elif ev.entity_type == "team_message":
+            team_messages.append(p)
+        elif ev.entity_type == "support":
+            support_messages.append(p)
+
+    logger.info(
+        f"Sync difference delta: user_id={clean_uid} from_pts={req.pts} "
+        f"new_pts={current_pts if events else req.pts} events={len(events)} has_more={has_more}"
+    )
+
+    return SyncDifferenceResponse(
+        new_pts=current_pts if events else req.pts,
+        has_more=has_more,
+        dialogs=dialogs,
+        entries=entries,
+        team_messages=team_messages,
+        support_messages=support_messages,
+        ai_config=ai_cfg
+    )
+
 # ۱. اندپوینت ثبت پیام‌ها در سرور
 @router.post("/entries", response_model=SyncResponse)
 def sync_entries(payload: SyncPayloadRequest, db: Session = Depends(get_db)):
     import main
     Entry = main.Entry
+    Person = main.Person
     try:
         saved = 0
         now_ms = int(time.time() * 1000)
         for item in payload.entries:
+            # بررسی وجود مخاطب/گروه هدف (برای تعیین مالکیت و انتشار گروهی PTS)
+            person = db.query(Person).filter(Person.id == item.person_id).first() if item.person_id else None
+            # تعیین مالکیت: اول از payload، در غیر این صورت از مالک مخاطب مربوطه استخراج می‌شود
+            owner_id = item.user_id
+            if not owner_id and person:
+                owner_id = person.user_id
             existing = db.query(Entry).filter(Entry.id == item.id).first()
             if existing:
                 existing.body = item.body
@@ -106,12 +268,16 @@ def sync_entries(payload: SyncPayloadRequest, db: Session = Depends(get_db)):
                 existing.occurred_at = item.occurred_at
                 existing.voice_path = item.voice_path
                 existing.media_path = item.media_path
+                if item.member_id is not None:
+                    existing.member_id = item.member_id
                 existing.target_recipient_id = item.target_recipient_id
+                if owner_id:
+                    existing.user_id = owner_id
                 existing.updated_at = now_ms
             else:
                 db.add(Entry(
                     id=item.id,
-                    user_id=None,
+                    user_id=owner_id,
                     person_id=item.person_id,
                     body=item.body,
                     kind=item.kind,
@@ -119,11 +285,40 @@ def sync_entries(payload: SyncPayloadRequest, db: Session = Depends(get_db)):
                     occurred_at=item.occurred_at,
                     voice_path=item.voice_path,
                     media_path=item.media_path,
+                    member_id=item.member_id,
                     target_recipient_id=item.target_recipient_id,
                     created_at=now_ms,
                     updated_at=now_ms,
                     pinned=False
                 ))
+            # ثبت رویداد سینک برای مالک پیام (PTS)
+            event_payload = {
+                "id": item.id,
+                "user_id": owner_id,
+                "person_id": item.person_id,
+                "body": item.body,
+                "kind": item.kind,
+                "channel": item.channel,
+                "occurred_at": item.occurred_at,
+                "voice_path": item.voice_path,
+                "media_path": item.media_path,
+                "member_id": item.member_id,
+                "target_recipient_id": item.target_recipient_id,
+            }
+            record_sync_event(db, owner_id, "entry", item.id, event_payload)
+            # اگر پیام در یک گروه/تیم ارسال شده باشد، رویداد برای سایر اعضا هم صادر می‌شود
+            # تا پیام از مسیر دلتای PTS به دستگاه آن‌ها برسد (مکمل حذف مسیر ارسال مستقیم تیم).
+            if person is not None and person.is_group:
+                if item.target_recipient_id:
+                    group_recipients = [item.target_recipient_id]
+                else:
+                    group_recipients = [
+                        m.user_id
+                        for m in db.query(main.TeamMember).filter(main.TeamMember.team_id == item.person_id).all()
+                    ]
+                for uid in set(group_recipients):
+                    if uid and uid != owner_id:
+                        record_sync_event(db, uid, "entry", item.id, event_payload)
             saved += 1
         db.commit()
         return SyncResponse(status="success", message="پیام‌ها با موفقیت در سرور ثبت شدند", saved_count=saved)
@@ -149,9 +344,11 @@ def sync_people(payload: SyncPeoplePayload, db: Session = Depends(get_db)):
                 existing.avatar = item.avatar
                 existing.is_group = item.is_group
                 existing.saved = item.saved
+                existing.user_id = item.user_id if item.user_id else existing.user_id
             else:
                 db.add(Person(
                     id=item.id,
+                    user_id=item.user_id,
                     name=item.name,
                     phone=item.phone,
                     role=item.role,
@@ -161,6 +358,26 @@ def sync_people(payload: SyncPeoplePayload, db: Session = Depends(get_db)):
                     saved=item.saved,
                     created_at=item.created_at
                 ))
+            # ثبت رویداد سینک برای مالک مخاطب (PTS)
+            owner = item.user_id or (existing.user_id if existing else None)
+            record_sync_event(
+                db,
+                owner,
+                "dialog",
+                item.id,
+                {
+                    "id": item.id,
+                    "user_id": owner,
+                    "name": item.name,
+                    "phone": item.phone,
+                    "role": item.role,
+                    "pinned": item.pinned,
+                    "avatar": item.avatar,
+                    "is_group": item.is_group,
+                    "saved": item.saved,
+                    "created_at": item.created_at,
+                },
+            )
             saved += 1
         db.commit()
         return SyncResponse(status="success", message="مخاطبین و گروه‌ها با موفقیت ثبت شدند", saved_count=saved)
@@ -356,6 +573,24 @@ def sync_support_messages(payload: SyncSupportMessagesPayload, db: Session = Dep
                     read_user=item.read_user,
                     created_at=item.created_at
                 ))
+            # ثبت رویداد سینک برای مالک پیام پشتیبانی (PTS)
+            record_sync_event(
+                db,
+                item.user_id,
+                "support",
+                item.id,
+                {
+                    "id": item.id,
+                    "user_id": item.user_id,
+                    "from_admin": item.from_admin,
+                    "body": item.body,
+                    "kind": item.kind,
+                    "path": item.path,
+                    "read_admin": item.read_admin,
+                    "read_user": item.read_user,
+                    "created_at": item.created_at,
+                },
+            )
             saved += 1
         db.commit()
         return SyncResponse(status="success", message="پیام‌های پشتیبانی با موفقیت ثبت شدند", saved_count=saved)

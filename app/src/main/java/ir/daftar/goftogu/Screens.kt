@@ -740,12 +740,13 @@ fun TeamsScreen(
         }
     }
 
-    // سینک خودکار لیست تیم‌ها هنگام ورود به صفحه (فارغ از پلن کاربر)
-    LaunchedEffect(userId) { fetchTeams() }
-
-    // رفرش مجدد هنگام بازگشت به صفحه (onResume) تا تیم‌های جدیدی که کاربر به آن‌ها اضافه شده بلافاصله لود شوند
+    // سینک خودکار (اسنپ‌شات کامل یا دلتای PTS) هنگام ورود و بازگشت به صفحه.
+    // داده‌های تیم و پیام‌های تیمی از طریق همین سینک داخل people و team_messages درج می‌شوند،
+    // بنابراین واکشی رگباری fetchTeams حذف شد و فقط در رفرش دستی (Pull-to-Refresh) اجرا می‌شود.
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
-        scope.launch { fetchTeams() }
+        app.fetchUpdatesDifferenceAsync(userId) { ok ->
+            if (ok) teams = app.db.teams(userId)
+        }
     }
 
     if (teams.isEmpty() && !hasTeamAccess) {
@@ -2911,6 +2912,14 @@ fun ChatsScreen(
     }
 
     val account = app.db.user(userId)
+
+    // سینک تجمیعی واحد (اسنپ‌شات/دلتای PTS) هنگام ورود و بازگشت به صفحه؛ پس از موفقیت لیست محلی بازخوانی می‌شود.
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        app.fetchUpdatesDifferenceAsync(userId) { ok ->
+            if (ok) people = app.db.people(userId)
+        }
+    }
+
     LaunchedEffect(openComposer, draftPhone) {
         if (openComposer) {
             draft = draftPhone
@@ -3659,7 +3668,6 @@ private fun AddPersonSheet(
                     }
                     try {
                         app.db.addPerson(userId, name, phone, role, avatar)
-                        if (!isDeviceOnline(context)) app.db.enqueue("person", name)
                         onSaved()
                     } catch (e: Exception) {
                         onError(e.message ?: "خطا")
@@ -4762,7 +4770,10 @@ fun ThreadScreen(app: App, userId: String, personId: String, back: () -> Unit, o
     val user = remember(userId) { app.db.getOrCreateUser(userId) }
     var person by remember(personId) { mutableStateOf(app.db.people(userId).find { it.id == personId }) }
     val personTitle = person?.name ?: app.db.personName(personId)
-    var allEntries by remember { mutableStateOf(app.db.entries(personId)) }
+    // برای گروه/تیم، پیام‌های دریافتی از اعضای دیگر (team_messages) نیز با entries ادغام می‌شود
+    fun reloadEntries(): List<Entry> =
+        if (person?.isGroup == true) app.db.getTeamUnifiedEntries(personId, userId) else app.db.entries(personId)
+    var allEntries by remember { mutableStateOf(reloadEntries()) }
     var entries = if (person?.isGroup == true) {
         allEntries.filter { it.userId == userId || it.targetRecipientId == null || it.targetRecipientId == userId }
     } else allEntries
@@ -4855,21 +4866,6 @@ fun ThreadScreen(app: App, userId: String, personId: String, back: () -> Unit, o
     var confirmTeamExit by remember { mutableStateOf(false) }
     var teamExitBusy by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
-    // ارسال پیام به سرور برای چت تیم (همگانی یا خصوصی هدفمند)
-    fun dispatchTeamMessage(content: String) {
-        if (person?.isGroup != true) return
-        val recipient = selectedRecipientId()
-        scope.launch {
-            runCatching {
-                withContext(Dispatchers.IO) {
-                    NetworkModule.getApiService().sendTeamMessage(
-                        personId,
-                        SendTeamMessageRequest(senderId = userId, content = content, recipientId = recipient),
-                    )
-                }
-            }
-        }
-    }
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
         runCatching { photoCrop = context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) } }.onFailure { error = it.message ?: "عکس خوانده نشد" }
@@ -4895,9 +4891,7 @@ fun ThreadScreen(app: App, userId: String, personId: String, back: () -> Unit, o
             }
             try {
                 app.db.addEntry(user, personId, saved.second, "file", channel, System.currentTimeMillis(), mediaPath = saved.first, memberId = memberId, targetRecipientId = selectedRecipientId())
-                if (!isDeviceOnline(context)) app.db.enqueue("entry", saved.second)
-                dispatchTeamMessage(saved.second)
-                allEntries = app.db.entries(personId)
+                allEntries = reloadEntries()
                 attachMenu = false
             } catch (e: Exception) {
                 val msg = e.message ?: ""
@@ -4979,7 +4973,7 @@ fun ThreadScreen(app: App, userId: String, personId: String, back: () -> Unit, o
                     ) {
                         JournalBubble(entry, personTitle, currentUserId = userId, memberNameFor = { uid -> members.firstOrNull { it.userId == uid }?.name }, onPin = {
                             app.db.setEntryPinned(entry.id, !entry.pinned)
-                            allEntries = app.db.entries(personId)
+                            allEntries = reloadEntries()
                         }, onDelete = {
                             // بستن منو بلافاصله
                             // حذف از لیست محلی بلافاصله برای ری‌رندر فوری
@@ -5013,8 +5007,7 @@ fun ThreadScreen(app: App, userId: String, personId: String, back: () -> Unit, o
                     stopVoice(app, user, personId) { path ->
                         runCatching {
                             app.db.addEntry(user, personId, "", "voice", channel, System.currentTimeMillis(), path, memberId = memberId, targetRecipientId = selectedRecipientId())
-                            dispatchTeamMessage("پیام صوتی")
-                            allEntries = app.db.entries(personId)
+                            allEntries = reloadEntries()
                         }.onFailure { error = it.message ?: "خطا" }
                     }
                 })
@@ -5069,12 +5062,10 @@ fun ThreadScreen(app: App, userId: String, personId: String, back: () -> Unit, o
                             val sendKind = if (pendingMedia != null) pendingKind else kind
                             val caption = body.ifBlank { if (pendingKind == "video") "فیلم" else if (pendingMedia != null) "عکس" else "" }
                             app.db.addEntry(user, personId, caption, sendKind, channel, System.currentTimeMillis(), mediaPath = pendingMedia, memberId = memberId, targetRecipientId = selectedRecipientId())
-                            if (!isDeviceOnline(context)) app.db.enqueue("entry", caption)
-                            dispatchTeamMessage(caption)
                             pendingMedia = null
                         }
                         body = ""
-                        allEntries = app.db.entries(personId)
+                        allEntries = reloadEntries()
                         upgrade = false
                     } catch (e: Exception) {
                         val msg = e.message ?: ""
@@ -5255,9 +5246,7 @@ fun ThreadScreen(app: App, userId: String, personId: String, back: () -> Unit, o
                     if (saved !== bitmap) saved.recycle()
                     val body = caption.ifBlank { "عکس" }
                     app.db.addEntry(user, personId, body, "photo", channel, System.currentTimeMillis(), mediaPath = dest.absolutePath, memberId = memberId, targetRecipientId = selectedRecipientId())
-                    if (!isDeviceOnline(context)) app.db.enqueue("entry", "عکس")
-                    dispatchTeamMessage(body)
-                    allEntries = app.db.entries(personId)
+                    allEntries = reloadEntries()
                     photoCrop = null
                 } catch (e: Exception) {
                     val msg = e.message ?: ""
@@ -5876,8 +5865,27 @@ private fun askAboutChat(app: App, userId: String, personId: String, turns: List
         error("سقف خلاصه‌ساز: شما به سقف مجاز ۵ خلاصه‌سازی در ماه رسیده‌اید. برای استفاده نامحدود ارتقا دهید.")
     }
 
-    val person = app.db.people(userId).find { it.id == personId } ?: error("گفتگو پیدا نشد")
-    val transcript = app.db.entries(personId).takeLast(80).joinToString("\n") { entry ->
+    val person = app.db.people(userId).find { it.id == personId }
+        ?: if (personId == AppConstants.AI_GENERAL_ASSISTANT_ID) {
+            Person(
+                id = AppConstants.AI_GENERAL_ASSISTANT_ID,
+                name = AppConstants.AI_GENERAL_ASSISTANT_NAME,
+                phone = "",
+                role = "assistant",
+                pinned = false,
+                lastBody = "",
+                lastAt = 0L,
+                lastKind = null,
+                lastChannel = null,
+                hasNote = false,
+                isGroup = false,
+            )
+        } else {
+            error("گفتگو پیدا نشد")
+        }
+    val transcriptSource =
+        if (person.isGroup) app.db.getTeamUnifiedEntries(personId, userId) else app.db.entries(personId)
+    val transcript = transcriptSource.takeLast(80).joinToString("\n") { entry ->
         val time = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date(entry.occurredAt))
         val kind = if (entry.kind == "note") "یادداشت" else "صحبت"
         val text = entry.body.ifBlank { if (entry.voicePath != null) "[ویس]" else "" }

@@ -148,6 +148,11 @@ interface ApiService {
     suspend fun sendAdminAiMessage(
         @Body req: AdminAiChatRequest
     ): Response<AdminAiChatResponse>
+
+    @POST("sync/difference")
+    suspend fun getSyncDifference(
+        @Body request: SyncDifferenceRequest
+    ): Response<SyncDifferenceResponse>
 }
 
 // --- مدل‌های احراز هویت ---
@@ -210,6 +215,7 @@ data class SyncResponse(
 
 data class SyncEntryItem(
     @SerializedName("id") val id: String,
+    @SerializedName("user_id") val userId: String? = null,
     @SerializedName("person_id") val personId: String,
     @SerializedName("body") val body: String,
     @SerializedName("kind") val kind: String,
@@ -217,6 +223,7 @@ data class SyncEntryItem(
     @SerializedName("occurred_at") val occurredAt: Long,
     @SerializedName("voice_path") val voicePath: String? = null,
     @SerializedName("media_path") val mediaPath: String? = null,
+    @SerializedName("member_id") val memberId: String? = null,
     @SerializedName("target_recipient_id") val targetRecipientId: String? = null
 )
 
@@ -227,6 +234,7 @@ data class SyncPayloadRequest(
 // --- مدل‌های مخاطبین و گروه‌ها ---
 data class SyncPersonItem(
     @SerializedName("id") val id: String,
+    @SerializedName("user_id") val userId: String? = null,
     @SerializedName("name") val name: String,
     @SerializedName("phone") val phone: String? = null,
     @SerializedName("role") val role: String? = null,
@@ -482,3 +490,36 @@ data class TeamMessageDto(
 )
 
 // --- Endpoints Teams ---
+
+// --- مدل‌های همگام‌سازی دلتا (PTS / getDifference) ---
+data class SyncDifferenceRequest(
+    @SerializedName("user_id") val userId: String,
+    @SerializedName("pts") val pts: Long = 0L,
+    @SerializedName("limit") val limit: Int = 200,
+    @SerializedName("offset") val offset: Int = 0
+)
+
+data class SyncTeamMessageItem(
+    @SerializedName("id") val id: String,
+    @SerializedName("team_id") val teamId: String,
+    @SerializedName("sender_id") val senderId: String,
+    @SerializedName("content") val content: String,
+    @SerializedName("recipient_id") val recipientId: String? = null,
+    @SerializedName("created_at") val createdAt: Long
+)
+
+data class SyncAiConfigItem(
+    @SerializedName("provider") val provider: String,
+    @SerializedName("model_name") val modelName: String,
+    @SerializedName("endpoint") val endpoint: String? = null
+)
+
+data class SyncDifferenceResponse(
+    @SerializedName("new_pts") val newPts: Long,
+    @SerializedName("has_more") val hasMore: Boolean = false,
+    @SerializedName("dialogs") val dialogs: List<SyncPersonItem> = emptyList(),
+    @SerializedName("entries") val entries: List<SyncEntryItem> = emptyList(),
+    @SerializedName("team_messages") val teamMessages: List<SyncTeamMessageItem> = emptyList(),
+    @SerializedName("support_messages") val supportMessages: List<SyncSupportMessageItem> = emptyList(),
+    @SerializedName("ai_config") val aiConfig: SyncAiConfigItem? = null
+)

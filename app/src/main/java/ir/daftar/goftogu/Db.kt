@@ -191,6 +191,8 @@ class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", 
         db.execSQL("CREATE TABLE IF NOT EXISTS export_logs (id TEXT PRIMARY KEY, user_id TEXT, timestamp INTEGER, file_type TEXT, target_name TEXT, records_count INTEGER)")
         db.execSQL("CREATE TABLE IF NOT EXISTS teams (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, creator_id TEXT, created_at INTEGER NOT NULL)")
         db.execSQL("CREATE TABLE IF NOT EXISTS team_members (id TEXT PRIMARY KEY, team_id TEXT, user_id TEXT, role TEXT DEFAULT 'member', joined_at INTEGER NOT NULL)")
+        db.execSQL("CREATE TABLE IF NOT EXISTS team_messages (id TEXT PRIMARY KEY, team_id TEXT NOT NULL, sender_id TEXT NOT NULL, content TEXT NOT NULL, recipient_id TEXT, created_at INTEGER NOT NULL)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_team_messages_team ON team_messages (team_id, created_at)")
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -259,6 +261,8 @@ class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", 
         db.execSQL("CREATE TABLE IF NOT EXISTS support_messages (id TEXT PRIMARY KEY, user_id TEXT, from_admin INTEGER NOT NULL DEFAULT 0, body TEXT, kind TEXT, path TEXT, read_admin INTEGER NOT NULL DEFAULT 0, read_user INTEGER NOT NULL DEFAULT 0, created_at INTEGER)")
         db.execSQL("CREATE TABLE IF NOT EXISTS teams (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, creator_id TEXT, created_at INTEGER NOT NULL)")
         db.execSQL("CREATE TABLE IF NOT EXISTS team_members (id TEXT PRIMARY KEY, team_id TEXT, user_id TEXT, role TEXT DEFAULT 'member', joined_at INTEGER NOT NULL)")
+        db.execSQL("CREATE TABLE IF NOT EXISTS team_messages (id TEXT PRIMARY KEY, team_id TEXT NOT NULL, sender_id TEXT NOT NULL, content TEXT NOT NULL, recipient_id TEXT, created_at INTEGER NOT NULL)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_team_messages_team ON team_messages (team_id, created_at)")
     }
 
     override fun onOpen(db: SQLiteDatabase) {
@@ -274,6 +278,144 @@ class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", 
                 db.execSQL("ALTER TABLE users ADD COLUMN tokens_used INTEGER NOT NULL DEFAULT 0")
             }
         } catch (_: Exception) {}
+        // اطمینان از وجود جدول team_messages برای نصب‌های قدیمی (بدون نیاز به Clear Data)
+        try {
+            db.execSQL("CREATE TABLE IF NOT EXISTS team_messages (id TEXT PRIMARY KEY, team_id TEXT NOT NULL, sender_id TEXT NOT NULL, content TEXT NOT NULL, recipient_id TEXT, created_at INTEGER NOT NULL)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS idx_team_messages_team ON team_messages (team_id, created_at)")
+        } catch (_: Exception) {}
+    }
+
+    /** بررسی وجود یک سطر بر اساس کلید اصلی (id). */
+    private fun rowExists(db: SQLiteDatabase, table: String, id: String): Boolean =
+        db.rawQuery("SELECT 1 FROM $table WHERE id=? LIMIT 1", arrayOf(id)).use { it.moveToFirst() }
+
+    /**
+     * درج/به‌روزرسانی ترکیبی (Merge) یک سطر:
+     * - اگر سطر از قبل موجود باشد، فقط ستون‌های دریافتی از سرور UPDATE می‌شوند تا ستون‌های مختص لوکال
+     *   (pinned / archived / creator_id / path / read_admin / read_user / created_at / updated_at) از دست نروند.
+     * - اگر سطر جدید باشد، ستون‌های سروری به همراه مقادیر پیش‌فرض لوکال درج می‌شوند.
+     * این جایگزین ایمن CONFLICT_REPLACE است که تمام سطر را حذف و از نو درج می‌کرد.
+     */
+    private fun mergeRow(
+        db: SQLiteDatabase,
+        table: String,
+        id: String,
+        serverValues: ContentValues,
+        insertDefaults: ContentValues
+    ) {
+        if (rowExists(db, table, id)) {
+            db.update(table, serverValues, "id=?", arrayOf(id))
+        } else {
+            val cv = ContentValues(serverValues)
+            cv.putAll(insertDefaults)
+            db.insertWithOnConflict(table, null, cv, SQLiteDatabase.CONFLICT_REPLACE)
+        }
+    }
+
+    /** آیا داده محلی کاربر خالی است؟ (برای تصمیم‌گیری بین اسنپ‌شات کامل و دلتا در زمان دریافت PTS) */
+    fun isLocalDataEmpty(userId: String): Boolean {
+        if (userId.isBlank()) return true
+        val hasPeople = readableDatabase.rawQuery("SELECT 1 FROM people WHERE user_id=? LIMIT 1", arrayOf(userId)).use { it.moveToFirst() }
+        if (hasPeople) return false
+        val hasEntries = readableDatabase.rawQuery("SELECT 1 FROM entries WHERE user_id=? LIMIT 1", arrayOf(userId)).use { it.moveToFirst() }
+        return !hasEntries
+    }
+
+    /**
+     * اعمال اتمیک تمام داده‌های سینک در قالب یک تراکنش واحد دیتابیس.
+     * از استراتژی Merge استفاده می‌شود تا ستون‌هایی که در سرور نگهداری نمی‌شوند ریست نشوند.
+     */
+    fun applyDifferenceLocally(
+        userId: String,
+        dialogs: List<SyncPersonItem>,
+        entries: List<SyncEntryItem>,
+        teamMessages: List<SyncTeamMessageItem>,
+        supportMessages: List<SyncSupportMessageItem>
+    ) {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            // ۱. گفتگوها / مخاطبین (people) — preservation: archived, creator_id
+            for (p in dialogs) {
+                val serverValues = ContentValues().apply {
+                    put("id", p.id)
+                    if (!p.userId.isNullOrBlank()) put("user_id", p.userId)
+                    put("name", p.name)
+                    if (!p.phone.isNullOrBlank()) put("phone", p.phone)
+                    if (!p.role.isNullOrBlank()) put("role", p.role)
+                    put("pinned", if (p.pinned) 1 else 0)
+                    put("created_at", p.createdAt)
+                    if (p.avatar != null) put("avatar", p.avatar)
+                    put("is_group", if (p.isGroup) 1 else 0)
+                    put("saved", if (p.saved) 1 else 0)
+                }
+                val insertDefaults = ContentValues().apply {
+                    put("user_id", p.userId ?: userId)
+                    put("archived", 0)
+                    putNull("creator_id")
+                }
+                mergeRow(db, "people", p.id, serverValues, insertDefaults)
+            }
+
+            // ۲. پیام‌ها و یادداشت‌ها (entries) — preservation: pinned, created_at, updated_at
+            val now = System.currentTimeMillis()
+            for (e in entries) {
+                val serverValues = ContentValues().apply {
+                    put("id", e.id)
+                    if (!e.userId.isNullOrBlank()) put("user_id", e.userId)
+                    put("person_id", e.personId)
+                    put("body", e.body)
+                    put("kind", e.kind)
+                    put("channel", e.channel)
+                    put("occurred_at", e.occurredAt)
+                    if (e.voicePath != null) put("voice_path", e.voicePath)
+                    if (e.mediaPath != null) put("media_path", e.mediaPath)
+                    if (e.memberId != null) put("member_id", e.memberId)
+                    if (e.targetRecipientId != null) put("target_recipient_id", e.targetRecipientId)
+                }
+                val insertDefaults = ContentValues().apply {
+                    put("user_id", e.userId ?: userId)
+                    put("pinned", 0)
+                    put("created_at", if (e.occurredAt > 0) e.occurredAt else now)
+                    put("updated_at", now)
+                }
+                mergeRow(db, "entries", e.id, serverValues, insertDefaults)
+            }
+
+            // ۳. پیام‌های تیمی (team_messages) — همه ستون‌ها از سرور می‌آید
+            for (tm in teamMessages) {
+                val serverValues = ContentValues().apply {
+                    put("id", tm.id)
+                    put("team_id", tm.teamId)
+                    put("sender_id", tm.senderId)
+                    put("content", tm.content)
+                    if (tm.recipientId != null) put("recipient_id", tm.recipientId)
+                    put("created_at", tm.createdAt)
+                }
+                mergeRow(db, "team_messages", tm.id, serverValues, ContentValues())
+            }
+
+            // ۴. پیام‌های پشتیبانی (support_messages) — preservation: path, read_admin, read_user
+            for (sm in supportMessages) {
+                val serverValues = ContentValues().apply {
+                    put("id", sm.id)
+                    put("user_id", sm.userId)
+                    put("from_admin", if (sm.fromAdmin) 1 else 0)
+                    put("body", sm.body)
+                    put("kind", sm.kind)
+                    put("created_at", sm.createdAt)
+                }
+                val insertDefaults = ContentValues().apply {
+                    put("read_admin", if (sm.fromAdmin) 1 else 0)
+                    put("read_user", if (sm.fromAdmin) 0 else 1)
+                }
+                mergeRow(db, "support_messages", sm.id, serverValues, insertDefaults)
+            }
+
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
     }
 
     fun enqueue(kind: String, payload: String) {
@@ -822,6 +964,7 @@ class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", 
         // افزودن به صف outbox برای ارسال به سرور دارکوب
         val personJson = org.json.JSONObject().apply {
             put("id", id)
+            put("user_id", userId)
             put("name", name.trim())
             put("phone", mobile)
             put("role", role.trim())
@@ -982,16 +1125,65 @@ class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", 
         return cursor.use { if (it.moveToFirst()) it.getString(0) else "" }
     }
 
+    /**
+     * لیست یکپارچهٔ پیام‌های یک تیم/گروه:
+     * ۱) پیام‌های دریافتی از سایر اعضا که از مسیر سینک PTS در جدول team_messages درج شده‌اند.
+     * ۲) پیام‌های لوکال خودِ کاربر و پیام‌های در صف ارسال که در جدول entries قرار دارند.
+     * در انتها بر اساس زمان مرتب‌سازی صعودی می‌شود.
+     */
+    fun getTeamUnifiedEntries(teamId: String, currentUserId: String): List<Entry> {
+        val result = mutableListOf<Entry>()
+        val cursor = readableDatabase.rawQuery(
+            "SELECT id, sender_id, content, recipient_id, created_at FROM team_messages " +
+                "WHERE team_id = ? AND (recipient_id IS NULL OR recipient_id = ? OR sender_id = ?) " +
+                "ORDER BY created_at ASC",
+            arrayOf(teamId, currentUserId, currentUserId),
+        )
+        cursor.use {
+            while (it.moveToNext()) {
+                result.add(
+                    Entry(
+                        id = it.getString(0),
+                        userId = it.getString(1),
+                        body = it.getString(2) ?: "",
+                        kind = "text",
+                        channel = "manual",
+                        occurredAt = it.getLong(4),
+                        targetRecipientId = if (it.isNull(3)) null else it.getString(3),
+                    )
+                )
+            }
+        }
+
+        // پیام‌های لوکال موجود در entries (شامل پیام‌های خودِ کاربر در صف ارسال)
+        val existingIds = result.map { it.id }.toSet()
+        for (e in entries(teamId)) {
+            if (e.id !in existingIds) result.add(e)
+        }
+
+        return result.sortedBy { it.occurredAt }
+    }
+
     fun teams(userId: String): List<Team> {
         val cursor = readableDatabase.rawQuery(
             """SELECT p.id, p.name, p.role, p.created_at,
                       (SELECT COUNT(*) FROM members m WHERE m.person_id = p.id),
-                      (SELECT body FROM entries e WHERE e.person_id = p.id ORDER BY e.occurred_at DESC LIMIT 1),
-                      (SELECT occurred_at FROM entries e WHERE e.person_id = p.id ORDER BY e.occurred_at DESC LIMIT 1)
+                      (SELECT body FROM (
+                           SELECT body AS body, occurred_at AS ts FROM entries WHERE person_id = p.id
+                           UNION ALL
+                           SELECT content AS body, created_at AS ts FROM team_messages
+                           WHERE team_id = p.id AND (recipient_id IS NULL OR recipient_id = ? OR sender_id = ?)
+                       ) ORDER BY ts DESC LIMIT 1),
+                      (SELECT ts FROM (
+                           SELECT occurred_at AS ts FROM entries WHERE person_id = p.id
+                           UNION ALL
+                           SELECT created_at AS ts FROM team_messages
+                           WHERE team_id = p.id AND (recipient_id IS NULL OR recipient_id = ? OR sender_id = ?)
+                       ) ORDER BY ts DESC LIMIT 1)
                FROM people p
                WHERE p.user_id = ? AND p.is_group = 1
                ORDER BY created_at DESC""",
-            arrayOf(userId)
+            arrayOf(userId, userId, userId, userId)
         )
         val list = mutableListOf<Team>()
         cursor.use {
@@ -1044,11 +1236,16 @@ val now = System.currentTimeMillis()
 
 val payloadJson = org.json.JSONObject().apply {
     put("id", entryId)
+    put("user_id", user.id)
     put("person_id", personId)
     put("body", body.trim())
     put("kind", kind)
     put("channel", channel)
     put("occurred_at", occurredAt)
+    if (voicePath != null) put("voice_path", voicePath)
+    if (mediaPath != null) put("media_path", mediaPath)
+    if (memberId != null) put("member_id", memberId)
+    if (targetRecipientId != null) put("target_recipient_id", targetRecipientId)
 }.toString()
 
 enqueue("entry", payloadJson)
@@ -1427,6 +1624,50 @@ writableDatabase.insert("entries", null, ContentValues().apply {
         try {
             db.execSQL("UPDATE ai_models SET active=0")
             db.update("ai_models", ContentValues().apply { put("active", 1) }, "id=?", arrayOf(id))
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+    }
+
+    /**
+     * ثبت/فعال‌سازی مدل هوش مصنوعی اعلامی از سرور (دریافتی از sync/difference).
+     * اگر مدلی با همان model_id از قبل موجود باشد فقط فعال می‌شود؛ در غیر این صورت سطر جدیدی
+     * ساخته و به‌عنوان مدل فعال ست می‌شود. چون منبع این تنظیم سرور است، به outbox ارسال نمی‌شود.
+     */
+    fun ensureServerAiModel(provider: String, modelName: String, endpoint: String?) {
+        val cleanModel = modelName.trim()
+        if (cleanModel.isBlank()) return
+
+        val existing = models().firstOrNull { it.modelId.equals(cleanModel, ignoreCase = true) }
+        if (existing != null) {
+            if (!existing.active) activateModel(existing.id)
+            return
+        }
+
+        val resolvedEndpoint = endpoint?.trim().takeUnless { it.isNullOrBlank() }
+            ?: models().firstOrNull()?.endpoint?.takeIf { it.isNotBlank() }
+            ?: "https://openrouter.ai/api/v1"
+        val apiKey = models().firstOrNull { it.apiKey.isNotBlank() }?.apiKey
+            ?: BuildConfig.OPENROUTER_KEY.trim()
+        if (apiKey.isBlank()) return
+
+        val newId = "server:${provider.trim().ifBlank { "openrouter" }}:$cleanModel"
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            db.execSQL("UPDATE ai_models SET active=0")
+            db.insertWithOnConflict("ai_models", null, ContentValues().apply {
+                put("id", newId)
+                put("name", cleanModel)
+                put("endpoint", resolvedEndpoint)
+                put("model_id", cleanModel)
+                put("api_key", apiKey)
+                put("input_cost", 0.0)
+                put("output_cost", 0.0)
+                put("active", 1)
+                put("created_at", System.currentTimeMillis())
+            }, SQLiteDatabase.CONFLICT_REPLACE)
             db.setTransactionSuccessful()
         } finally {
             db.endTransaction()

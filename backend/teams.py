@@ -1,7 +1,6 @@
 import logging
 import time
 import uuid
-import logging
 from typing import List, Optional
 from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException, Header, status
@@ -480,7 +479,9 @@ def get_team_messages(
             )
         )
 
-    messages = query.order_by(TeamMessage.created_at.asc()).offset(skip).limit(limit).all()
+    # آخرین پیام‌ها را با ترتیب نزولی می‌خوانیم، سپس برای نمایش به ترتیب زمانی صعودی معکوس می‌کنیم
+    messages = query.order_by(TeamMessage.created_at.desc()).offset(skip).limit(limit).all()
+    messages = list(reversed(messages))
 
     return [
         TeamMessageDto(
@@ -531,8 +532,30 @@ def send_team_message(
         created_at=int(time.time() * 1000)
     )
     db.add(message)
+
+    # ثبت رویداد سینک (PTS) برای اعضای تیم داخل همان تراکنش پیش از commit
+    # تا در صورت بروز خطا کل عملیات منسجم بماند و نیازی به rollback بی‌اثر بعد از commit نباشد.
+    from sync import record_sync_event
+    if req.recipient_id:
+        recipients = [req.recipient_id]
+    else:
+        recipients = [
+            m.user_id
+            for m in db.query(TeamMember).filter(TeamMember.team_id == team_id).all()
+        ]
+    event_payload = {
+        "id": message.id,
+        "team_id": message.team_id,
+        "sender_id": message.sender_id,
+        "content": message.content,
+        "recipient_id": message.recipient_id,
+        "created_at": message.created_at,
+    }
+    for uid in set(recipients):
+        record_sync_event(db, uid, "team_message", message.id, event_payload, "upsert")
+
     db.commit()
-    
+
     return TeamMessageDto(
         id=message.id,
         team_id=message.team_id,

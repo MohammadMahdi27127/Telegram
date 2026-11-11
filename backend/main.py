@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException
 from sqlalchemy import (
-    Column, String, Integer, BigInteger, Boolean, Float, Text, create_engine, text
+    Column, String, Integer, BigInteger, Boolean, Float, Text, JSON, create_engine, text
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
@@ -80,7 +80,7 @@ class User(Base):
 class Person(Base):
     __tablename__ = "people"
     id = Column(String, primary_key=True)
-    user_id = Column(String, index=True)
+    user_id = Column(String, index=True, nullable=True)
     name = Column(String)
     phone = Column(String)
     role = Column(String)
@@ -93,8 +93,8 @@ class Person(Base):
 class Entry(Base):
     __tablename__ = "entries"
     id = Column(String, primary_key=True)
-    user_id = Column(String, index=True)
-    person_id = Column(String, index=True)
+    user_id = Column(String, index=True, nullable=True)
+    person_id = Column(String, index=True, nullable=True)
     body = Column(Text)
     kind = Column(String)
     channel = Column(String)
@@ -242,54 +242,95 @@ class TeamMessage(Base):
     recipient_id = Column(String, nullable=True, default=None)  # None = Broadcast to all
     created_at = Column(BigInteger, nullable=False, default=lambda: int(time.time() * 1000))
 
+class UserSyncEvent(Base):
+    """رویدادهای سینک مبتنی بر PTS (مشابه تلگرام) برای هر کاربر."""
+    __tablename__ = "user_sync_events"
+    id = Column(BigInteger, primary_key=True, autoincrement=True)  # همان شماره ترتیبی PTS
+    user_id = Column(String, index=True, nullable=False)
+    entity_type = Column(String, nullable=False)  # 'dialog', 'entry', 'team_message', 'support', 'ai_config'
+    entity_id = Column(String, nullable=False)
+    action = Column(String, default="upsert")     # 'upsert' یا 'delete'
+    payload = Column(JSON, nullable=False)        # محتوای کامل شیء برای ارسال فوری به کلاینت
+    created_at = Column(BigInteger, default=lambda: int(time.time() * 1000), index=True)
+
 # ساخت جداول و اعمال دستورات SQL با استفاده از text()
 def init_db():
+    logger.info("Initializing database tables...")
     try:
-        logger.info("Initializing database tables...")
         Base.metadata.create_all(bind=engine)
-        
-        db = SessionLocal()
-        try:
-            # استفاده استاندارد از text() برای سازگاری با SQLAlchemy 2.0+
-            db.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS tokens_used BIGINT DEFAULT 0;"))
-            db.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS username VARCHAR(64) UNIQUE;"))
-            
-            db.execute(text("""
-                CREATE TABLE IF NOT EXISTS admin_ai_chats (
-                    id VARCHAR(64) PRIMARY KEY,
-                    admin_id VARCHAR(64) NOT NULL,
-                    role VARCHAR(16) NOT NULL,
-                    content TEXT NOT NULL,
-                    created_at BIGINT NOT NULL
-                );
-            """))
-            db.execute(text("CREATE INDEX IF NOT EXISTS idx_admin_ai_chats_admin_id ON admin_ai_chats(admin_id);"))
-            
-            db.execute(text("""
-                CREATE TABLE IF NOT EXISTS team_messages (
-                    id VARCHAR(64) PRIMARY KEY,
-                    team_id VARCHAR(64) NOT NULL,
-                    sender_id VARCHAR(64) NOT NULL,
-                    content TEXT NOT NULL,
-                    recipient_id VARCHAR(64),
-                    created_at BIGINT NOT NULL
-                );
-            """))
-            db.execute(text("ALTER TABLE team_messages ADD COLUMN IF NOT EXISTS recipient_id VARCHAR(64);"))
-            db.execute(text("CREATE INDEX IF NOT EXISTS idx_team_messages_team_id ON team_messages(team_id);"))
-            db.execute(text("CREATE INDEX IF NOT EXISTS idx_team_messages_created_at ON team_messages(created_at);"))
-            
-            db.commit()
-            logger.info("Database migrations executed successfully.")
-        except Exception as e:
-            logger.warning(f"Could not add/update columns: {e}")
-            db.rollback()
-        finally:
-            db.close()
-        
-        logger.info("Database tables created successfully.")
     except Exception as e:
-        logger.error(f"Database initialization failed: {e}")
+        logger.error(f"Database initialization failed (create_all): {e}")
+        return
+
+    ddl_statements = [
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS tokens_used BIGINT DEFAULT 0;",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS username VARCHAR(64) UNIQUE;",
+        """
+            CREATE TABLE IF NOT EXISTS admin_ai_chats (
+                id VARCHAR(64) PRIMARY KEY,
+                admin_id VARCHAR(64) NOT NULL,
+                role VARCHAR(16) NOT NULL,
+                content TEXT NOT NULL,
+                created_at BIGINT NOT NULL
+            );
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_admin_ai_chats_admin_id ON admin_ai_chats(admin_id);",
+        """
+            CREATE TABLE IF NOT EXISTS team_messages (
+                id VARCHAR(64) PRIMARY KEY,
+                team_id VARCHAR(64) NOT NULL,
+                sender_id VARCHAR(64) NOT NULL,
+                content TEXT NOT NULL,
+                recipient_id VARCHAR(64),
+                created_at BIGINT NOT NULL
+            );
+        """,
+        "ALTER TABLE team_messages ADD COLUMN IF NOT EXISTS recipient_id VARCHAR(64);",
+        "CREATE INDEX IF NOT EXISTS idx_team_messages_team_id ON team_messages(team_id);",
+        "CREATE INDEX IF NOT EXISTS idx_team_messages_created_at ON team_messages(created_at);",
+    ]
+
+    index_statements = [
+        "CREATE INDEX IF NOT EXISTS ix_people_user_id ON people (user_id);",
+        "CREATE INDEX IF NOT EXISTS ix_entries_user_id ON entries (user_id);",
+        "CREATE INDEX IF NOT EXISTS ix_entries_person_id ON entries (person_id);",
+        "CREATE INDEX IF NOT EXISTS ix_team_messages_team_created ON team_messages (team_id, created_at);"
+    ]
+
+    # هر دستور DDL در یک تراکنش مستقل اجرا می‌شود تا شکست یکی، بقیه را rollback نکند
+    for stmt in ddl_statements + index_statements:
+        try:
+            with engine.connect() as conn:
+                conn.execute(text(stmt))
+                conn.commit()
+        except Exception as e:
+            logger.warning(f"Migration notice for [{stmt.strip()[:60]}]: {e}")
+
+    # مایگریشن جدول رویدادهای سینک (PTS) - بلاک مستقل
+    sync_event_stmts = [
+        """
+        CREATE TABLE IF NOT EXISTS user_sync_events (
+            id BIGSERIAL PRIMARY KEY,
+            user_id VARCHAR NOT NULL,
+            entity_type VARCHAR NOT NULL,
+            entity_id VARCHAR NOT NULL,
+            action VARCHAR DEFAULT 'upsert',
+            payload JSONB NOT NULL,
+            created_at BIGINT
+        );
+        """,
+        "CREATE INDEX IF NOT EXISTS ix_sync_user_pts ON user_sync_events (user_id, id);"
+    ]
+
+    for stmt in sync_event_stmts:
+        try:
+            with engine.connect() as conn:
+                conn.execute(text(stmt))
+                conn.commit()
+        except Exception as e:
+            logger.warning(f"SyncEvent migration notice: {e}")
+
+    logger.info("Database tables created successfully.")
 
 def hash_password(password: str, salt: str) -> str:
     return hashlib.sha256(f"{salt}{password}".encode()).hexdigest()
