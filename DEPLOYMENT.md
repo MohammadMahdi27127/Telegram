@@ -3,7 +3,7 @@
 ## Prerequisites
 
 - Docker Engine with the Compose plugin
-- A strong PostgreSQL password
+- A strong URL-safe PostgreSQL password
 
 ## First run
 
@@ -13,7 +13,12 @@
    cp .env.example .env
    ```
 
-2. Edit `.env` and replace `POSTGRES_PASSWORD` with a long random value.
+2. Generate a URL-safe password and put it in `.env`:
+
+   ```bash
+   openssl rand -hex 32
+   ```
+
 3. Validate the Compose configuration:
 
    ```bash
