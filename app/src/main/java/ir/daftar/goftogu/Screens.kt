@@ -5,7 +5,6 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.provider.ContactsContract
-import android.util.Log
 import java.net.HttpURLConnection
 import java.net.URL
 import java.text.SimpleDateFormat
@@ -14,14 +13,11 @@ import java.util.Locale
 import java.util.UUID
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
@@ -45,20 +41,16 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.absoluteOffset
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -74,7 +66,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -100,17 +91,10 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Contacts
 import androidx.compose.material.icons.filled.Crop
-import androidx.compose.material.icons.filled.AspectRatio
-import androidx.compose.material.icons.filled.Brush
-import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Note
-import androidx.compose.material.icons.filled.ViewList
-import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.TableChart
@@ -137,14 +121,12 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.RotateRight
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.DarkMode
-import androidx.compose.material.icons.filled.LightMode
-import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.FormatSize
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.Person
@@ -161,22 +143,16 @@ import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.Receipt
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.MenuDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Divider
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FabPosition
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.FloatingActionButton
-import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.DropdownMenu
@@ -191,17 +167,9 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
-import androidx.compose.material3.Snackbar
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.SnackbarDuration
-import androidx.compose.material3.SnackbarResult
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.zIndex
@@ -212,7 +180,6 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.Path
@@ -220,14 +187,10 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalLayoutDirection
-import androidx.compose.ui.window.Dialog
 import java.io.File
 import kotlin.random.Random
 import kotlinx.coroutines.Dispatchers
@@ -249,13 +212,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.unit.sp
@@ -263,7 +223,6 @@ import ir.daftar.goftogu.ui.theme.APP_THEMES
 import ir.daftar.goftogu.ui.theme.AppColorTheme
 import ir.daftar.goftogu.ui.theme.LocalAppTheme
 import ir.daftar.goftogu.ui.theme.updateAppTheme
-import androidx.compose.material.icons.filled.Send
 
 /**
  * رنگ اکشن سراسری برنامه؛ به‌صورت واکنشی از تم دوگانه انتخاب‌شده کاربر خوانده می‌شود
@@ -528,13 +487,12 @@ private fun RiseRow(id: String, index: Int, arrived: MutableList<String>, conten
     ) { content() }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun BottomBar(route: String, avatar: String?, name: String, hasStar: Boolean = false, onSelect: (String) -> Unit) {
     val palette = LocalTg.current
-    val idle = if (palette.dark) Color(0xFF9AA7B5) else Color(0xFF7A8490)
+    val idle = if (palette.dark) Color(0xFFE0E0E0) else Color(0xFF17212B)
     val accent = Blue
-    val indicatorColor = if (palette.dark) accent.copy(alpha = 0.24f) else accent.copy(alpha = 0.14f)
+    val pill = themeContainer()
     val items = listOf(
         TabGlyph("chats", "چت‌ها", Icons.Outlined.ChatBubbleOutline),
         TabGlyph("teams", "تیم‌ها", Icons.Filled.Groups),
@@ -544,110 +502,50 @@ fun BottomBar(route: String, avatar: String?, name: String, hasStar: Boolean = f
     val dy = with(LocalDensity.current) { 20.dp.roundToPx() }
     val played = PlayedOnce.bottomBar
     var shown by remember { mutableStateOf(played) }
-    val indicatorWidth = remember { Animatable(64f) }
-    val indicatorIndex = items.indexOfFirst { it.id == route }.coerceAtLeast(0)
     LaunchedEffect(Unit) {
         shown = true
         PlayedOnce.bottomBar = true
-    }
-    LaunchedEffect(route) {
-        indicatorWidth.snapTo(52f)
-        indicatorWidth.animateTo(64f, spring(dampingRatio = 0.72f, stiffness = 420f))
     }
     AnimatedVisibility(
         shown,
         Modifier.fillMaxWidth(),
         enter = fadeIn(tween(250, easing = FastOutSlowInEasing)) + slideInVertically(tween(250, easing = FastOutSlowInEasing)) { dy },
     ) {
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            color = if (palette.dark) {
-                Color.Black.copy(alpha = 0.05f)
-            } else {
-                palette.surface.copy(alpha = 0.05f)
-            },
-            shadowElevation = 0.dp,
+    Box(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp)) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .height(56.dp)
+                .shadow(6.dp, RoundedCornerShape(50), ambientColor = Color.Black.copy(alpha = 0.06f), spotColor = Color.Black.copy(alpha = 0.08f))
+                .clip(RoundedCornerShape(50))
+                .background(palette.surface.copy(alpha = 0.95f))
+                .border(1.dp, if (palette.dark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.06f), RoundedCornerShape(50))
+                .padding(horizontal = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .background(Color.Transparent)
-                    .padding(bottom = 16.dp, start = 16.dp, end = 16.dp),
-            ) {
-                Row(
+            items.forEach { item ->
+                val on = route == item.id
+                val tint by animateColorAsState(if (on) accent else idle, tween(200, easing = FastOutSlowInEasing), label = "tab-tint")
+                val capsule by animateColorAsState(if (on) pill else Color.Transparent, tween(200, easing = FastOutSlowInEasing), label = "tab-pill")
+                Column(
                     Modifier
-                        .fillMaxWidth()
-                        .height(68.dp)
-                        .shadow(
-                            8.dp,
-                            CircleShape,
-                        )
-                        .clip(CircleShape)
-                        .background(if (palette.dark) palette.surface else Color.White),
+                        .weight(1f)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(capsule)
+                        .clickable { onSelect(item.id) }
+                        .padding(horizontal = if (on) 8.dp else 4.dp, vertical = 4.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    BoxWithConstraints(Modifier.fillMaxSize().padding(horizontal = 6.dp)) {
-                        val segmentWidth = maxWidth / items.size
-                        val actualIndicatorWidth = indicatorWidth.value.dp.coerceAtMost(segmentWidth)
-                        val indicatorOffset by animateDpAsState(
-                            targetValue = run {
-                                segmentWidth * indicatorIndex +
-                                    (segmentWidth - actualIndicatorWidth) / 2
-                            },
-                            animationSpec = spring(dampingRatio = 0.82f, stiffness = 520f),
-                            label = "bottom-nav-indicator-offset",
-                        )
-                        Box(
-                            Modifier
-                                .align(Alignment.TopStart)
-                                .padding(top = (maxHeight - 48.dp) / 2)
-                                .offset(x = indicatorOffset)
-                                .width(actualIndicatorWidth)
-                                .height(32.dp)
-                                .clip(CircleShape)
-                                .background(indicatorColor),
-                        )
-                        Row(Modifier.fillMaxSize()) {
-                            items.forEach { item ->
-                                val on = route == item.id
-                                val tint by animateColorAsState(
-                                    if (on) accent else idle,
-                                    tween(220, easing = FastOutSlowInEasing),
-                                    label = "tab-tint-${item.id}",
-                                )
-                                Column(
-                                    Modifier
-                                        .weight(1f)
-                                        .fillMaxHeight()
-                                        .clip(RoundedCornerShape(16.dp))
-                                        .clickable { onSelect(item.id) },
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = Arrangement.Center,
-                                ) {
-                                    Box(
-                                        Modifier.width(64.dp).height(32.dp),
-                                        contentAlignment = Alignment.Center,
-                                    ) {
-                                        if (item.id == "profile") {
-                                            PersonAvatar(name, avatar, size = 20.dp, star = hasStar)
-                                        } else {
-                                            Icon(item.icon, item.label, tint = tint, modifier = Modifier.size(20.dp))
-                                        }
-                                    }
-                                    Spacer(Modifier.height(4.dp))
-                                    Text(
-                                        item.label,
-                                        fontSize = 10.sp,
-                                        fontWeight = if (on) FontWeight.SemiBold else FontWeight.Medium,
-                                        color = tint,
-                                        maxLines = 1,
-                                    )
-                                }
-                            }
-                        }
+                    if (item.id == "profile") {
+                        PersonAvatar(name, avatar, size = 20.dp, star = hasStar)
+                    } else {
+                        Icon(item.icon, item.label, tint = tint, modifier = Modifier.size(20.dp))
                     }
+                    Text(item.label, fontSize = 10.sp, fontWeight = if (on) FontWeight.SemiBold else FontWeight.Medium, color = tint, maxLines = 1)
                 }
             }
         }
+    }
     }
 }
 
@@ -682,7 +580,6 @@ private const val TELEGRAM_ID = "Mahdi27_127"
 /** آیدی پشتیبانی در پیام‌رسان بله. */
 private const val BALE_ID = "127_27"
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TeamsScreen(
     app: App,
@@ -691,64 +588,11 @@ fun TeamsScreen(
     onUpgrade: () -> Unit,
     onBack: () -> Unit
 ) {
-    val user = remember(userId) { app.db.getOrCreateUser(userId) }
+    val user = app.db.user(userId) ?: return
     val palette = LocalTg.current
     val dark = palette.dark
-    
-    // بررسی دسترسی بر اساس plan (فقط برای «ساخت تیم» اعمال می‌شود، نه برای دیدن تیم‌هایی که کاربر عضو آن‌هاست)
-    val allowedTeamPlans = AppConstants.TEAM_ALLOWED_PLANS
-    val isAdmin = user.phone == AppConstants.ADMIN_PHONE
-    val hasTeamAccess = user.plan in allowedTeamPlans || isAdmin
 
-    var teams by remember { mutableStateOf(app.db.teams(userId)) }
-    var creating by remember { mutableStateOf(false) }
-    var refreshing by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
-
-    // واکشی تیم‌ها از سرور و ذخیره در دیتابیس لوکال (برای همه کاربران، حتی پلن free)
-    suspend fun fetchTeams() {
-        refreshing = true
-        try {
-            val response = withContext(Dispatchers.IO) {
-                NetworkModule.getApiService().getUserTeams(userId)
-            }
-            if (response.isSuccessful) {
-                val remote = response.body().orEmpty()
-                withContext(Dispatchers.IO) {
-                    val remoteIds = remote.map { it.id }.toSet()
-                    remote.forEach { team ->
-                        app.db.upsertGroupTeam(
-                            userId = userId,
-                            teamId = team.id,
-                            name = team.name,
-                            description = team.description,
-                            members = team.members,
-                            creatorId = team.creatorId,
-                        )
-                    }
-                    // حذف تیم‌های لوکالی که دیگر روی سرور برای این کاربر وجود ندارند
-                    app.db.localTeamIds(userId)
-                        .filter { it !in remoteIds }
-                        .forEach { app.db.deleteTeamLocally(it) }
-                }
-                teams = app.db.teams(userId)
-            }
-        } catch (_: Exception) {
-            // در صورت نبود اتصال، لیست لوکال نمایش داده می‌شود
-        } finally {
-            refreshing = false
-        }
-    }
-
-    // سینک خودکار لیست تیم‌ها هنگام ورود به صفحه (فارغ از پلن کاربر)
-    LaunchedEffect(userId) { fetchTeams() }
-
-    // رفرش مجدد هنگام بازگشت به صفحه (onResume) تا تیم‌های جدیدی که کاربر به آن‌ها اضافه شده بلافاصله لود شوند
-    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
-        scope.launch { fetchTeams() }
-    }
-
-    if (teams.isEmpty() && !hasTeamAccess) {
+    if (user.plan != "advanced") {
         Box(Modifier.fillMaxSize().background(palette.bg), contentAlignment = Alignment.Center) {
             Card(
                 shape = RoundedCornerShape(28.dp),
@@ -798,24 +642,19 @@ fun TeamsScreen(
             }
         }
     } else {
+        var teams by remember { mutableStateOf(app.db.teams(userId)) }
+        var creating by remember { mutableStateOf(false) }
+
         Scaffold(
             containerColor = palette.bg,
-            // در چیدمان RTL، FabPosition.Start در سمت راست صفحه رندر می‌شود (هم‌راستا با FAB صفحه چت‌ها)
-            floatingActionButtonPosition = FabPosition.Start,
             floatingActionButton = {
-                // دکمه ساخت تیم فقط برای کاربران دارای پلن معتبر نمایش داده می‌شود
-                if (hasTeamAccess) {
-                    FloatingActionButton(
-                        onClick = { creating = true },
-                        containerColor = Blue,
-                        contentColor = Color.White,
-                        shape = CircleShape,
-                        modifier = Modifier
-                            .padding(bottom = 80.dp, start = 16.dp)
-                            .shadow(6.dp, CircleShape)
-                    ) {
-                        Icon(Icons.Filled.Add, "ایجاد تیم جدید")
-                    }
+                FloatingActionButton(
+                    onClick = { creating = true },
+                    containerColor = Blue,
+                    contentColor = Color.White,
+                    shape = CircleShape
+                ) {
+                    Icon(Icons.Filled.Add, "ایجاد تیم جدید")
                 }
             }
         ) { padding ->
@@ -827,46 +666,28 @@ fun TeamsScreen(
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = palette.text) }
                     Text("تیم‌های من", color = palette.text, fontWeight = FontWeight.Bold, fontSize = 20.sp, modifier = Modifier.padding(start = 8.dp))
                 }
-                PullToRefreshBox(
-                    isRefreshing = refreshing,
-                    onRefresh = { scope.launch { fetchTeams() } },
-                    modifier = Modifier.weight(1f).fillMaxWidth()
-                ) {
-                    LazyColumn(Modifier.fillMaxSize()) {
-                        if (teams.isEmpty()) {
-                            item {
-                                Box(Modifier.fillParentMaxSize(), contentAlignment = Alignment.Center) {
-                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                        Text("شما هنوز تیمی نساخته‌اید", color = palette.subtext)
-                                        Button(
-                                            onClick = { creating = true },
-                                            shape = RoundedCornerShape(16.dp),
-                                            colors = ButtonDefaults.buttonColors(containerColor = Blue),
-                                            modifier = Modifier.padding(top = 16.dp)
-                                        ) {
-                                            Text("ساخت تیم جدید", fontWeight = FontWeight.Bold)
-                                        }
+                if (teams.isEmpty()) {
+                    Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                        Text("هنوز تیمی نساخته‌اید", color = palette.subtext)
+                    }
+                } else {
+                    LazyColumn(Modifier.weight(1f)) {
+                        items(teams) { team ->
+                            Card(
+                                shape = RoundedCornerShape(22.dp),
+                                colors = CardDefaults.cardColors(containerColor = Color.White),
+                                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp).clickable { onOpenTeam(team.id) }
+                            ) {
+                                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Box(Modifier.size(48.dp).clip(CircleShape).background(Blue.copy(alpha = 0.1f)), contentAlignment = Alignment.Center) {
+                                        Icon(Icons.Filled.Groups, null, tint = Blue)
                                     }
-                                }
-                            }
-                        } else {
-                            items(teams) { team ->
-                                Card(
-                                    shape = RoundedCornerShape(22.dp),
-                                    colors = CardDefaults.cardColors(containerColor = Color.White),
-                                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp).clickable { onOpenTeam(team.id) }
-                                ) {
-                                    Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                                        Box(Modifier.size(48.dp).clip(CircleShape).background(Blue.copy(alpha = 0.1f)), contentAlignment = Alignment.Center) {
-                                            Icon(Icons.Filled.Groups, null, tint = Blue)
-                                        }
-                                        Column(Modifier.weight(1f).padding(start = 16.dp)) {
-                                            Text(team.name, color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                                            Text(team.lastBody.ifBlank { team.description }, color = Color.Gray, fontSize = 13.sp, maxLines = 1)
-                                        }
-                                        Text(listStamp(team.lastAt), color = Color.Gray, fontSize = 11.sp)
+                                    Column(Modifier.weight(1f).padding(start = 16.dp)) {
+                                        Text(team.name, color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                        Text(team.lastBody.ifBlank { team.description }, color = Color.Gray, fontSize = 13.sp, maxLines = 1)
                                     }
+                                    Text(listStamp(team.lastAt), color = Color.Gray, fontSize = 11.sp)
                                 }
                             }
                         }
@@ -877,8 +698,8 @@ fun TeamsScreen(
 
         if (creating) {
             AddTeamSheet(app, userId, onClose = { creating = false }, onSaved = {
+                teams = app.db.teams(userId)
                 creating = false
-                scope.launch { fetchTeams() }
             })
         }
     }
@@ -887,312 +708,55 @@ fun TeamsScreen(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddTeamSheet(app: App, userId: String, onClose: () -> Unit, onSaved: () -> Unit) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    
-    var teamName by remember { mutableStateOf("") }
-    var teamDesc by remember { mutableStateOf("") }
-    var phoneInput by remember { mutableStateOf("") }
-    var selectedMembers by remember { mutableStateOf<Set<UserCheckResponse>>(setOf()) }
-    var error by remember { mutableStateOf("") }
-    var loading by remember { mutableStateOf(false) }
-    var checkingUser by remember { mutableStateOf(false) }
-    var lastCheckedPhone by remember { mutableStateOf("") }
-    var lastCheckResult by remember { mutableStateOf<UserCheckResponse?>(null) }
-    
+    var name by remember { mutableStateOf("") }
+    var desc by remember { mutableStateOf("") }
+    var selectedContacts by remember { mutableStateOf(setOf<String>()) }
+    val contacts = remember { app.db.people(userId).filter { !it.isGroup } }
     val palette = LocalTg.current
-    val dark = palette.dark
-    val card = if (dark) Color(0xFF1E293B) else Color.White
-    val ink = if (dark) Color.White else Color(0xFF111827)
-    
-    val api = NetworkModule.getApiService()
-    
-    fun checkUserExists() {
-        if (phoneInput.isBlank()) {
-            error = "شماره تلفن یا نام کاربری را وارد کنید"
-            return
-        }
-        
-        if (phoneInput == lastCheckedPhone && lastCheckResult != null) {
-            return
-        }
-        
-        checkingUser = true
-        error = ""
-        
-        scope.launch {
-            try {
-                val rawInput = phoneInput.trim().toEnglishDigits()
-                val query = normalizePhone(rawInput) ?: rawInput
-                val response = api.checkUserExists(UserCheckRequest(phone = query))
-                if (response.isSuccessful) {
-                    val result = response.body()
-                    if (result != null) {
-                        lastCheckResult = result
-                        lastCheckedPhone = phoneInput
-                        if (!result.exists) {
-                            error = "این کاربر در دفتر گفتگو ثبت‌نام نکرده است"
-                        }
-                    }
-                } else {
-                    error = "خطا در بررسی کاربر"
-                }
-            } catch (e: Exception) {
-                error = "خطا در اتصال: ${e.message}"
-            } finally {
-                checkingUser = false
-            }
-        }
-    }
-    
-    fun addUserToTeam() {
-        val result = lastCheckResult
-        if (result != null && result.exists && result.userId != null) {
-            if (selectedMembers.any { it.userId == result.userId }) {
-                error = "این کاربر قبلاً انتخاب شده است"
-                return
-            }
-            selectedMembers = selectedMembers + result
-            phoneInput = ""
-            lastCheckedPhone = ""
-            lastCheckResult = null
-            error = ""
-        } else {
-            error = "ابتدا کاربر را تایید کنید"
-        }
-    }
-    
-    fun sendInvitationSms() {
-        val phone = phoneInput.trim()
-        if (phone.isBlank()) {
-            error = "شماره تلفن را وارد کنید"
-            return
-        }
-        
-        val smsBody = "سلام! من در اپلیکیشن دفتر گفتگو منتظر شما هستم. برای نصب و شروع گفتگو از لینک زیر اقدام کنید:\n\nhttps://recamender.darkube.ir/"
-        val intent = Intent(Intent.ACTION_SENDTO).apply {
-            data = Uri.parse("smsto:$phone")
-            putExtra("sms_body", smsBody)
-        }
-        try {
-            context.startActivity(intent)
-            phoneInput = ""
-            lastCheckedPhone = ""
-            lastCheckResult = null
-        } catch (e: Exception) {
-            error = "اپلیکیشن SMS موجود نیست"
-        }
-    }
-    
-    fun createTeam() {
-        if (teamName.isBlank()) {
-            error = "نام تیم را وارد کنید"
-            return
-        }
-        
-        if (selectedMembers.isEmpty()) {
-            error = "حداقل یک عضو را انتخاب کنید"
-            return
-        }
-        
-        loading = true
-        error = ""
-        
-        scope.launch {
-            try {
-                val memberIds = selectedMembers.mapNotNull { it.userId }
-                val createReq = CreateTeamRequest(
-                    name = teamName.trim(),
-                    description = teamDesc.trim().ifBlank { null },
-                    creatorId = userId,
-                    memberUserIds = memberIds
-                )
-                
-                val response = api.createTeam(createReq)
-                
-                if (response.isSuccessful && response.body() != null) {
-                    // ذخیره تیم در دیتابیس لوکال به صورت گروه با همان شناسه سرور
-                    val team = response.body()!!
-                    app.db.upsertGroupTeam(
-                        userId = userId,
-                        teamId = team.id,
-                        name = team.name,
-                        description = team.description,
-                        members = team.members,
-                        memberNames = selectedMembers
-                            .mapNotNull { m -> m.userId?.let { id -> id to (m.name ?: "") } }
-                            .toMap(),
-                        creatorId = team.creatorId,
-                    )
 
-                    onSaved()
-                } else {
-                    error = "خطا در ساخت تیم"
-                }
-            } catch (e: Exception) {
-                error = "خطا: ${e.message ?: "نامشخص"}"
-            } finally {
-                loading = false
-            }
-        }
-    }
-
-    ModalBottomSheet(onDismissRequest = onClose, containerColor = card, scrimColor = Color.Black.copy(alpha = 0.32f)) {
-        Column(Modifier.fillMaxWidth().padding(24.dp).padding(bottom = 24.dp)) {
-            Text("ایجاد تیم جدید", color = ink, fontWeight = FontWeight.Bold, fontSize = 20.sp)
-            
-            // نام تیم
+    ModalBottomSheet(onDismissRequest = onClose, containerColor = palette.surface) {
+        Column(Modifier.padding(24.dp).fillMaxWidth()) {
+            Text("ایجاد تیم جدید", color = palette.text, fontWeight = FontWeight.Bold, fontSize = 20.sp)
             OutlinedTextField(
-                value = teamName,
-                onValueChange = { teamName = it },
+                value = name,
+                onValueChange = { name = it },
                 label = { Text("نام تیم") },
                 modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
-                shape = RoundedCornerShape(12.dp),
-                enabled = !loading
+                shape = RoundedCornerShape(12.dp)
             )
-            
-            // توضیحات
             OutlinedTextField(
-                value = teamDesc,
-                onValueChange = { teamDesc = it },
+                value = desc,
+                onValueChange = { desc = it },
                 label = { Text("توضیحات (اختیاری)") },
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                shape = RoundedCornerShape(12.dp),
-                enabled = !loading
+                shape = RoundedCornerShape(12.dp)
             )
-            
-            // بخش انتخاب اعضا
-            Text("انتخاب اعضا", color = ink, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 16.dp))
-            Text("تنها کاربران ثبت‌شده می‌توانند اضافه شوند", color = Color(0xFF64748B), fontSize = 12.sp, modifier = Modifier.padding(bottom = 8.dp))
-            
-            // جستجو و بررسی کاربر
-            Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                OutlinedTextField(
-                    value = phoneInput,
-                    onValueChange = { phoneInput = it },
-                    label = { Text("شماره یا نام کاربری") },
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(12.dp),
-                    enabled = !checkingUser && !loading
-                )
-                
-                Button(
-                    onClick = { checkUserExists() },
-                    modifier = Modifier.height(56.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    enabled = phoneInput.isNotBlank() && !checkingUser && !loading
-                ) {
-                    if (checkingUser) {
-                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = Color.White)
-                    } else {
-                        Text("بررسی")
-                    }
-                }
-            }
-            
-            // نتیجه بررسی
-            if (lastCheckResult != null) {
-                if (lastCheckResult!!.exists) {
-                    // کاربر موجود است
+            Text("انتخاب اعضا", color = palette.text, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 16.dp))
+            LazyColumn(Modifier.heightIn(max = 200.dp).padding(top = 8.dp)) {
+                items(contacts) { contact ->
                     Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(top = 8.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(Color(0xFFECFDF5))
-                            .padding(12.dp),
+                        Modifier.fillMaxWidth().clickable {
+                            selectedContacts = if (contact.id in selectedContacts) selectedContacts - contact.id else selectedContacts + contact.id
+                        }.padding(vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(Icons.Filled.Check, null, tint = Color(0xFF059669), modifier = Modifier.size(24.dp))
-                        Column(Modifier.weight(1f).padding(start = 12.dp)) {
-                            Text(lastCheckResult!!.name ?: "کاربر", color = Color(0xFF111827), fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                            Text("کاربر ثبت‌شده است", color = Color(0xFF059669), fontSize = 12.sp)
-                        }
-                        Button(
-                            onClick = { addUserToTeam() },
-                            modifier = Modifier.height(40.dp),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Text("افزودن", fontSize = 12.sp)
-                        }
-                    }
-                } else {
-                    // کاربر موجود نیست
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(top = 8.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(Color(0xFFFEF2F2))
-                            .padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(Icons.Filled.Email, null, tint = Color(0xFFDC2626), modifier = Modifier.size(24.dp))
-                        Column(Modifier.weight(1f).padding(start = 12.dp)) {
-                            Text("کاربری ثبت‌نام نکرده", color = Color(0xFF111827), fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                            Text("می‌توانید دعوت‌نامه SMS بفرستید", color = Color(0xFFDC2626), fontSize = 12.sp)
-                        }
-                        Button(
-                            onClick = { sendInvitationSms() },
-                            modifier = Modifier.height(40.dp),
-                            shape = RoundedCornerShape(8.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626))
-                        ) {
-                            Text("دعوت", fontSize = 12.sp)
-                        }
+                        Checkbox(checked = contact.id in selectedContacts, onCheckedChange = null)
+                        Text(contact.name, modifier = Modifier.padding(start = 12.dp), color = palette.text)
                     }
                 }
             }
-            
-            // اعضای انتخاب‌شده
-            if (selectedMembers.isNotEmpty()) {
-                Text("اعضای انتخاب‌شده (${selectedMembers.size})", color = ink, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 16.dp))
-                LazyColumn(Modifier.heightIn(max = 150.dp).padding(top = 8.dp)) {
-                    items(selectedMembers.toList()) { member ->
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 8.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(Color(0xFFF1F5F9))
-                                .padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(member.name ?: "کاربر", color = ink, fontSize = 14.sp, modifier = Modifier.weight(1f))
-                            IconButton(
-                                onClick = { selectedMembers = selectedMembers.filter { it.userId != member.userId }.toSet() },
-                                modifier = Modifier.size(32.dp)
-                            ) {
-                                Icon(Icons.Filled.Close, null, tint = Color(0xFF6B7280), modifier = Modifier.size(18.dp))
-                            }
-                        }
-                    }
-                }
-            }
-            
-            // پیام خطا
-            if (error.isNotEmpty()) {
-                Text(
-                    error,
-                    color = Color(0xFFDC2626),
-                    fontSize = 12.sp,
-                    modifier = Modifier.padding(top = 12.dp).fillMaxWidth()
-                )
-            }
-            
-            // دکمه ایجاد
             Button(
-                onClick = { createTeam() },
-                modifier = Modifier.fillMaxWidth().padding(top = 24.dp).height(52.dp),
+                onClick = {
+                    if (name.isNotBlank()) {
+                        app.db.addTeam(userId, name, desc, selectedContacts.toList())
+                        onSaved()
+                    }
+                },
+                modifier = Modifier.fillMaxWidth().padding(top = 24.dp, bottom = 16.dp),
                 shape = RoundedCornerShape(16.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Blue),
-                enabled = !loading && teamName.isNotBlank() && selectedMembers.isNotEmpty()
+                colors = ButtonDefaults.buttonColors(containerColor = Blue)
             ) {
-                if (loading) {
-                    CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = Color.White)
-                } else {
-                    Text("ایجاد تیم", fontWeight = FontWeight.Bold)
-                }
+                Text("ایجاد تیم", fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -1487,118 +1051,12 @@ private fun SupportBadge(size: androidx.compose.ui.unit.Dp) {
 private fun supportClock(millis: Long): String =
     persianDigits(SimpleDateFormat("HH:mm", Locale.US).format(Date(millis)))
 
-private val inlineMarkdownPattern = Regex("""(\*\*\*|\*\*|\*|~~|~|__|_|`)(.+?)\1""")
-
-/** فرمت‌بندی درون‌خطی Markdown (بولد/ایتالیک/خط‌خورده/کد). */
-private fun inlineMarkdownAnnotated(line: String): androidx.compose.ui.text.AnnotatedString {
-    if (line.isEmpty()) return androidx.compose.ui.text.AnnotatedString(line)
-    return buildAnnotatedString {
-        var cursor = 0
-        inlineMarkdownPattern.findAll(line).forEach { match ->
-            append(line.substring(cursor, match.range.first))
-            val delimiter = match.groupValues[1]
-            val content = match.groupValues[2]
-            val style = when (delimiter) {
-                "***", "**", "*", "__" -> SpanStyle(fontWeight = FontWeight.Bold)
-                "_" -> SpanStyle(fontStyle = FontStyle.Italic)
-                "~~", "~" -> SpanStyle(textDecoration = TextDecoration.LineThrough)
-                "`" -> SpanStyle(fontFamily = FontFamily.Monospace, background = Color(0x22000000))
-                else -> SpanStyle()
-            }
-            withStyle(style) { append(content) }
-            cursor = match.range.last + 1
-        }
-        append(line.substring(cursor))
-    }
-}
-
-private fun parseMarkdown(rawText: String): androidx.compose.ui.text.AnnotatedString {
-    if (inlineMarkdownPattern.find(rawText) == null) return androidx.compose.ui.text.AnnotatedString(rawText)
-    return inlineMarkdownAnnotated(rawText)
-}
-
-// --- موتور Markdown بلوکی ---------------------------------------------------
-
-private sealed interface MdBlock {
-    data class Heading(val level: Int, val text: String) : MdBlock
-    data class Bullet(val text: String) : MdBlock
-    data class Para(val text: String) : MdBlock
-    data class Code(val text: String) : MdBlock
-    data class Table(val header: List<String>, val rows: List<List<String>>) : MdBlock
-    object Divider : MdBlock
-}
-
-private fun mdIsDivider(line: String): Boolean {
-    val t = line.trim()
-    if (t.length < 3) return false
-    val c = t.first()
-    if (c != '-' && c != '*' && c != '_') return false
-    return t.all { it == c || it == ' ' } && t.count { it == c } >= 3
-}
-
-private fun mdSplitRow(line: String): List<String> =
-    line.trim().trim('|').split('|').map { it.trim() }
-
-private fun mdIsTableSeparator(line: String): Boolean {
-    val t = line.trim()
-    if (!t.contains('-')) return false
-    val cells = t.trim('|').split('|')
-    return cells.isNotEmpty() && cells.all { cell ->
-        val c = cell.trim()
-        c.isNotEmpty() && c.contains('-') && c.all { it == '-' || it == ':' || it == ' ' }
-    }
-}
-
-/** تفکیک متن به بلوک‌ها؛ یک‌بار در remember کش می‌شود تا اسکرول بدون لگ بماند. */
-private fun parseMarkdownBlocks(source: String): List<MdBlock> {
-    if (source.isBlank()) return emptyList()
-    val lines = source.replace("\r\n", "\n").replace('\r', '\n').split("\n")
-    val blocks = ArrayList<MdBlock>()
-    var i = 0
-    while (i < lines.size) {
-        val raw = lines[i]
-        val t = raw.trim()
-        when {
-            t.startsWith("```") -> {
-                val sb = StringBuilder()
-                i++
-                while (i < lines.size && !lines[i].trim().startsWith("```")) {
-                    if (sb.isNotEmpty()) sb.append('\n')
-                    sb.append(lines[i])
-                    i++
-                }
-                if (i < lines.size) i++ // پرش از فنس بسته
-                blocks.add(MdBlock.Code(sb.toString()))
-            }
-            mdIsDivider(t) -> { blocks.add(MdBlock.Divider); i++ }
-            i + 1 < lines.size && t.contains('|') && mdIsTableSeparator(lines[i + 1]) -> {
-                val header = mdSplitRow(t)
-                i += 2
-                val rows = ArrayList<List<String>>()
-                while (i < lines.size && lines[i].contains('|') && lines[i].trim().isNotEmpty()) {
-                    rows.add(mdSplitRow(lines[i]))
-                    i++
-                }
-                blocks.add(MdBlock.Table(header, rows))
-            }
-            t.startsWith("### ") -> { blocks.add(MdBlock.Heading(3, t.removePrefix("### ").trim())); i++ }
-            t.startsWith("## ") -> { blocks.add(MdBlock.Heading(2, t.removePrefix("## ").trim())); i++ }
-            t.startsWith("# ") -> { blocks.add(MdBlock.Heading(1, t.removePrefix("# ").trim())); i++ }
-            t.startsWith("- ") || t.startsWith("* ") -> { blocks.add(MdBlock.Bullet(t.drop(2).trim())); i++ }
-            t.isEmpty() -> i++
-            else -> { blocks.add(MdBlock.Para(raw)); i++ }
-        }
-    }
-    return blocks
-}
-
 @Composable
 private fun SupportBubble(message: SupportMessage, mine: Boolean) {
     val palette = LocalTg.current
     val chatTheme = LocalChatPalette.current
     val bubble = if (mine) (if (palette.dark) palette.outgoing else chatTheme.outgoingBubble) else (if (palette.dark) Color(0xFF1E293B) else Color.White)
     val ink = if (palette.dark && !mine) Color.White else palette.text
-    val formattedBody = remember(message.body) { parseMarkdown(message.body) }
     val shape = if (mine) {
         RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 16.dp, bottomEnd = 4.dp)
     } else {
@@ -1607,12 +1065,11 @@ private fun SupportBubble(message: SupportMessage, mine: Boolean) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start) {
         Column(
             Modifier
-                .widthIn(max = 360.dp)
-                .fillMaxWidth(0.85f)
+                .fillMaxWidth(0.80f)
                 .shadow(1.dp, shape)
                 .clip(shape)
                 .background(bubble)
-                .padding(horizontal = 14.dp, vertical = 10.dp),
+                .padding(horizontal = 10.dp, vertical = 7.dp),
         ) {
             if (message.kind == "voice" && message.path != null) {
                 VoiceMessage(message.path)
@@ -1622,18 +1079,18 @@ private fun SupportBubble(message: SupportMessage, mine: Boolean) {
             if (message.body.isNotBlank()) {
                 val chatFont = LocalChatFont.current
                 Text(
-                    formattedBody,
+                    message.body,
                     color = ink,
                     fontSize = chatFont.sp,
                     lineHeight = (chatFont * 1.5f).sp,
-                    modifier = Modifier.padding(top = if (message.kind == "text") 0.dp else 6.dp),
+                    modifier = Modifier.padding(top = if (message.kind == "text") 0.dp else 4.dp),
                 )
             }
             Text(
                 supportClock(message.createdAt),
                 fontSize = 10.sp,
                 color = if (message.kind == "voice") Color.White.copy(alpha = 0.85f) else palette.subtext,
-                modifier = Modifier.align(Alignment.End).padding(top = 4.dp),
+                modifier = Modifier.align(Alignment.End).padding(top = 2.dp),
             )
         }
     }
@@ -1712,18 +1169,6 @@ fun SupportChatRoom(app: App, userId: String, asAdmin: Boolean, onBack: () -> Un
     }
     LaunchedEffect(userId) {
         if (asAdmin) app.db.markSupportReadByAdmin(userId) else app.db.markSupportReadByUser(userId)
-        // سینک مستقیم پیام‌های پشتیبانی از سرور (Cloud-Driven): با پاک‌شدن حافظه/نصب مجدد، از سرور بازمی‌گردند.
-        try {
-            val response = NetworkModule.getApiService().getUserSupportMessages(userId)
-            if (response.isSuccessful) {
-                withContext(Dispatchers.IO) {
-                    app.db.upsertSupportMessagesLocally(userId, response.body().orEmpty())
-                }
-                reload()
-            }
-        } catch (_: Exception) {
-            // آفلاین: پیام‌های کش‌شدهٔ محلی نمایش داده می‌شوند
-        }
     }
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) listState.animateScrollToItem(messages.lastIndex)
@@ -1969,92 +1414,41 @@ fun AuthScreen(app: App, onLoggedIn: (String) -> Unit, openSignup: () -> Unit, o
     var phone by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var alert by remember { mutableStateOf<Pair<String, String>?>(null) }
-    var loading by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
-    val context = LocalContext.current
-    
     Box(Modifier.fillMaxSize()) {
-        AuthCard(title = "ورود") {
-            AuthField(phone, { phone = it }, "شماره موبایل", KeyboardType.Phone)
-            AuthPassword(password, { password = it }, "رمز عبور")
-            AuthButton(if (loading) "در حال ورود..." else "ورود") {
-                if (loading) return@AuthButton
-                val normalized = normalizePhone(phone.toEnglishDigits())
-                if (normalized == null) {
-                    alert = "شماره نادرست" to "شماره موبایل باید ۱۱ رقم و با ۰۹ شروع شود."
-                    return@AuthButton
-                }
-                
-                loading = true
-                scope.launch(Dispatchers.Main) {
-                    try {
-                        if (!NetworkHelper.isDeviceOnline(context)) {
-                            alert = "خطا در شبکه" to "لطفاً اتصال اینترنت را بررسی کنید"
-                            loading = false
-                            return@launch
-                        }
-                        
-                        val response = withContext(Dispatchers.IO) {
-                            val apiService = NetworkModule.getApiService()
-                            val loginRequest = LoginRequest(phone = normalized, password = password)
-                            apiService.login(loginRequest)
-                        }
-                        
-                        if (response.status == "success" && response.userId != null) {
-    val uid = response.userId!!
-    
-    // ذخیره خودکار مشخصات کاربری که لاگین کرده در دیتابیس محلی گوشی
-    withContext(Dispatchers.IO) {
-        app.db.saveOrUpdateUser(
-            id = uid,
-            phone = response.phone ?: normalized,
-            name = response.name ?: "کاربر",
-            plan = response.plan ?: "free"
-        )
-    }
-    
-    app.setSession(uid)
-    onLoggedIn(uid)
-} else {
-                            alert = "ورود ناموفق" to (response.message ?: "خطای نامشخص")
-                        }
-                    } catch (e: Exception) {
-                        alert = "ورود ناموفق" to NetworkHelper.getErrorMessage(e)
-                    } finally {
-                        loading = false
-                    }
-                }
+    AuthCard(title = "ورود") {
+        AuthField(phone, { phone = it }, "شماره موبایل", KeyboardType.Phone)
+        AuthPassword(password, { password = it }, "رمز عبور")
+        AuthButton("ورود") {
+            val normalized = normalizePhone(phone)
+            if (normalized == null) {
+                alert = "شماره نادرست" to "شماره موبایل باید ۱۱ رقم و با ۰۹ شروع شود."
+                return@AuthButton
             }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
-                Text("ثبت‌نام", color = Color(0xFF0288D1), fontSize = 14.sp, modifier = Modifier.clickable(onClick = openSignup))
-                Text("فراموشی رمز", color = Color(0xFF0288D1), fontSize = 14.sp, modifier = Modifier.clickable(onClick = openForgot))
-               Text(
-    text = "ورود مهمان",
-    color = Color(0xFF0288D1),
-    fontSize = 14.sp,
-    modifier = Modifier.clickable {
-        if (loading) return@clickable
-        loading = true
-        scope.launch(Dispatchers.Main) {
             try {
-                val id = withContext(Dispatchers.IO) {
-                    app.db.signupGuest(context)
-                }
-                app.setSession(id)
-                onLoggedIn(id)
+                val user = app.db.login(normalized, password)
+                app.setSession(user.id)
+                onLoggedIn(user.id)
             } catch (e: Exception) {
-                alert = "ورود مهمان" to (e.message ?: "امکان ورود مهمان وجود ندارد.")
-            } finally {
-                loading = false
+                alert = "ورود ناموفق" to (e.message ?: "خطا")
             }
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
+            Text("ثبت‌نام", color = Color(0xFF0288D1), fontSize = 14.sp, modifier = Modifier.clickable(onClick = openSignup))
+            Text("فراموشی رمز", color = Color(0xFF0288D1), fontSize = 14.sp, modifier = Modifier.clickable(onClick = openForgot))
+            Text("ورود مهمان", color = Color(0xFF0288D1), fontSize = 14.sp, modifier = Modifier.clickable {
+                try {
+                    val id = app.db.signupGuest()
+                    app.setSession(id)
+                    onLoggedIn(id)
+                } catch (e: Exception) {
+                    alert = "مهمان" to (e.message ?: "خطا")
+                }
+            })
         }
     }
-)
-            }
-        }
-        alert?.let { (title, body) ->
-            PrettyAlert(title, body, onConfirm = { alert = null })
-        }
+    alert?.let { (title, body) ->
+        PrettyAlert(title, body, onConfirm = { alert = null })
+    }
     }
 }
 
@@ -2064,129 +1458,45 @@ fun SignUpScreen(app: App, onReady: (String) -> Unit, openLogin: () -> Unit) {
     var name by remember { mutableStateOf("") }
     var phone by remember { mutableStateOf("") }
     var code by remember { mutableStateOf("") }
-    var otpSecondsLeft by remember { mutableIntStateOf(120) }
-    var otpTimerKey by remember { mutableIntStateOf(0) }
     var password by remember { mutableStateOf("") }
     var confirm by remember { mutableStateOf("") }
     var alert by remember { mutableStateOf<Pair<String, String>?>(null) }
-    var loading by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
-    val context = LocalContext.current
-
-    LaunchedEffect(step, otpTimerKey) {
-        if (step == 1) {
-            otpSecondsLeft = 120
-            while (otpSecondsLeft > 0) {
-                delay(1_000)
-                otpSecondsLeft--
-            }
-        }
-    }
-    
+    val verified = code == OTP
     Box(Modifier.fillMaxSize()) {
-        AuthCard(title = "ثبت‌نام") {
-            if (step == 0) {
+    AuthCard(title = "ثبت‌نام") {
+        when (step) {
+            0 -> {
                 AuthField(name, { name = it }, "نام", KeyboardType.Text)
                 AuthField(phone, { phone = it }, "شماره موبایل", KeyboardType.Phone)
-                AuthButton(
-                    if (loading) "در حال ارسال کد..." else "دریافت کد تأیید",
-                    loading = loading,
-                ) {
-                    if (loading) return@AuthButton
+                AuthButton("ثبت‌نام") {
                     if (name.trim().length < 2) {
                         alert = "نام" to "نام را کامل‌تر بنویس."
                         return@AuthButton
                     }
-                    val normalized = normalizePhone(phone)
-                    if (normalized == null) {
+                    if (normalizePhone(phone) == null) {
                         alert = "شماره نادرست" to "شماره موبایل باید ۱۱ رقم و با ۰۹ شروع شود."
                         return@AuthButton
                     }
-
-                    loading = true
-                    scope.launch(Dispatchers.Main) {
-                        try {
-                            if (!NetworkHelper.isDeviceOnline(context)) {
-                                alert = "خطا در شبکه" to "لطفاً اتصال اینترنت را بررسی کنید"
-                                return@launch
-                            }
-                            val response = withContext(Dispatchers.IO) {
-                                NetworkModule.getApiService().sendOtp(OtpRequest(normalized))
-                            }
-                            response.body()?.close()
-                            response.errorBody()?.close()
-                            if (response.isSuccessful) {
-                                code = ""
-                                step = 1
-                                alert = null
-                            } else {
-                                alert = "خطا در ارسال پیامک" to
-                                    "کد ارسال نشد: ${response.message().ifBlank { response.code().toString() }}"
-                            }
-                        } catch (e: Exception) {
-                            alert = "خطا در ارسال پیامک" to NetworkHelper.getErrorMessage(e)
-                        } finally {
-                            loading = false
-                        }
-                    }
+                    step = 1
+                    alert = "کد تأیید" to "کد آزمایشی ${persianDigits(OTP)} را در ۶ خانه وارد کن."
                 }
-            } else {
-                Text("کد پیامک‌شده را وارد کن", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Start)
-                OtpBoxes(code) { code = it }
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        "اعتبار کد: ${persianDigits(otpSecondsLeft.toString())} ثانیه",
-                        color = Color(0xFF6B7280),
-                        fontSize = 12.sp,
-                    )
-                    TextButton(
-                        onClick = {
-                            if (loading || otpSecondsLeft > 0) return@TextButton
-                            val normalized = normalizePhone(phone.toEnglishDigits()) ?: return@TextButton
-                            loading = true
-                            scope.launch(Dispatchers.Main) {
-                                try {
-                                    if (!NetworkHelper.isDeviceOnline(context)) {
-                                        alert = "خطا در شبکه" to "لطفاً اتصال اینترنت را بررسی کنید"
-                                        return@launch
-                                    }
-                                    val response = withContext(Dispatchers.IO) {
-                                        NetworkModule.getApiService().sendOtp(OtpRequest(normalized))
-                                    }
-                                    response.body()?.close()
-                                    response.errorBody()?.close()
-                                    if (response.isSuccessful) {
-                                        code = ""
-                                        otpTimerKey++
-                                        alert = null
-                                    } else {
-                                        alert = "ارسال مجدد ناموفق" to
-                                            "کد ارسال نشد: ${response.message().ifBlank { response.code().toString() }}"
-                                    }
-                                } catch (e: Exception) {
-                                    alert = "ارسال مجدد ناموفق" to NetworkHelper.getErrorMessage(e)
-                                } finally {
-                                    loading = false
-                                }
-                            }
-                        },
-                        enabled = !loading && otpSecondsLeft == 0,
-                    ) {
-                        Text("ارسال مجدد")
-                    }
-                }
-                AuthPassword(password, { password = it }, "رمز عبور جدید")
-                AuthPassword(confirm, { confirm = it }, "تکرار رمز عبور")
-                AuthButton(if (loading) "در حال ثبت‌نام..." else "تکمیل و ثبت‌نام") {
-                    if (loading) return@AuthButton
-                    if (code.length != 6) {
-                        alert = "کد ناقص" to "کد ۶ رقمی پیامک‌شده را کامل وارد کن."
+            }
+            1 -> {
+                Text("کد پیامک را وارد کن", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Start)
+                OtpBoxes(code) { code = it.filter { ch -> ch.isDigit() }.take(6) }
+                if (verified) Text("کد تأیید شد", color = CheckGreen, fontWeight = FontWeight.Bold, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Start)
+                AuthButton("مرحله بعد") {
+                    if (!verified) {
+                        alert = "کد نادرست" to "شش رقم کد را درست وارد کن."
                         return@AuthButton
                     }
+                    step = 2
+                }
+            }
+            else -> {
+                AuthPassword(password, { password = it }, "رمز عبور")
+                AuthPassword(confirm, { confirm = it }, "تکرار رمز عبور")
+                AuthButton("ساخت حساب") {
                     if (password.length < 8) {
                         alert = "رمز کوتاه" to "رمز باید حداقل ۸ کاراکتر باشد."
                         return@AuthButton
@@ -2195,83 +1505,24 @@ fun SignUpScreen(app: App, onReady: (String) -> Unit, openLogin: () -> Unit) {
                         alert = "رمز" to "رمز و تکرار آن یکی نیست."
                         return@AuthButton
                     }
-                    val cleanName = name.trim()
-                    if (cleanName.length < 2) {
-                        alert = "نام" to "نام را کامل‌تر بنویس."
-                        return@AuthButton
-                    }
-                    val cleanPhone = normalizePhone(phone)
-                    if (cleanPhone == null) {
-                        alert = "شماره نادرست" to "شماره موبایل باید ۱۱ رقم و با ۰۹ شروع شود."
-                        return@AuthButton
-                    }
-                    val cleanCode = code.toEnglishDigits().trim()
-                    loading = true
-                    scope.launch(Dispatchers.Main) {
-                        try {
-                            if (!NetworkHelper.isDeviceOnline(context)) {
-                                alert = "خطا در شبکه" to "لطفاً اتصال اینترنت را بررسی کنید"
-                                return@launch
-                            }
-                            val response = withContext(Dispatchers.IO) {
-                                val signupRequest = SignupRequest(
-                                    phone = cleanPhone,
-                                    name = cleanName,
-                                    password = password,
-                                    code = cleanCode,
-                                )
-                                NetworkModule.getApiService().signup(signupRequest)
-                            }
-                            if (response.isSuccessful) {
-                                val signupResponse = response.body()
-                                if (signupResponse?.status == "success" && signupResponse.userId != null) {
-                                    val uid = signupResponse.userId
-                                    withContext(Dispatchers.IO) {
-                                        app.db.saveOrUpdateUser(
-                                            id = uid,
-                                            phone = signupResponse.phone ?: cleanPhone,
-                                            name = signupResponse.name ?: cleanName,
-                                            plan = "free",
-                                        )
-                                    }
-                                    app.setSession(uid)
-                                    onReady(uid)
-                                } else {
-                                    alert = "ثبت‌نام ناموفق" to (signupResponse?.message ?: "پاسخ سرور نامعتبر است.")
-                                }
-                            } else {
-                                val errorMessage = try {
-                                    response.errorBody()?.string()?.let { jsonString ->
-                                        org.json.JSONObject(jsonString).optString("detail", "خطا در ثبت‌نام")
-                                    } ?: "خطا در برقراری ارتباط با سرور"
-                                } catch (e: Exception) {
-                                    "درخواست نامعتبر (${response.code()})"
-                                }
-                                Log.e("SignUp", "Signup failed with HTTP ${response.code()}: $errorMessage")
-                                alert = "ثبت‌نام ناموفق" to errorMessage
-                            }
-                        } catch (e: Exception) {
-                            alert = "ثبت‌نام ناموفق" to NetworkHelper.getErrorMessage(e)
-                        } finally {
-                            loading = false
-                        }
+                    val normalized = normalizePhone(phone) ?: return@AuthButton
+                    try {
+                        val id = app.db.signup(normalized, name, password)
+                        app.setSession(id)
+                        onReady(id)
+                    } catch (e: Exception) {
+                        alert = "ثبت‌نام" to (e.message ?: "خطا")
                     }
                 }
             }
-            Text(
-                "قبلاً ثبت‌نام کرده‌اید؟ ورود به حساب",
-                color = Color(0xFF0288D1),
-                fontSize = 14.sp,
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp).clickable(onClick = openLogin),
-                textAlign = TextAlign.Center,
-            )
         }
-        alert?.let { (title, body) ->
-            PrettyAlert(title, body, onConfirm = { alert = null })
+        AuthLinks("ورود", openLogin, if (step > 0) "مرحله قبل" else "ورود", { if (step > 0) step -= 1 else openLogin() })
+    }
+    alert?.let { (title, body) ->
+        PrettyAlert(title, body, onConfirm = { alert = null })
         }
     }
 }
-
 
 @Composable
 fun ForgotScreen(app: App, openLogin: () -> Unit, openSignup: () -> Unit) {
@@ -2281,120 +1532,66 @@ fun ForgotScreen(app: App, openLogin: () -> Unit, openSignup: () -> Unit) {
     var password by remember { mutableStateOf("") }
     var confirm by remember { mutableStateOf("") }
     var alert by remember { mutableStateOf<Pair<String, String>?>(null) }
-    var loading by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
-    val context = LocalContext.current
-    val verified = code.length == 6
-    
+    val verified = code == OTP
     Box(Modifier.fillMaxSize()) {
-        AuthCard(title = "بازیابی رمز") {
-            when (step) {
-                0 -> {
-                    AuthField(phone, { phone = it }, "شماره موبایل", KeyboardType.Phone)
-                    AuthButton(if (loading) "در حال ارسال کد..." else "ارسال کد تأیید") {
-                        if (loading) return@AuthButton
-                        val normalized = normalizePhone(phone)
-                        if (normalized == null) {
-                            alert = "شماره نادرست" to "شماره موبایل باید ۱۱ رقم و با ۰۹ شروع شود."
-                            return@AuthButton
-                        }
-                        loading = true
-                        scope.launch(Dispatchers.Main) {
-                            try {
-                                if (!NetworkHelper.isDeviceOnline(context)) {
-                                    alert = "خطا در شبکه" to "لطفاً اتصال اینترنت را بررسی کنید"
-                                    loading = false
-                                    return@launch
-                                }
-                                val response = withContext(Dispatchers.IO) {
-                                    val apiService = NetworkModule.getApiService()
-                                    apiService.sendOtp(OtpRequest(normalized))
-                                }
-                                if (response.isSuccessful) {
-                                    step = 1
-                                    alert = null
-                                } else {
-                                    alert = "خطا در ارسال پیامک" to
-                                        "کد ارسال نشد: ${response.message().ifBlank { response.code().toString() }}"
-                                }
-                            } catch (e: Exception) {
-                                alert = "خطا در ارسال پیامک" to NetworkHelper.getErrorMessage(e)
-                            } finally {
-                                loading = false
-                            }
-                        }
+    AuthCard(title = "بازیابی رمز") {
+        when (step) {
+            0 -> {
+                AuthField(phone, { phone = it }, "شماره موبایل", KeyboardType.Phone)
+                AuthButton("ادامه") {
+                    if (normalizePhone(phone) == null) {
+                        alert = "شماره نادرست" to "شماره موبایل باید ۱۱ رقم و با ۰۹ شروع شود."
+                        return@AuthButton
                     }
+                    step = 1
+                    alert = "کد تأیید" to "کد آزمایشی ${persianDigits(OTP)} را در ۶ خانه وارد کن."
                 }
-                1 -> {
-                    Text("کد پیامک را وارد کن", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Start)
-                    OtpBoxes(code) { code = it }
-                    AuthButton("مرحله بعد") {
-                        if (code.length < 6) {
-                            alert = "کد ناقص" to "شش رقم کد را درست و کامل وارد کن."
-                            return@AuthButton
-                        }
-                        step = 2
+            }
+            1 -> {
+                OtpBoxes(code) { code = it.filter { ch -> ch.isDigit() }.take(6) }
+                if (verified) Text("کد تأیید شد", color = CheckGreen, fontWeight = FontWeight.Bold, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Start)
+                AuthButton("مرحله بعد") {
+                    if (!verified) alert = "کد نادرست" to "شش رقم کد را درست وارد کن." else step = 2
+                }
+            }
+            else -> {
+                AuthPassword(password, { password = it }, "رمز جدید")
+                AuthPassword(confirm, { confirm = it }, "تکرار رمز")
+                AuthButton("بازیابی رمز") {
+                    if (password.length < 8 || password != confirm) {
+                        alert = "رمز" to "رمز حداقل ۸ کاراکتر باشد و با تکرارش یکی باشد."
+                        return@AuthButton
                     }
-                }
-                else -> {
-                    AuthPassword(password, { password = it }, "رمز جدید")
-                    AuthPassword(confirm, { confirm = it }, "تکرار رمز")
-                    AuthButton(if (loading) "در حال ذخیره..." else "بازیابی رمز") {
-                        if (loading) return@AuthButton
-                        if (password.length < 8 || password != confirm) {
-                            alert = "رمز" to "رمز حداقل ۸ کاراکتر باشد و با تکرارش یکی باشد."
-                            return@AuthButton
-                        }
-                        val normalized = normalizePhone(phone) ?: return@AuthButton
-                        
-                        loading = true
-                        scope.launch(Dispatchers.Main) {
-                            try {
-                                if (!NetworkHelper.isDeviceOnline(context)) {
-                                    alert = "خطا در شبکه" to "لطفاً اتصال اینترنت را بررسی کنید"
-                                    loading = false
-                                    return@launch
-                                }
-                                
-                                val response = withContext(Dispatchers.IO) {
-                                    val apiService = NetworkModule.getApiService()
-                                    val verifyRequest = OtpVerifyRequest(phone = normalized, code = code.toEnglishDigits().trim())
-                                    apiService.verifyOtp(verifyRequest)
-                                }
-                                
-                                if (response.status == "success") {
-                                    alert = "انجام شد" to "رمز تازه ذخیره شد. حالا وارد شو."
-                                    step = 3
-                                } else {
-                                    alert = "بازیابی" to (response.message ?: "کد وارد شده صحیح نیست.")
-                                }
-                                loading = false
-                            } catch (e: Exception) {
-                                alert = "بازیابی" to NetworkHelper.getErrorMessage(e)
-                                loading = false
-                            }
-                        }
+                    val normalized = normalizePhone(phone) ?: return@AuthButton
+                    try {
+                        app.db.reset(normalized, password)
+                        alert = "انجام شد" to "رمز تازه ذخیره شد. حالا وارد شو."
+                        step = 3
+                    } catch (e: Exception) {
+                        alert = "بازیابی" to (e.message ?: "خطا")
                     }
                 }
             }
-            AuthLinks("ورود", openLogin, "ثبت‌نام", openSignup)
         }
-        alert?.let { (title, body) ->
-            PrettyAlert(title, body, onConfirm = {
-                alert = null
-                if (step == 3) openLogin()
-            })
-        }
+        AuthLinks("ورود", openLogin, "ثبت‌نام", openSignup)
+    }
+    alert?.let { (title, body) ->
+        PrettyAlert(title, body, onConfirm = {
+            alert = null
+            if (step == 3) openLogin()
+        })
+    }
     }
 }
+
 @Composable
 private fun OtpBoxes(value: String, onChange: (String) -> Unit) {
-    val ok = value.length == 6 
+    val ok = value.length == 6 && value == OTP
     val border = if (ok) CheckGreen else Color(0xFFE5E7EB)
     BasicTextField(
         value,
-        { input -> onChange(input.toEnglishDigits().filter { it in '0'..'9' }.take(6)) },
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+        onChange,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
         singleLine = true,
         decorationBox = {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -2409,7 +1606,7 @@ private fun OtpBoxes(value: String, onChange: (String) -> Unit) {
                             .background(if (ok) Color(0xFFE8F5E9) else Color.White),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text(if (char.isEmpty()) "" else char, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                        Text(if (char.isEmpty()) "" else persianDigits(char), fontSize = 20.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -2535,31 +1732,14 @@ private fun AuthCodeRow(value: String, onChange: (String) -> Unit, request: () -
 }
 
 @Composable
-private fun AuthButton(label: String, loading: Boolean = false, onClick: () -> Unit) {
+private fun AuthButton(label: String, onClick: () -> Unit) {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val scale by animateFloatAsState(if (pressed) 0.95f else 1f, label = "auth-btn")
     Box(
-        Modifier.graphicsLayer { scaleX = scale; scaleY = scale }.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Color(0xFF29B6F6)).clickable(
-            interactionSource = interaction,
-            indication = null,
-            enabled = !loading,
-            onClick = onClick,
-        ).padding(vertical = 14.dp),
+        Modifier.graphicsLayer { scaleX = scale; scaleY = scale }.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Color(0xFF29B6F6)).clickable(interaction, null, onClick = onClick).padding(vertical = 14.dp),
         contentAlignment = Alignment.Center,
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
-            if (loading) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(18.dp),
-                    color = Color.White,
-                    strokeWidth = 2.dp,
-                )
-                Spacer(Modifier.width(10.dp))
-            }
-            Text(label, color = Color.White, fontWeight = FontWeight.Bold)
-        }
-    }
+    ) { Text(label, color = Color.White, fontWeight = FontWeight.Bold) }
 }
 
 @Composable
@@ -2881,7 +2061,6 @@ private fun isDeviceOnline(context: android.content.Context): Boolean {
     }.getOrDefault(true)
 }
 
-@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class, androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun ChatsScreen(
     app: App,
@@ -2901,62 +2080,15 @@ fun ChatsScreen(
     onComposerHandled: () -> Unit = {},
 ) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     var people by remember { mutableStateOf(app.db.people(userId)) }
     var creating by remember { mutableStateOf(false) }
+    var groupMode by remember { mutableStateOf(false) }
     var draft by remember { mutableStateOf("") }
     var query by remember { mutableStateOf("") }
     var searching by remember { mutableStateOf(false) }
     var filter by remember { mutableStateOf("all") }
     var menu by remember { mutableStateOf(false) }
     var alert by remember { mutableStateOf<Pair<String, String>?>(null) }
-
-    // بازخوانی کامل از سرور (Cloud-Driven). سرور منبع حقیقت است و SQLite فقط کش موقت/آفلاین.
-    // ۱. اگر دیتابیس لوکال خالی باشد (نصب مجدد/پاک‌شدن کش)، لودینگ «بازیابی ابری» نمایش داده می‌شود.
-    var syncingInitial by remember { mutableStateOf(false) }
-    var refreshing by remember { mutableStateOf(false) }
-
-    suspend fun refreshFromServer() {
-        app.refreshAppDataFromServer(userId)
-        people = app.db.people(userId)
-    }
-
-    LaunchedEffect(userId) {
-        if (app.db.isLocalDataEmpty(userId)) {
-            syncingInitial = true
-            app.refreshAppDataFromServer(userId)
-            people = app.db.people(userId)
-            syncingInitial = false
-        } else if (app.shouldTriggerAutoSync()) {
-            // حتی اگر کش محلی موجود است، در پس‌زمینه از سرور همگام می‌شویم (با احترام به کول‌داون).
-            refreshFromServer()
-        }
-    }
-
-    // ۲. رفرش زنده هنگام بازگشت به تب چت‌ها (onResume) — فقط اگر دیتابیس کاملاً خالی باشد
-    // یا از آخرین سینک موفق بیش از ۶۰ ثانیه گذشته باشد؛ تا از بمباران درخواست‌ها جلوگیری شود.
-    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
-        val isDbEmpty = app.db.isLocalDataEmpty(userId)
-        val canAutoSync = app.shouldTriggerAutoSync(cooldownMillis = 60_000L)
-        if (isDbEmpty || canAutoSync) {
-            scope.launch {
-                refreshing = true
-                try { refreshFromServer() } finally { refreshing = false }
-            }
-        }
-    }
-
-    // فیلتر بر اساس تب فعال و مخفی‌سازی چت‌های بایگانی‌شده در تب‌های عادی
-    val filteredPeople = remember(people, filter) {
-        when (filter) {
-            "archived", "بایگانی" -> people.filter { it.archived }
-            "chats", "گفتگوها" -> people.filter { !it.archived && !it.isGroup && !it.saved }
-            "notes", "یادداشت‌ها" -> people.filter { !it.archived && it.hasNote }
-            "saved", "پرونده‌ها" -> people.filter { !it.archived && it.saved }
-            else -> people.filter { !it.archived } // تب «همه»
-        }
-    }
-
     val account = app.db.user(userId)
     LaunchedEffect(openComposer, draftPhone) {
         if (openComposer) {
@@ -2970,14 +2102,11 @@ fun ChatsScreen(
             "note" -> it.hasNote
             "direct" -> !it.isGroup
             "group" -> it.isGroup
-            "archive" -> it.archived
-            "files" -> it.lastKind?.let { kind -> kind.contains("voice", ignoreCase = true) || kind.contains("video", ignoreCase = true) || kind.contains("image", ignoreCase = true) } ?: false
-            else -> !it.archived
+            else -> true
         }
     }
     val palette = LocalTg.current
     val dark = palette.dark
-    val chatPalette = LocalChatPalette.current
     val listState = rememberLazyListState()
     val arrived = remember { mutableStateListOf<String>() }
     val scrolled by remember { derivedStateOf { listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 4 } }
@@ -3002,18 +2131,13 @@ fun ChatsScreen(
                         alert = "حالت مهمان" to "در حالت مهمان فقط یک نفر می‌توانید اضافه کنید."
                     } else {
                         draft = ""
+                        groupMode = false
                         creating = !creating
                     }
                 },
                 shape = CircleShape,
-                containerColor = chatPalette.primary,
+                containerColor = if (creating) Blue.copy(alpha = 0.85f) else Blue,
                 contentColor = Color.White,
-                elevation = FloatingActionButtonDefaults.elevation(
-                    defaultElevation = 0.dp,
-                    pressedElevation = 0.dp,
-                    focusedElevation = 0.dp,
-                    hoveredElevation = 0.dp,
-                ),
                 modifier = Modifier
                     .graphicsLayer {
                         val scale = fabScale * fabPop.value
@@ -3021,18 +2145,10 @@ fun ChatsScreen(
                         scaleY = scale
                         alpha = fabFade.value
                     }
-                    .padding(bottom = 80.dp, start = 16.dp)
                     .size(56.dp)
-                    .shadow(6.dp, CircleShape)
+                    .border(if (creating) 2.dp else 0.dp, Color.White, CircleShape)
             ) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Icon(
-                        if (creating) Icons.Filled.Close else Icons.Filled.Edit,
-                        "شخص جدید",
-                        tint = Color.White,
-                        modifier = Modifier.size(26.dp),
-                    )
-                }
+                Icon(if (creating) Icons.Filled.Close else Icons.Filled.Edit, "شخص جدید", modifier = Modifier.size(24.dp))
             }
         }
     ) { paddingValues ->
@@ -3053,82 +2169,32 @@ fun ChatsScreen(
             Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                 Box {
                     IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, "منو", tint = headerInk, modifier = Modifier.size(22.dp)) }
-                    DropdownMenu(
-                        expanded = menu,
-                        onDismissRequest = { menu = false },
-                        modifier = Modifier
-                            .shadow(6.dp, RoundedCornerShape(20.dp))
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(palette.surface, RoundedCornerShape(20.dp))
-                            .border(
-                                BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.12f)),
-                                RoundedCornerShape(20.dp),
-                            )
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text(if (darkTheme) "حالت روز" else "حالت شب") }, 
-                            leadingIcon = { Icon(if (darkTheme) Icons.Filled.LightMode else Icons.Filled.DarkMode, null) }, 
-                            onClick = { menu = false; onToggleTheme() }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("پیام‌های ذخیره‌شده") }, 
-                            leadingIcon = { Icon(Icons.Filled.PushPin, null) }, 
-                            onClick = {
-                                menu = false
-                                open(app.db.ensureSaved(userId))
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("اطلاعیه‌ها") }, 
-                            leadingIcon = { Icon(Icons.Filled.Notifications, null) },
-                            onClick = { menu = false; onNotices() }
-                        )
-                        if (isAdmin(account?.phone)) {
-                            DropdownMenuItem(
-                                text = { Text("پنل ادمین") }, 
-                                leadingIcon = { Icon(Icons.Filled.AdminPanelSettings, null) },
-                                onClick = { menu = false; onAdmin() }
-                            )
-                        }
+                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                        DropdownMenuItem(text = { Text(if (darkTheme) "حالت روز" else "حالت شب") }, leadingIcon = { Icon(Icons.Filled.DarkMode, null) }, onClick = { menu = false; onToggleTheme() })
+                        DropdownMenuItem(text = { Text("گروه جدید") }, leadingIcon = { Icon(Icons.Filled.Person, null) }, onClick = {
+                            menu = false
+                            if (account?.plan == "guest" && people.any { !it.saved }) alert = "حالت مهمان" to "در حالت مهمان فقط یک نفر می‌توانید اضافه کنید."
+                            else { draft = ""; groupMode = true; creating = true }
+                        })
+                        DropdownMenuItem(text = { Text("پیام‌های ذخیره‌شده") }, leadingIcon = { Icon(Icons.Filled.PushPin, null) }, onClick = {
+                            menu = false
+                            open(app.db.ensureSaved(userId))
+                        })
+                        DropdownMenuItem(text = { Text("اطلاعیه‌ها") }, onClick = { menu = false; onNotices() })
+                        if (isAdmin(account?.phone)) DropdownMenuItem(text = { Text("ادمین") }, onClick = { menu = false; onAdmin() })
                     }
                 }
                 if (account != null) {
-                    // منطق نمایش براساس plan
-                    val isSubscribed = account.plan == "plus" || account.plan == "smart"
-                    val planExpiresAt = account.planExpiresAt
-                    val remainingDays = if (isSubscribed && planExpiresAt != null && planExpiresAt > System.currentTimeMillis()) {
-                        val diff = planExpiresAt - System.currentTimeMillis()
-                        (diff / (1000 * 60 * 60 * 24)).coerceAtLeast(1)
-                    } else 0
-                    
                     Row(
                         Modifier
                             .clip(RoundedCornerShape(20.dp))
-                            .background(
-                                if (isSubscribed) Brush.horizontalGradient(listOf(Color(0xFFFFD700).copy(alpha = 0.15f), Color(0xFFFFD700).copy(alpha = 0.08f)))
-                                else Brush.horizontalGradient(listOf(Blue.copy(alpha = 0.20f), Blue.copy(alpha = 0.12f)))
-                            )
+                            .background(Brush.horizontalGradient(listOf(Blue.copy(alpha = 0.20f), Blue.copy(alpha = 0.12f))))
                             .clickable(onClick = onPay)
                             .padding(horizontal = 10.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Icon(
-                            if (isSubscribed) Icons.Filled.Star else Icons.Filled.Wallet, 
-                            null, 
-                            tint = if (isSubscribed) Color(0xFFFFD700) else palette.blue, 
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Text(
-                            if (isSubscribed) {
-                                if (remainingDays > 0) "اشتراک: $remainingDays روز باقیمانده"
-                                else "اشتراک منقضی شده"
-                            } else {
-                                "موجودی: ${formatToman(account.balance)} تومان"
-                            },
-                            color = palette.text, 
-                            fontSize = 12.sp, 
-                            modifier = Modifier.padding(start = 6.dp)
-                        )
+                        Icon(Icons.Filled.Wallet, null, tint = palette.blue, modifier = Modifier.size(16.dp))
+                        Text("موجودی: ${formatToman(account.balance)} تومان", color = palette.text, fontSize = 12.sp, modifier = Modifier.padding(start = 6.dp))
                     }
                 }
                 Spacer(Modifier.weight(1f))
@@ -3292,63 +2358,29 @@ fun ChatsScreen(
             OfflineBanner()
             }
             }
-            PullToRefreshBox(
-                isRefreshing = refreshing,
-                onRefresh = {
-                    scope.launch {
-                        refreshing = true
-                        try { refreshFromServer() } finally { refreshing = false }
-                    }
-                },
-                modifier = Modifier.weight(1f).fillMaxWidth(),
-            ) {
-            LazyColumn(Modifier.fillMaxSize(), state = listState) {
-                if (syncingInitial) {
-                    item(key = "initial-sync") {
-                        Box(
-                            Modifier.fillMaxWidth().padding(vertical = 24.dp),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                CircularProgressIndicator(color = chatPalette.primary)
-                                Text(
-                                    "در حال بازیابی گفتگوها از سرور…",
-                                    color = palette.subtext,
-                                    fontSize = 13.sp,
-                                    modifier = Modifier.padding(top = 12.dp),
-                                )
-                            }
-                        }
-                    }
-                }
+            LazyColumn(Modifier.weight(1f), state = listState) {
                 if (!contacts && account?.plan == "advanced") {
                     item(key = "ai-chat") {
                         RiseRow("ai", 0, arrived) {
                         Column(Modifier.fillMaxWidth().clickable(onClick = onAi)) {
-                            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Box(Modifier.size(44.dp).clip(CircleShape).background(Blue), contentAlignment = Alignment.Center) {
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                Box(Modifier.padding(horizontal = 16.dp, vertical = 10.dp).size(52.dp).clip(CircleShape).background(Blue), contentAlignment = Alignment.Center) {
                                     Icon(Icons.Filled.AutoAwesome, null, tint = Color.White)
                                 }
-                                Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
-                                    Text("چت با هوش مصنوعی", color = if (dark) Color.White else Color(0xFF111827), fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                                    Text("یکی از گفتگوها را انتخاب کن", color = Color(0xFF94A3B8), fontSize = 12.sp)
+                                Column(Modifier.weight(1f).padding(vertical = 10.dp)) {
+                                    Text("چت با هوش مصنوعی", color = if (dark) Color.White else Color(0xFF111827), fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+                                    Text("یکی از گفتگوها را انتخاب کن", color = Color(0xFF6B7280), fontSize = 14.sp)
                                 }
-                                Spacer(Modifier.width(4.dp))
+                                Spacer(Modifier.width(16.dp))
                             }
                             if (shown.isNotEmpty()) {
-                                Box(Modifier.padding(start = 72.dp, end = 16.dp).fillMaxWidth().height(0.5.dp).background(rowLine))
+                                Box(Modifier.padding(start = 76.dp, end = 16.dp).fillMaxWidth().height(0.5.dp).background(rowLine))
                             }
                         }
                         }
                     }
                 }
                 itemsIndexed(shown, key = { _, person -> person.id }) { index, person ->
-                    var showContextMenu by remember { mutableStateOf(false) }
-                    var deletedPersonId by remember { mutableStateOf<String?>(null) }
-                    var snackbarMessage by remember { mutableStateOf("") }
-                    var snackbarVisible by remember { mutableStateOf(false) }
-                    val snackbarHostState = remember { SnackbarHostState() }
-                    
                     RiseRow(person.id, index, arrived) {
                         Card(
                             shape = RoundedCornerShape(28.dp),
@@ -3356,23 +2388,20 @@ fun ChatsScreen(
                             elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 4.dp)
-                                .combinedClickable(
-                                    onClick = { open(person.id) },
-                                    onLongClick = { showContextMenu = true }
-                                )
+                                .padding(horizontal = 16.dp, vertical = 8.dp)
+                                .clickable { open(person.id) }
                         ) {
                             Row(
-                                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                PersonAvatar(person.name, person.avatar, size = 44.dp)
+                                PersonAvatar(person.name, person.avatar, size = 52.dp)
                                 Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
                                     Text(
                                         person.name,
                                         color = if (dark) Color.White else Color(0xFF1E293B),
-                                        fontWeight = FontWeight.SemiBold,
-                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 15.sp,
                                         maxLines = 1
                                     )
                                     val subtitle = if (contacts) {
@@ -3383,8 +2412,8 @@ fun ChatsScreen(
                                     }
                                     Text(
                                         subtitle,
-                                        color = if (dark) Color(0xFF94A3B8) else Color(0xFF94A3B8),
-                                        fontSize = 12.sp,
+                                        color = if (dark) Color(0xFF94A3B8) else Color(0xFF64748B),
+                                        fontSize = 13.sp,
                                         maxLines = 1,
                                     )
                                 }
@@ -3398,163 +2427,7 @@ fun ChatsScreen(
                             }
                         }
                     }
-                    
-                    // Context Menu Bottom Sheet
-                    if (showContextMenu) {
-                        ModalBottomSheet(
-                            onDismissRequest = { showContextMenu = false },
-                            containerColor = if (dark) Color(0xFF1E293B) else Color.White,
-                            scrimColor = Color.Black.copy(alpha = 0.32f)
-                        ) {
-                            Column(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 16.dp, vertical = 16.dp),
-                                verticalArrangement = Arrangement.spacedBy(12.dp),
-                                horizontalAlignment = Alignment.End
-                            ) {
-                                Text(
-                                    person.name,
-                                    color = if (dark) Color.White else Color(0xFF1E293B),
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 16.sp,
-                                    modifier = Modifier.fillMaxWidth(),
-                                    textAlign = TextAlign.End
-                                )
-                                Divider(color = if (dark) Color.White.copy(0.1f) else Color.Black.copy(0.1f), thickness = 1.dp, modifier = Modifier.fillMaxWidth())
-                                
-                                // Archive/Unarchive button (فقط برای چت‌های شخصی)
-                                if (!person.isGroup) {
-                                    Button(
-                                        onClick = {
-                                            val isArchiving = !person.archived
-                                            app.db.updatePersonArchived(person.id, isArchiving)
-                                            people = app.db.people(userId)
-                                            showContextMenu = false
-                                            snackbarMessage = if (isArchiving) "گفتگو بایگانی شد" else "گفتگو از بایگانی خارج شد"
-                                            snackbarVisible = true
-                                        },
-                                        shape = RoundedCornerShape(12.dp),
-                                        colors = ButtonDefaults.buttonColors(
-                                            containerColor = if (dark) Color(0xFF334155) else Color(0xFFF1F5F9),
-                                            contentColor = if (dark) Color(0xFF94A3B8) else Color(0xFF64748B)
-                                        ),
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        Text(
-                                            if (person.archived) "خروج از بایگانی" else "بایگانی گفتگو",
-                                            fontSize = 14.sp,
-                                            fontWeight = FontWeight.Medium
-                                        )
-                                    }
-                                }
-                                
-                                // Delete / Leave button
-                                val isTeamOwner = person.isGroup && app.db.teamCreatorId(person.id) == userId
-                                Button(
-                                    onClick = {
-                                        showContextMenu = false
-                                        if (person.isGroup) {
-                                            scope.launch {
-                                                val res = runCatching {
-                                                    withContext(Dispatchers.IO) {
-                                                        if (isTeamOwner) NetworkModule.getApiService().deleteTeam(person.id, userId)
-                                                        else NetworkModule.getApiService().leaveTeam(person.id, userId, userId)
-                                                    }
-                                                }.getOrNull()
-                                                if (res != null && res.isSuccessful) {
-                                                    app.db.deleteTeamLocally(person.id)
-                                                    people = app.db.people(userId)
-                                                    snackbarMessage = if (isTeamOwner) "تیم حذف شد" else "از تیم خارج شدید"
-                                                } else {
-                                                    snackbarMessage = if (isTeamOwner) "خطا در حذف تیم" else "خطا در ترک تیم"
-                                                }
-                                                snackbarVisible = true
-                                            }
-                                        } else {
-                                            deletedPersonId = person.id
-                                            snackbarMessage = "گفتگو حذف شد"
-                                            snackbarVisible = true
-                                        }
-                                    },
-                                    shape = RoundedCornerShape(12.dp),
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = Color(0xFFEF4444).copy(alpha = 0.15f),
-                                        contentColor = Color(0xFFDC2626)
-                                    ),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Text(
-                                        when {
-                                            isTeamOwner -> "حذف تیم"
-                                            person.isGroup -> "ترک تیم"
-                                            else -> "حذف گفتگو"
-                                        },
-                                        fontSize = 14.sp,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                }
-                                
-                                // Cancel button
-                                Button(
-                                    onClick = { showContextMenu = false },
-                                    shape = RoundedCornerShape(12.dp),
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = Color.Transparent,
-                                        contentColor = if (dark) Color(0xFF94A3B8) else Color(0xFF64748B)
-                                    ),
-                                    border = BorderStroke(1.dp, if (dark) Color.White.copy(0.2f) else Color.Black.copy(0.1f)),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Text(
-                                        "لغو",
-                                        fontSize = 14.sp,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                }
-                                
-                                Spacer(Modifier.height(16.dp))
-                            }
-                        }
-                    }
-                    
-                    // Delete / Team action - Snackbar
-                    if (snackbarVisible) {
-                        LaunchedEffect(deletedPersonId) {
-                            val isDeletePending = deletedPersonId == person.id
-                            val result = snackbarHostState.showSnackbar(
-                                message = snackbarMessage,
-                                actionLabel = if (isDeletePending) "بازگردانی" else null,
-                                duration = SnackbarDuration.Long,
-                                withDismissAction = true
-                            )
-                            if (!isDeletePending) {
-                                // پیام‌های عملیات تیم (حذف/ترک) فقط اطلاع‌رسانی هستند
-                                snackbarVisible = false
-                            } else {
-                                when (result) {
-                                    SnackbarResult.ActionPerformed -> {
-                                        // Undo delete - restoration would require additional logic
-                                        snackbarVisible = false
-                                        deletedPersonId = null
-                                    }
-                                    SnackbarResult.Dismissed -> {
-                                        // Actually delete after snackbar timeout
-                                        try {
-                                            app.db.deletePerson(person.id)
-                                            people = app.db.people(userId)
-                                        } catch (e: Exception) {
-                                            snackbarMessage = "خطا در حذف: ${e.message ?: "نامشخص"}"
-                                        }
-                                        snackbarVisible = false
-                                        deletedPersonId = null
-                                    }
-                                }
-                            }
-                        }
-                    }
                 }
-            }
             }
         }
         if (searching) {
@@ -3581,7 +2454,7 @@ fun ChatsScreen(
             exit = slideOutVertically(tween(240)) { it } + fadeOut(tween(180)),
             modifier = Modifier.align(Alignment.BottomCenter),
         ) {
-            AddPersonSheet(app, userId, draft, onClose = { creating = false }, onSaved = {
+            AddPersonSheet(app, userId, draft, groupMode, onClose = { creating = false; groupMode = false }, onSaved = {
                         people = app.db.people(userId)
                         creating = false
             }, onError = { alert = "شخص جدید" to it })
@@ -3664,6 +2537,7 @@ private fun AddPersonSheet(
     app: App,
     userId: String,
     initialPhone: String,
+    groupMode: Boolean = false,
     onClose: () -> Unit,
     onSaved: () -> Unit,
     onError: (String) -> Unit = {},
@@ -3674,6 +2548,8 @@ private fun AddPersonSheet(
     var phone by remember(initialPhone) { mutableStateOf(initialPhone) }
     var role by remember { mutableStateOf("") }
     var avatar by remember { mutableStateOf<String?>(null) }
+    var memberDraft by remember { mutableStateOf("") }
+    var members by remember { mutableStateOf(listOf<String>()) }
     var crop by remember { mutableStateOf<Bitmap?>(null) }
     val scope = rememberCoroutineScope()
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
@@ -3704,16 +2580,26 @@ private fun AddPersonSheet(
             Icon(Icons.Filled.Star, null, tint = Color(0xFFFFC107), modifier = Modifier.padding(horizontal = 8.dp))
             Box(Modifier.size(46.dp).clip(CircleShape).background(Color(0xFF7E57C2)), contentAlignment = Alignment.Center) { Icon(Icons.Outlined.Person, null, tint = Color.White) }
         }
-        Text("افزودن شخص جدید", color = if (dark) Color.White else palette.text, fontWeight = FontWeight.Bold, fontSize = 20.sp, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
+        Text(if (groupMode) "گروه جدید" else "افزودن شخص جدید", color = if (dark) Color.White else palette.text, fontWeight = FontWeight.Bold, fontSize = 20.sp, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
         Box(Modifier.padding(top = 10.dp).align(Alignment.CenterHorizontally).clickable { picker.launch("image/*") }) {
             PersonAvatar(name.ifBlank { "؟" }, avatar, size = 72.dp)
             Box(Modifier.align(Alignment.BottomEnd).size(24.dp).clip(CircleShape).background(Blue), contentAlignment = Alignment.Center) {
                 Icon(Icons.Filled.CameraAlt, null, tint = Color.White, modifier = Modifier.size(14.dp))
             }
         }
-        SheetField(name, { name = it }, "نام", Icons.Outlined.Person, dark)
-        SheetField(phone, { phone = it }, "شماره موبایل", Icons.Filled.Phone, dark, KeyboardType.Phone)
-        SheetField(role, { role = it }, "سمت", Icons.Filled.Star, dark)
+        SheetField(name, { name = it }, if (groupMode) "نام گروه" else "نام", Icons.Outlined.Person, dark)
+        if (!groupMode) {
+            SheetField(phone, { phone = it }, "شماره موبایل", Icons.Filled.Phone, dark, KeyboardType.Phone)
+            SheetField(role, { role = it }, "سمت", Icons.Filled.Star, dark)
+        }
+        SheetField(memberDraft, { memberDraft = it }, "نام عضو", Icons.Filled.Person, dark)
+        Text("افزودن عضو", color = Blue, modifier = Modifier.padding(top = 6.dp).clickable {
+            if (memberDraft.isNotBlank()) {
+                members = members + memberDraft.trim()
+                memberDraft = ""
+            }
+        })
+        if (members.isNotEmpty()) Text(members.joinToString("، "), color = palette.subtext, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
         val pressed = remember { MutableInteractionSource() }
         val down by pressed.collectIsPressedAsState()
         val scale by animateFloatAsState(if (down) 0.98f else 1f, label = "save-person")
@@ -3734,7 +2620,7 @@ private fun AddPersonSheet(
                         return@clickable
                     }
                     try {
-                        app.db.addPerson(userId, name, phone, role, avatar)
+                        app.db.addPerson(userId, name, if (groupMode) "" else phone, role, avatar, if (groupMode) members else members)
                         if (!isDeviceOnline(context)) app.db.enqueue("person", name)
                         onSaved()
                     } catch (e: Exception) {
@@ -3746,7 +2632,7 @@ private fun AddPersonSheet(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Filled.Check, null, tint = Color.White, modifier = Modifier.size(18.dp))
-                Text("ثبت شخص جدید", color = Color.White, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 8.dp))
+                Text(if (groupMode) "ساخت گروه" else "ثبت شخص جدید", color = Color.White, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 8.dp))
             }
         }
     }
@@ -3789,27 +2675,15 @@ private fun SheetField(value: String, onChange: (String) -> Unit, label: String,
     }
 }
 
-/** فرمت زمان نسبی فارسی برای آخرین پیام (چند لحظه پیش، X دقیقه پیش، X ساعت پیش، دیروز، X روز پیش، X ماه پیش). */
-private fun timeAgoFa(ms: Long): String {
+private fun listStamp(ms: Long): String {
     if (ms <= 0L) return ""
-    val diff = System.currentTimeMillis() - ms
-    // زمان آینده یا نامشخص: ساعت خام همان روز
-    if (diff < 0L) return persianDigits(SimpleDateFormat("HH:mm", Locale.US).format(Date(ms)))
-    val minutes = diff / 60_000L
-    val hours = diff / 3_600_000L
-    val days = diff / 86_400_000L
-    return when {
-        minutes < 1L -> "چند لحظه پیش"
-        minutes < 60L -> "${persianDigits(minutes.toString())} دقیقه پیش"
-        hours < 24L -> "${persianDigits(hours.toString())} ساعت پیش"
-        days == 1L -> "دیروز"
-        days < 30L -> "${persianDigits(days.toString())} روز پیش"
-        days < 365L -> "${persianDigits((days / 30L).toString())} ماه پیش"
-        else -> "${persianDigits((days / 365L).toString())} سال پیش"
-    }
+    val now = java.util.Calendar.getInstance()
+    val day = java.util.Calendar.getInstance().apply { timeInMillis = ms }
+    val same = now.get(java.util.Calendar.YEAR) == day.get(java.util.Calendar.YEAR) && now.get(java.util.Calendar.DAY_OF_YEAR) == day.get(java.util.Calendar.DAY_OF_YEAR)
+    if (same) return SimpleDateFormat("HH:mm", Locale.US).format(Date(ms))
+    if (now.timeInMillis - ms < 7L * 24 * 60 * 60 * 1000) return SimpleDateFormat("EEE", Locale.US).format(Date(ms))
+    return SimpleDateFormat("MM/dd", Locale.US).format(Date(ms))
 }
-
-private fun listStamp(ms: Long): String = timeAgoFa(ms)
 
 private val media = listOf(
     "phone" to "📞 تماس تلفنی",
@@ -3863,71 +2737,6 @@ private fun jalaliDayLabel(millis: Long): String {
 private fun jalaliShort(millis: Long): String {
     val (y, m, d) = jalaliOf(millis)
     return persianDigits(String.format(Locale.US, "%04d/%02d/%02d", y, m, d))
-}
-
-/** تاریخ شمسی سبک برای انتخاب‌گر بازه. */
-private data class JalaliDate(val year: Int, val month: Int, val day: Int) {
-    fun toFormattedString(): String = String.format(Locale.US, "%04d/%02d/%02d", year, month, day)
-}
-
-/**
- * تبدیل تاریخ شمسی به میلی‌ثانیه.
- * الگوریتم استاندارد ریاضی جلالی ← میلادی (بدون وابستگی خارجی).
- * اگر endOfDay=true باشد، انتهای همان روز (۰۰:۰۰ روز بعد منهای ۱ms) برگردانده می‌شود.
- */
-private fun jalaliToEpochMillis(year: Int, month: Int, day: Int, endOfDay: Boolean = false): Long {
-    val jy = (year + 1595).toLong()
-    var days = -355668L + (365L * jy) + ((jy / 33L) * 8L) + (((jy % 33L) + 3L) / 4L) + day.toLong()
-    days += if (month < 7) (month - 1) * 31L else ((month - 7) * 30L) + 186L
-
-    var gy = 400L * (days / 146097L)
-    days %= 146097L
-    if (days > 36524L) {
-        days -= 1
-        gy += 100L * (days / 36524L)
-        days %= 36524L
-        if (days >= 365L) days += 1
-    }
-    gy += 4L * (days / 1461L)
-    days %= 1461L
-    if (days > 365L) {
-        gy += (days - 1) / 365L
-        days = (days - 1) % 365L
-    }
-
-    var gd = (days + 1).toInt()
-    val leap = (gy % 4L == 0L && gy % 100L != 0L) || (gy % 400L == 0L)
-    val monthDays = intArrayOf(0, 31, if (leap) 29 else 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
-    var gm = 0
-    while (gm < 13 && gd > monthDays[gm]) {
-        gd -= monthDays[gm]
-        gm++
-    }
-
-    val cal = java.util.Calendar.getInstance()
-    cal.clear()
-    if (endOfDay) {
-        cal.set(gy.toInt(), gm - 1, gd, 23, 59, 59)
-        cal.set(java.util.Calendar.MILLISECOND, 999)
-    } else {
-        cal.set(gy.toInt(), gm - 1, gd, 0, 0, 0)
-        cal.set(java.util.Calendar.MILLISECOND, 0)
-    }
-    return cal.timeInMillis
-}
-
-/** بررسی کبیسه بودن سال شمسی با مقایسه طول سال (سازگار با jalaliToEpochMillis). */
-private fun isJalaliLeapYear(year: Int): Boolean {
-    val start = jalaliToEpochMillis(year, 1, 1, false)
-    val next = jalaliToEpochMillis(year + 1, 1, 1, false)
-    return (next - start) / 86_400_000L == 366L
-}
-
-/** تعداد روزهای یک ماه شمسی (۱ تا ۳۱) با احتساب کبیسه اسفند. */
-private fun daysInJalaliMonth(year: Int, month: Int): Int = when {
-    month <= 6 -> 31
-    month <= 11 -> 30
-    else -> if (isJalaliLeapYear(year)) 30 else 29
 }
 
 private fun dayKey(millis: Long): Long = millis / 86_400_000L
@@ -4030,13 +2839,13 @@ private fun RangeChips(selected: Int, dark: Boolean, onSelect: (Int) -> Unit) {
                 }
             }
         }
-        val onAll = selected == 6
+        val onAll = selected == 5
         Text(
             "همۀ گفتگوها",
             color = if (onAll) Color.White else if (dark) Color(0xFFD1D5DB) else Color(0xFF4B5563),
             fontSize = 12.sp,
             textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth().padding(top = 6.dp).clip(RoundedCornerShape(12.dp)).background(if (onAll) Blue else chipBg).clickable { onSelect(6) }.padding(vertical = 8.dp),
+            modifier = Modifier.fillMaxWidth().padding(top = 6.dp).clip(RoundedCornerShape(12.dp)).background(if (onAll) Blue else chipBg).clickable { onSelect(5) }.padding(vertical = 8.dp),
         )
     }
 }
@@ -4070,11 +2879,8 @@ private fun ChatTopBar(
     onAll: () -> Unit,
     onNotes: () -> Unit,
     onDeleteIdentity: () -> Unit,
-    isGroup: Boolean = false,
-    isCreator: Boolean = false,
 ) {
     val dark = LocalDark.current
-    val palette = LocalTg.current
     val ink = if (dark) Color.White else LocalAppTheme.current.onContainerColor
     val sub = if (dark) Color(0xFF9CA3AF) else Color(0xFF6B7280)
     val action = if (dark) Color(0xFFD1D5DB) else LocalAppTheme.current.onContainerColor
@@ -4116,85 +2922,16 @@ private fun ChatTopBar(
                             Icon(Icons.Filled.MoreVert, "منو", tint = action, modifier = Modifier.size(20.dp))
                         }
                     }
-                    DropdownMenu(
-                        expanded = menu,
-                        onDismissRequest = { menu = false },
-                        modifier = Modifier
-                            .shadow(6.dp, RoundedCornerShape(20.dp))
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(palette.surface, RoundedCornerShape(20.dp))
-                            .border(
-                                BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.12f)),
-                                RoundedCornerShape(20.dp),
-                            )
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text(if (isGroup) "اطلاعات تیم" else "مشخصات هویت") }, 
-                            leadingIcon = { Icon(Icons.Filled.Info, null) },
-                            onClick = { menu = false; onInfo() }
-                        )
-                        if (!isGroup || isCreator) {
-                            DropdownMenuItem(
-                                text = { Text(if (isGroup) "ویرایش تیم" else "ویرایش هویت") }, 
-                                leadingIcon = { Icon(Icons.Filled.Edit, null) },
-                                onClick = { menu = false; onEditIdentity() }
-                            )
-                        }
-                        DropdownMenuItem(
-                            text = { Text("خلاصه‌سازی") }, 
-                            leadingIcon = { Icon(Icons.Filled.AutoAwesome, null) },
-                            onClick = { menu = false; onSummary() }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("خروجی گزارش") }, 
-                            leadingIcon = { Icon(Icons.Filled.Download, null) },
-                            onClick = { menu = false; onExport() }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("ساخت پرونده") }, 
-                            leadingIcon = { Icon(Icons.Filled.Save, null) },
-                            onClick = { menu = false; onBuildFile() }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("جستجو") }, 
-                            leadingIcon = { Icon(Icons.Filled.Search, null) },
-                            onClick = { menu = false; onSearch() }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("همۀ گزاره‌ها") }, 
-                            leadingIcon = { Icon(Icons.Filled.ViewList, null) },
-                            onClick = { menu = false; onAll() }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("یادداشت‌ها") }, 
-                            leadingIcon = { Icon(Icons.Filled.Note, null) },
-                            onClick = { menu = false; onNotes() }
-                        )
-                        Divider()
-                        val deleteInteraction = remember { MutableInteractionSource() }
-                        val deletePressed by deleteInteraction.collectIsPressedAsState()
-                        DropdownMenuItem(
-                            text = {
-                                Text(
-                                    when {
-                                        isGroup && isCreator -> "حذف تیم"
-                                        isGroup -> "ترک تیم"
-                                        else -> "حذف هویت"
-                                    },
-                                    color = Color(0xFFE53935),
-                                )
-                            },
-                            leadingIcon = { Icon(Icons.Filled.Delete, null, tint = Color(0xFFE53935)) },
-                            onClick = { menu = false; onDeleteIdentity() },
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(if (deletePressed) Color(0xFFE53935).copy(alpha = 0.10f) else Color.Transparent),
-                            interactionSource = deleteInteraction,
-                            colors = MenuDefaults.itemColors(
-                                textColor = Color(0xFFE53935),
-                                leadingIconColor = Color(0xFFE53935),
-                            ),
-                        )
+                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                        DropdownMenuItem(text = { Text("مشخصات هویت") }, onClick = { menu = false; onInfo() })
+                        DropdownMenuItem(text = { Text("ویرایش هویت") }, onClick = { menu = false; onEditIdentity() })
+                        DropdownMenuItem(text = { Text("خلاصه‌سازی") }, onClick = { menu = false; onSummary() })
+                        DropdownMenuItem(text = { Text("خروجی گزارش") }, onClick = { menu = false; onExport() })
+                        DropdownMenuItem(text = { Text("ساخت پرونده از گزارش") }, onClick = { menu = false; onBuildFile() })
+                        DropdownMenuItem(text = { Text("جستجو در گزاره‌ها") }, onClick = { menu = false; onSearch() })
+                        DropdownMenuItem(text = { Text("همۀ گزاره‌ها") }, onClick = { menu = false; onAll() })
+                        DropdownMenuItem(text = { Text("فقط یادداشت‌ها") }, onClick = { menu = false; onNotes() })
+                        DropdownMenuItem(text = { Text("حذف هویت", color = Color.Red) }, onClick = { menu = false; onDeleteIdentity() })
                     }
                 }
                 Surface(shape = CircleShape, shadowElevation = 2.dp, color = pill) {
@@ -4239,7 +2976,6 @@ private fun IdentitySheet(
     onSendMessage: () -> Unit,
     onEdit: () -> Unit,
     onReports: () -> Unit,
-    onAvatarPick: (() -> Unit)? = null,
 ) {
     val dark = LocalDark.current
     val context = LocalContext.current
@@ -4254,13 +2990,7 @@ private fun IdentitySheet(
             Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 28.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Box(
-                Modifier
-                    .then(if (onAvatarPick != null) Modifier.clip(CircleShape).clickable(onClick = onAvatarPick) else Modifier),
-                contentAlignment = Alignment.Center,
-            ) {
-                PersonAvatar(name, avatar, size = 96.dp)
-            }
+            PersonAvatar(name, avatar, size = 96.dp)
             Text(name, color = ink, fontWeight = FontWeight.Bold, fontSize = 20.sp, modifier = Modifier.padding(top = 12.dp))
             if (showPhone) {
                 Text(if (phone.isBlank()) "شماره ثبت نشده" else persianDigits(phone), color = muted, fontSize = 12.sp, modifier = Modifier.padding(top = 3.dp))
@@ -4302,7 +3032,7 @@ private fun IdentitySheet(
                     Text(persianDigits(entries.size.toString()), color = ink, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                 }
             }
-            Row(Modifier.fillMaxWidth().padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(Modifier.fillMaxWidth().padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 IdentityAction("ارسال پیام", Icons.AutoMirrored.Filled.Send, true) { toast = "نویسنده پیام پایین صفحه فعال است"; onSendMessage() }
                 IdentityAction("ویرایش مخاطب", Icons.Filled.Edit, false) { onEdit() }
                 IdentityAction("مشاهده گزارش‌ها", Icons.Filled.Download, false) { onReports() }
@@ -4322,21 +3052,22 @@ private fun androidx.compose.foundation.layout.RowScope.IdentityAction(
     primary: Boolean,
     onClick: () -> Unit,
 ) {
-    val dark = LocalDark.current
-    Box(
+    Column(
         Modifier
             .weight(1f)
-            .height(52.dp)
             .clip(RoundedCornerShape(16.dp))
-            .background(if (primary) Blue else if (dark) Color(0xFF1E293B) else Color(0xFFF7F8FC))
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
+            .background(if (primary) Blue else if (LocalDark.current) Color(0xFF1E293B) else Color(0xFFF7F8FC))
+            .clickable(onClick = onClick)
+            .padding(vertical = 12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Icon(
-            icon,
-            contentDescription = label,
-            tint = if (primary || dark) Color.White else Color(0xFF334155),
-            modifier = Modifier.size(24.dp),
+        Icon(icon, label, tint = if (primary) Color.White else if (LocalDark.current) Color.White else Color(0xFF334155), modifier = Modifier.size(18.dp))
+        Text(
+            label,
+            color = if (primary) Color.White else if (LocalDark.current) Color.White else Color(0xFF334155),
+            fontSize = 11.sp,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(top = 6.dp),
         )
     }
 }
@@ -4366,10 +3097,7 @@ private fun ChatInputBar(
         if (group) {
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 InputChip("ارسال به همه اعضا", memberId == null, dark) { onMember(null) }
-                members.forEach { member ->
-                    val selected = memberId == member.id
-                    InputChip((if (selected) "🔒 " else "") + member.name, selected, dark) { onMember(member.id) }
-                }
+                members.forEach { member -> InputChip("مخاطب: ${member.name}", memberId == member.id, dark) { onMember(member.id) } }
             }
         }
         if (pendingMedia != null) {
@@ -4523,189 +3251,6 @@ private fun AiSummaryDialog(
 }
 
 @Composable
-private fun DateStepper(
-    title: String,
-    value: String,
-    dark: Boolean,
-    modifier: Modifier = Modifier,
-    onUp: () -> Unit,
-    onDown: () -> Unit,
-) {
-    val ink = if (dark) Color.White else Color(0xFF111827)
-    val sub = if (dark) Color(0xFF9CA3AF) else Color(0xFF6B7280)
-    val bg = if (dark) Color(0xFF1C2738) else Color(0xFFF1F2F6)
-    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(title, fontSize = 10.sp, color = sub)
-        Spacer(Modifier.height(4.dp))
-        Surface(shape = RoundedCornerShape(14.dp), color = bg, modifier = Modifier.fillMaxWidth()) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Box(
-                    Modifier.fillMaxWidth().height(30.dp).clip(RoundedCornerShape(14.dp)).clickable { onUp() },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(Icons.Filled.KeyboardArrowUp, "افزایش", tint = Blue, modifier = Modifier.size(20.dp))
-                }
-                Text(
-                    value,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = ink,
-                    maxLines = 1,
-                    modifier = Modifier.padding(vertical = 4.dp),
-                )
-                Box(
-                    Modifier.fillMaxWidth().height(30.dp).clip(RoundedCornerShape(14.dp)).clickable { onDown() },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(Icons.Filled.KeyboardArrowDown, "کاهش", tint = Blue, modifier = Modifier.size(20.dp))
-                }
-            }
-        }
-    }
-}
-
-/**
- * دیالوگ انتخاب بازه تاریخ کاملاً شمسی (جلالی) با انتخاب‌گر چرخانِ سال/ماه/روز.
- * بدون کتابخانه خارجی؛ خروجی میلی‌ثانیه‌ای برای فیلتر گزارش.
- */
-@Composable
-private fun PersianDateRangePickerDialog(
-    initialStartYear: Int,
-    initialStartMonth: Int,
-    initialStartDay: Int,
-    initialEndYear: Int,
-    initialEndMonth: Int,
-    initialEndDay: Int,
-    dark: Boolean,
-    onDismissRequest: () -> Unit,
-    onConfirm: (startDateMillis: Long, endDateMillis: Long, label: String) -> Unit,
-) {
-    var sy by remember { mutableIntStateOf(initialStartYear) }
-    var sm by remember { mutableIntStateOf(initialStartMonth) }
-    var sd by remember { mutableIntStateOf(initialStartDay) }
-    var ey by remember { mutableIntStateOf(initialEndYear) }
-    var em by remember { mutableIntStateOf(initialEndMonth) }
-    var ed by remember { mutableIntStateOf(initialEndDay) }
-    var error by remember { mutableStateOf("") }
-
-    val ink = if (dark) Color.White else Color(0xFF111827)
-    val sub = if (dark) Color(0xFF9CA3AF) else Color(0xFF6B7280)
-    val minYear = 1300
-    val maxYear = 1500
-
-    fun clampDay() {
-        sd = sd.coerceIn(1, daysInJalaliMonth(sy, sm))
-        ed = ed.coerceIn(1, daysInJalaliMonth(ey, em))
-    }
-
-    AlertDialog(
-        onDismissRequest = onDismissRequest,
-        shape = RoundedCornerShape(24.dp),
-        containerColor = themeDialogContainer(),
-        title = {
-            Column {
-                Text("انتخاب بازه تاریخ", fontWeight = FontWeight.Bold, color = ink)
-                Text("تقویم هجری شمسی", fontSize = 12.sp, color = sub, modifier = Modifier.padding(top = 2.dp))
-            }
-        },
-        text = {
-            Column(Modifier.verticalScroll(rememberScrollState())) {
-                Text("تاریخ شروع (از)", fontWeight = FontWeight.Bold, color = ink, fontSize = 13.sp)
-                Row(
-                    Modifier.fillMaxWidth().padding(top = 6.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    DateStepper(
-                        title = "روز",
-                        value = persianDigits(sd.toString()),
-                        dark = dark,
-                        modifier = Modifier.weight(1f),
-                        onUp = { sd = if (sd >= daysInJalaliMonth(sy, sm)) 1 else sd + 1 },
-                        onDown = { sd = if (sd <= 1) daysInJalaliMonth(sy, sm) else sd - 1 },
-                    )
-                    DateStepper(
-                        title = "ماه",
-                        value = jalaliMonths[sm - 1],
-                        dark = dark,
-                        modifier = Modifier.weight(2f),
-                        onUp = { sm = if (sm >= 12) 1 else sm + 1; clampDay() },
-                        onDown = { sm = if (sm <= 1) 12 else sm - 1; clampDay() },
-                    )
-                    DateStepper(
-                        title = "سال",
-                        value = persianDigits(sy.toString()),
-                        dark = dark,
-                        modifier = Modifier.weight(1.4f),
-                        onUp = { sy = (sy + 1).coerceAtMost(maxYear); clampDay() },
-                        onDown = { sy = (sy - 1).coerceAtLeast(minYear); clampDay() },
-                    )
-                }
-
-                Text(
-                    "تاریخ پایان (تا)",
-                    fontWeight = FontWeight.Bold,
-                    color = ink,
-                    fontSize = 13.sp,
-                    modifier = Modifier.padding(top = 16.dp),
-                )
-                Row(
-                    Modifier.fillMaxWidth().padding(top = 6.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    DateStepper(
-                        title = "روز",
-                        value = persianDigits(ed.toString()),
-                        dark = dark,
-                        modifier = Modifier.weight(1f),
-                        onUp = { ed = if (ed >= daysInJalaliMonth(ey, em)) 1 else ed + 1 },
-                        onDown = { ed = if (ed <= 1) daysInJalaliMonth(ey, em) else ed - 1 },
-                    )
-                    DateStepper(
-                        title = "ماه",
-                        value = jalaliMonths[em - 1],
-                        dark = dark,
-                        modifier = Modifier.weight(2f),
-                        onUp = { em = if (em >= 12) 1 else em + 1; clampDay() },
-                        onDown = { em = if (em <= 1) 12 else em - 1; clampDay() },
-                    )
-                    DateStepper(
-                        title = "سال",
-                        value = persianDigits(ey.toString()),
-                        dark = dark,
-                        modifier = Modifier.weight(1.4f),
-                        onUp = { ey = (ey + 1).coerceAtMost(maxYear); clampDay() },
-                        onDown = { ey = (ey - 1).coerceAtLeast(minYear); clampDay() },
-                    )
-                }
-
-                if (error.isNotEmpty()) {
-                    Text(error, color = Color.Red, fontSize = 12.sp, modifier = Modifier.padding(top = 10.dp))
-                }
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    val startMillis = jalaliToEpochMillis(sy, sm, sd, endOfDay = false)
-                    val endMillis = jalaliToEpochMillis(ey, em, ed, endOfDay = true)
-                    if (startMillis > endMillis) {
-                        error = "تاریخ شروع نباید بعد از تاریخ پایان باشد"
-                    } else {
-                        val label = "از ${jalaliShort(startMillis)} تا ${jalaliShort(endMillis)}"
-                        onConfirm(startMillis, endMillis, label)
-                    }
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = Blue, contentColor = Color.White),
-                shape = RoundedCornerShape(14.dp),
-            ) {
-                Text("تأیید بازه")
-            }
-        },
-        dismissButton = { TextButton(onClick = onDismissRequest) { Text("انصراف", color = sub) } },
-    )
-}
-
-@Composable
 private fun ExportReportDialog(
     app: App,
     user: User,
@@ -4719,19 +3264,9 @@ private fun ExportReportDialog(
     val scope = rememberCoroutineScope()
     var range by remember { mutableIntStateOf(0) }
     var excel by remember { mutableStateOf(true) }
-    var showCustomDatePicker by remember { mutableStateOf(false) }
-    var customStartDateMillis by remember { mutableStateOf<Long?>(null) }
-    var customEndDateMillis by remember { mutableStateOf<Long?>(null) }
-    var customDateLabel by remember { mutableStateOf<String?>(null) }
     val ink = if (dark) Color.White else Color(0xFF111827)
     val sub = if (dark) Color(0xFF9CA3AF) else Color(0xFF6B7280)
-    val isCustomRange = range == 5
-    val filtered = entries.filter { entry ->
-        val start = customStartDateMillis
-        val end = customEndDateMillis
-        if (isCustomRange && start != null && end != null) entry.occurredAt in start..end
-        else entry.occurredAt >= rangeStart(range)
-    }.sortedBy { it.occurredAt }
+    val filtered = entries.filter { it.occurredAt >= rangeStart(range) }.sortedBy { it.occurredAt }
 
     val quotaReached = user.plan == "free" && user.monthlyDownloadCount >= 5
     val remaining = if (user.plan == "free") 5 - user.monthlyDownloadCount else -1
@@ -4756,11 +3291,7 @@ private fun ExportReportDialog(
         }
         onDismiss()
     }
-    val stamp = when {
-        isCustomRange && customDateLabel != null -> "$customDateLabel · ${persianDigits(filtered.size.toString())} گزاره"
-        filtered.isEmpty() -> "بدون گزاره"
-        else -> "${jalaliShort(filtered.first().occurredAt)} تا ${jalaliShort(filtered.last().occurredAt)} · ${persianDigits(filtered.size.toString())} گزاره"
-    }
+    val stamp = if (filtered.isEmpty()) "بدون گزاره" else "${jalaliShort(filtered.first().occurredAt)} تا ${jalaliShort(filtered.last().occurredAt)} · ${persianDigits(filtered.size.toString())} گزاره"
     AlertDialog(
         onDismissRequest = onDismiss,
         shape = RoundedCornerShape(24.dp),
@@ -4773,15 +3304,7 @@ private fun ExportReportDialog(
         },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
-                RangeChips(selected = range, dark = dark, onSelect = { idx ->
-                    if (idx == 5) {
-                        // «اختیاری» → باز کردن دیالوگ انتخاب بازه تاریخ شمسی
-                        range = 5
-                        showCustomDatePicker = true
-                    } else {
-                        range = idx
-                    }
-                })
+                RangeChips(selected = range, dark = dark, onSelect = { range = it })
                 Text(stamp, fontSize = 12.sp, color = sub, modifier = Modifier.padding(top = 10.dp))
                 if (user.plan == "free") {
                     Text("سقف دانلود ماهانه (${persianDigits(user.monthlyDownloadCount.toString())} از ۵) تکمیل شده است. برای دانلود نامحدود ارتقا دهید.", color = if (quotaReached) Color.Red else Blue, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
@@ -4805,37 +3328,12 @@ private fun ExportReportDialog(
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("انصراف", color = sub) } },
     )
-
-    // دیالوگ انتخاب بازه تاریخ شمسی (فقط هنگام انتخاب گزینه «اختیاری»)
-    if (showCustomDatePicker) {
-        val nowTriple = jalaliOf(System.currentTimeMillis())
-        val defaultStartTriple = jalaliOf(System.currentTimeMillis() - 30 * 86_400_000L)
-        val startTriple = customStartDateMillis?.let { jalaliOf(it) } ?: defaultStartTriple
-        val endTriple = customEndDateMillis?.let { jalaliOf(it) } ?: nowTriple
-        PersianDateRangePickerDialog(
-            initialStartYear = startTriple.first,
-            initialStartMonth = startTriple.second,
-            initialStartDay = startTriple.third,
-            initialEndYear = endTriple.first,
-            initialEndMonth = endTriple.second,
-            initialEndDay = endTriple.third,
-            dark = dark,
-            onDismissRequest = { showCustomDatePicker = false },
-            onConfirm = { startMs, endMs, label ->
-                customStartDateMillis = startMs
-                customEndDateMillis = endMs
-                customDateLabel = label
-                range = 5
-                showCustomDatePicker = false
-            },
-        )
-    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ThreadScreen(app: App, userId: String, personId: String, back: () -> Unit, onPricing: () -> Unit = {}) {
-    val user = remember(userId) { app.db.getOrCreateUser(userId) }
+    val user = app.db.user(userId) ?: return
     var person by remember(personId) { mutableStateOf(app.db.people(userId).find { it.id == personId }) }
     val personTitle = person?.name ?: app.db.personName(personId)
     var allEntries by remember { mutableStateOf(app.db.entries(personId)) }
@@ -4909,10 +3407,7 @@ fun ThreadScreen(app: App, userId: String, personId: String, back: () -> Unit, o
     var summary by remember { mutableStateOf("") }
     var members by remember(personId) { mutableStateOf(app.db.members(personId)) }
     var memberId by remember { mutableStateOf<String?>(null) }
-    // شناسه کاربرِ گیرندهٔ انتخاب‌شده برای پیام خصوصی (null = ارسال به همه اعضا)
-    fun selectedRecipientId(): String? = members.firstOrNull { it.id == memberId }?.userId
     var photoCrop by remember { mutableStateOf<Bitmap?>(null) }
-    var personAvatarCrop by remember { mutableStateOf<Bitmap?>(null) }
     var toast by remember { mutableStateOf("") }
     LaunchedEffect(toast) {
         if (toast.isNotEmpty()) {
@@ -4922,30 +3417,14 @@ fun ThreadScreen(app: App, userId: String, personId: String, back: () -> Unit, o
     }
     var attachMenu by remember { mutableStateOf(false) }
     var cameraShot by remember { mutableStateOf<File?>(null) }
+    var newMember by remember { mutableStateOf("") }
     var searchOpen by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
     var notesOnly by remember { mutableStateOf(false) }
     var exportOpen by remember { mutableStateOf(false) }
     var summaryOpen by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
-    var confirmTeamExit by remember { mutableStateOf(false) }
-    var teamExitBusy by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
-    // ارسال پیام به سرور برای چت تیم (همگانی یا خصوصی هدفمند)
-    fun dispatchTeamMessage(content: String) {
-        if (person?.isGroup != true) return
-        val recipient = selectedRecipientId()
-        scope.launch {
-            runCatching {
-                withContext(Dispatchers.IO) {
-                    NetworkModule.getApiService().sendTeamMessage(
-                        personId,
-                        SendTeamMessageRequest(senderId = userId, content = content, recipientId = recipient),
-                    )
-                }
-            }
-        }
-    }
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
         runCatching { photoCrop = context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) } }.onFailure { error = it.message ?: "عکس خوانده نشد" }
@@ -4970,9 +3449,8 @@ fun ThreadScreen(app: App, userId: String, personId: String, back: () -> Unit, o
                 return@launch
             }
             try {
-                app.db.addEntry(user, personId, saved.second, "file", channel, System.currentTimeMillis(), mediaPath = saved.first, memberId = memberId, targetRecipientId = selectedRecipientId())
+                app.db.addEntry(user, personId, saved.second, "file", channel, System.currentTimeMillis(), mediaPath = saved.first, memberId = memberId, targetRecipientId = memberId)
                 if (!isDeviceOnline(context)) app.db.enqueue("entry", saved.second)
-                dispatchTeamMessage(saved.second)
                 allEntries = app.db.entries(personId)
                 attachMenu = false
             } catch (e: Exception) {
@@ -4996,22 +3474,20 @@ fun ThreadScreen(app: App, userId: String, personId: String, back: () -> Unit, o
     }
     val personPhoto = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
-        scope.launch {
-            val bitmap = withContext(Dispatchers.IO) { runCatching { decodeSampledBitmap(context, uri, 1024) }.getOrNull() }
-            if (bitmap == null) infoError = "عکس خوانده نشد" else personAvatarCrop = bitmap
-        }
+        runCatching {
+            val path = savePersonAvatar(context, uri, personId)
+            app.db.setPersonAvatar(personId, path)
+            person = app.db.people(userId).find { it.id == personId }
+        }.onFailure { infoError = it.message ?: "عکس ذخیره نشد" }
     }
     val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val isTeam = person?.isGroup == true
-    val isTeamCreator = isTeam && app.db.teamCreatorId(personId) == userId
-    val teamSubtitle = if (members.isNotEmpty()) "${persianDigits(members.size.toString())} عضو" else "گزارش تیم"
     Box(Modifier.fillMaxSize()) {
         ChatBackdrop(user)
         Column(Modifier.fillMaxSize()) {
         ChatTopBar(
             title = personTitle,
             avatar = person?.avatar,
-            subtitle = if (isTeam) teamSubtitle else "گزارش هویت",
+            subtitle = "گزارش هویت",
             searchOpen = searchOpen,
             query = query,
             onQuery = { query = it },
@@ -5029,43 +3505,31 @@ fun ThreadScreen(app: App, userId: String, personId: String, back: () -> Unit, o
             onSearch = { searchOpen = !searchOpen; if (!searchOpen) query = "" },
             onAll = { notesOnly = false; query = "" },
             onNotes = { notesOnly = true },
-            onDeleteIdentity = { if (isTeam) confirmTeamExit = true else confirmDelete = true },
-            isGroup = isTeam,
-            isCreator = isTeamCreator,
+            onDeleteIdentity = { confirmDelete = true },
         )
         if (summary.isNotEmpty()) {
             Text(summary, Modifier.fillMaxWidth().background(Color.White).padding(12.dp), color = Color(0xFF334155))
         }
         val shown = entries.filter { (!notesOnly || it.kind == "note") && (query.isBlank() || it.body.contains(query.trim(), true)) }
-        val previousEntryById = remember(shown) {
-            shown.mapIndexedNotNull { index, entry ->
-                if (index == 0) null else entry.id to shown[index - 1]
-            }.toMap()
-        }
         LazyColumn(Modifier.weight(1f).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(shown, key = { it.id }) { entry ->
-                val previousEntry = previousEntryById[entry.id]
+            itemsIndexed(shown, key = { _, e -> e.id }) { index, entry ->
                 Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-                    if (previousEntry == null || dayKey(previousEntry.occurredAt) != dayKey(entry.occurredAt)) DateSeparatorPill(entry.occurredAt)
+                    if (index == 0 || dayKey(shown[index - 1].occurredAt) != dayKey(entry.occurredAt)) DateSeparatorPill(entry.occurredAt)
                     val visible = entry.id !in hidden
                     AnimatedVisibility(
                         visible = visible,
                         enter = if (entry.id in fresh) fadeIn(tween(280)) + expandVertically(tween(280)) else fadeIn(tween(1)),
                         exit = shrinkVertically(tween(260)) + fadeOut(tween(220)),
                     ) {
-                        JournalBubble(entry, personTitle, currentUserId = userId, memberNameFor = { uid -> members.firstOrNull { it.userId == uid }?.name }, onPin = {
+                        JournalBubble(entry, personTitle, onPin = {
                             app.db.setEntryPinned(entry.id, !entry.pinned)
                             allEntries = app.db.entries(personId)
                         }, onDelete = {
-                            // بستن منو بلافاصله
-                            // حذف از لیست محلی بلافاصله برای ری‌رندر فوری
-                            allEntries = allEntries.filter { it.id != entry.id }
-                            entries = entries.filter { it.id != entry.id }
                             hidden = hidden + entry.id
                             scope.launch {
                                 delay(260)
-                                // حذف از دیتابیس
                                 app.db.deleteEntry(entry.id)
+                                entries = entries.filter { it.id != entry.id }
                                 hidden = hidden - entry.id
                             }
                         }, onEdit = {
@@ -5088,8 +3552,7 @@ fun ThreadScreen(app: App, userId: String, personId: String, back: () -> Unit, o
                     if (voicePaused) runCatching { voiceRecorder.value?.resume() }
                     stopVoice(app, user, personId) { path ->
                         runCatching {
-                            app.db.addEntry(user, personId, "", "voice", channel, System.currentTimeMillis(), path, memberId = memberId, targetRecipientId = selectedRecipientId())
-                            dispatchTeamMessage("پیام صوتی")
+                            app.db.addEntry(user, personId, "", "voice", channel, System.currentTimeMillis(), path, memberId = memberId, targetRecipientId = memberId)
                             allEntries = app.db.entries(personId)
                         }.onFailure { error = it.message ?: "خطا" }
                     }
@@ -5139,14 +3602,13 @@ fun ThreadScreen(app: App, userId: String, personId: String, back: () -> Unit, o
                     error = ""
                     try {
                         if (editingId != null && pendingMedia == null) {
-                            app.db.updateEntry(editingId!!, body)
+                            app.db.updateEntry(editingId!!, body, kind, channel, System.currentTimeMillis())
                             editingId = null
                         } else {
                             val sendKind = if (pendingMedia != null) pendingKind else kind
                             val caption = body.ifBlank { if (pendingKind == "video") "فیلم" else if (pendingMedia != null) "عکس" else "" }
-                            app.db.addEntry(user, personId, caption, sendKind, channel, System.currentTimeMillis(), mediaPath = pendingMedia, memberId = memberId, targetRecipientId = selectedRecipientId())
+                            app.db.addEntry(user, personId, caption, sendKind, channel, System.currentTimeMillis(), mediaPath = pendingMedia, memberId = memberId, targetRecipientId = memberId)
                             if (!isDeviceOnline(context)) app.db.enqueue("entry", caption)
-                            dispatchTeamMessage(caption)
                             pendingMedia = null
                         }
                         body = ""
@@ -5196,143 +3658,62 @@ fun ThreadScreen(app: App, userId: String, personId: String, back: () -> Unit, o
                 onSendMessage = { profileOpen = false },
                 onEdit = { profileOpen = false; info = true },
                 onReports = { profileOpen = false; summaryOpen = true },
-                onAvatarPick = { personPhoto.launch("image/*") },
             )
         }
         if (info) {
             val ink = if (LocalDark.current) Color.White else Color(0xFF111827)
-            val isGroupInfo = person?.isGroup == true
-            val isCreatorInfo = isGroupInfo && app.db.teamCreatorId(personId) == userId
             ModalBottomSheet(onDismissRequest = { info = false }, sheetState = sheet, containerColor = themeDialogContainer()) {
                 Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp).padding(bottom = 28.dp)) {
-                    Text(if (isGroupInfo) "اطلاعات تیم" else "اطلاعات کاربر", fontWeight = FontWeight.Bold, fontSize = 20.sp)
-                    // ۲) آواتار و فیلدهای نام/توضیحات
-                    Box(Modifier.padding(vertical = 8.dp).clickable { personPhoto.launch("image/*") }) {
-                        PersonAvatar(editName.ifBlank { personTitle }, person?.avatar, size = 72.dp)
-                    }
-                    OutlinedTextField(editName, { editName = it }, Modifier.fillMaxWidth(), label = { Text(if (isGroupInfo) "نام تیم" else "نام") })
-                    OutlinedTextField(editRole, { editRole = it }, Modifier.fillMaxWidth(), label = { Text(if (isGroupInfo) "توضیحات تیم" else "سمت") })
-                    if (!isGroupInfo) {
-                        OutlinedTextField(editPhone, { editPhone = it }, Modifier.fillMaxWidth(), label = { Text("شماره موبایل") })
-                    }
-                    if (infoError.isNotEmpty()) Text(infoError, color = Color.Red)
-                    // ۳) اعضای تیم
-                    if (isGroupInfo) {
+                    Text("اطلاعات کاربر", fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                    if (person?.isGroup == true) {
                         Text("اعضای تیم", fontWeight = FontWeight.Bold, fontSize = 16.sp, modifier = Modifier.padding(top = 12.dp))
                         members.forEach { m ->
                             Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                                 PersonAvatar(m.name, null, size = 32.dp)
                                 Text(m.name, color = ink, fontSize = 14.sp, modifier = Modifier.padding(start = 8.dp))
-                                val userIdText = m.userId.orEmpty()
-                                if (userIdText.isNotBlank()) {
-                                    Text(userIdText, color = Color(0xFF9CA3AF), fontSize = 10.sp, maxLines = 1, modifier = Modifier.padding(start = 8.dp).weight(1f))
-                                }
                             }
                         }
-                    }
-                    // ۴) ذخیره تغییرات (فقط سازنده تیم مجاز است)
-                    Button(
-                        onClick = {
+                        OutlinedTextField(newMember, { newMember = it }, Modifier.fillMaxWidth().padding(top = 8.dp), label = { Text("افزودن عضو (شماره یا نام کاربری)") })
+                        TextButton(onClick = {
+                            if (newMember.isBlank()) return@TextButton
                             try {
-                                app.db.updatePerson(personId, editName, editPhone, editRole)
+                                app.db.addMember(personId, newMember)
+                                members = app.db.members(personId)
                                 person = app.db.people(userId).find { it.id == personId }
+                                newMember = ""
                                 infoError = ""
-                                info = false
                             } catch (e: Exception) { infoError = e.message ?: "خطا" }
-                        },
-                        enabled = !isGroupInfo || isCreatorInfo,
-                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                    ) { Text("ذخیره تغییرات") }
-                    // ۵) شمارنده رسانه مشترک
-                    InfoLine("رسانه مشترک", entries.size.toString())
-                    // ۶) حذف/خروج
-                    if (isGroupInfo) {
-                        OutlinedButton(
-                            onClick = { confirmTeamExit = true },
-                            enabled = !teamExitBusy,
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.error),
-                            modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-                        ) {
-                            Text(
-                                if (isCreatorInfo) "حذف کامل تیم" else "خروج از تیم",
-                                fontWeight = FontWeight.Bold,
-                            )
-                        }
+                        }) { Text("افزودن به گروه") }
                     }
+                    Box(Modifier.padding(vertical = 8.dp).clickable { personPhoto.launch("image/*") }) {
+                        PersonAvatar(editName.ifBlank { personTitle }, person?.avatar, size = 72.dp)
+                    }
+                    OutlinedTextField(editName, { editName = it }, Modifier.fillMaxWidth(), label = { Text("نام") })
+                    OutlinedTextField(editRole, { editRole = it }, Modifier.fillMaxWidth(), label = { Text(if (person?.isGroup == true) "توضیحات تیم" else "سمت") })
+                    if (person?.isGroup == false) {
+                        OutlinedTextField(editPhone, { editPhone = it }, Modifier.fillMaxWidth(), label = { Text("شماره موبایل") })
+                    }
+                    if (infoError.isNotEmpty()) Text(infoError, color = Color.Red)
+                    Button(onClick = {
+                        try {
+                            app.db.updatePerson(personId, editName, editPhone, editRole)
+                            person = app.db.people(userId).find { it.id == personId }
+                            infoError = ""
+                            info = false
+                        } catch (e: Exception) { infoError = e.message ?: "خطا" }
+                    }, Modifier.padding(top = 8.dp)) { Text("ذخیره") }
+                    InfoLine("رسانه مشترک", entries.size.toString())
                 }
             }
         }
-        if (confirmTeamExit) {
-            val dark = LocalDark.current
-            val isCreator = app.db.teamCreatorId(personId) == userId
-            AlertDialog(
-                onDismissRequest = { if (!teamExitBusy) confirmTeamExit = false },
-                shape = RoundedCornerShape(24.dp),
-                containerColor = themeDialogContainer(),
-                title = {
-                    Text(
-                        if (isCreator) "حذف کامل تیم" else "ترک تیم",
-                        fontWeight = FontWeight.Bold,
-                        color = if (dark) Color.White else Color(0xFF111827),
-                    )
-                },
-                text = {
-                    Text(
-                        if (isCreator) "تیم «$personTitle» به‌طور کامل حذف می‌شود. این عمل بازگشت‌پذیر نیست."
-                        else "از تیم «$personTitle» خارج می‌شوید و دیگر پیام‌های آن را دریافت نمی‌کنید.",
-                        color = if (dark) Color(0xFFC7D2DE) else Color(0xFF4B5563),
-                    )
-                },
-                confirmButton = {
-                    TextButton(
-                        enabled = !teamExitBusy,
-                        onClick = {
-                            teamExitBusy = true
-                            scope.launch {
-                                val res = runCatching {
-                                    withContext(Dispatchers.IO) {
-                                        if (isCreator) NetworkModule.getApiService().deleteTeam(personId, userId)
-                                        else NetworkModule.getApiService().leaveTeam(personId, userId, userId)
-                                    }
-                                }.getOrNull()
-                                teamExitBusy = false
-                                if (res != null && res.isSuccessful) {
-                                    app.db.deleteTeamLocally(personId)
-                                    confirmTeamExit = false
-                                    info = false
-                                    back()
-                                } else {
-                                    confirmTeamExit = false
-                                    error = if (isCreator) "خطا در حذف تیم" else "خطا در ترک تیم"
-                                }
-                            }
-                        },
-                    ) {
-                        Text(
-                            if (isCreator) "حذف" else "ترک",
-                            color = Color(0xFFEF4444),
-                            fontWeight = FontWeight.Bold,
-                        )
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { confirmTeamExit = false }) {
-                        Text("انصراف", color = if (dark) Color(0xFF9CA3AF) else Color(0xFF6B7280))
-                    }
-                },
-            )
-        }
         photoCrop?.let { bitmap ->
-            PhotoSendPreview(bitmap, title = personTitle, onCancel = { photoCrop = null }) { saved, caption ->
+            PhotoSendPreview(bitmap, onCancel = { photoCrop = null }) { saved ->
                 try {
                     val dest = File(context.filesDir, "photo-${System.currentTimeMillis()}.jpg")
                     dest.outputStream().use { saved.compress(Bitmap.CompressFormat.JPEG, 90, it) }
                     if (saved !== bitmap) saved.recycle()
-                    val body = caption.ifBlank { "عکس" }
-                    app.db.addEntry(user, personId, body, "photo", channel, System.currentTimeMillis(), mediaPath = dest.absolutePath, memberId = memberId, targetRecipientId = selectedRecipientId())
+                    app.db.addEntry(user, personId, "عکس", "photo", channel, System.currentTimeMillis(), mediaPath = dest.absolutePath, memberId = memberId, targetRecipientId = memberId)
                     if (!isDeviceOnline(context)) app.db.enqueue("entry", "عکس")
-                    dispatchTeamMessage(body)
                     allEntries = app.db.entries(personId)
                     photoCrop = null
                 } catch (e: Exception) {
@@ -5355,22 +3736,6 @@ fun ThreadScreen(app: App, userId: String, personId: String, back: () -> Unit, o
                 onFile = { filePicker.launch(arrayOf("*/*")) },
                 onVideo = { attachMenu = false; videoPicker.launch("video/*") },
             )
-        }
-        personAvatarCrop?.let { bitmap ->
-            CropDialog(bitmap, onCancel = { personAvatarCrop = null }) { saved ->
-                try {
-                    val dest = File(context.filesDir, "person-$personId.jpg")
-                    dest.outputStream().use { saved.compress(Bitmap.CompressFormat.JPEG, 90, it) }
-                    if (saved !== bitmap) saved.recycle()
-                    app.db.setPersonAvatar(personId, dest.absolutePath)
-                    person = app.db.people(userId).find { it.id == personId }
-                    infoError = ""
-                    personAvatarCrop = null
-                    toast = "عکس مخاطب ذخیره شد"
-                } catch (e: Exception) {
-                    infoError = e.message ?: "عکس ذخیره نشد"
-                }
-            }
         }
         if (toast.isNotEmpty()) {
             Text(toast, color = Color.White, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 96.dp).clip(RoundedCornerShape(16.dp)).background(Color(0xCC2B2B2F)).padding(horizontal = 16.dp, vertical = 10.dp))
@@ -5685,12 +4050,11 @@ private fun AiThread(app: App, userId: String, person: Person, palette: TgPalett
             Text(toast, color = Color.White, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 84.dp).clip(RoundedCornerShape(16.dp)).background(Color(0xE617212B)).padding(horizontal = 14.dp, vertical = 8.dp))
         }
         preview?.let { bitmap ->
-            PhotoSendPreview(bitmap, title = person.name, onCancel = { preview = null }) { saved, caption ->
+            PhotoSendPreview(bitmap, onCancel = { preview = null }) { saved ->
                 val dest = File(context.filesDir, "ai-${System.currentTimeMillis()}.jpg")
                 dest.outputStream().use { saved.compress(Bitmap.CompressFormat.JPEG, 90, it) }
                 if (saved !== bitmap) saved.recycle()
                 image = dest.absolutePath
-                if (caption.isNotBlank()) input = caption
                 preview = null
             }
         }
@@ -5778,12 +4142,11 @@ private fun AiContextSheet(app: App, userId: String, personId: String, personNam
         }
     }
     preview?.let { bitmap ->
-        PhotoSendPreview(bitmap, title = personName, onCancel = { preview = null }) { saved, caption ->
+        PhotoSendPreview(bitmap, onCancel = { preview = null }) { saved ->
             val dest = File(context.filesDir, "ai-${System.currentTimeMillis()}.jpg")
             dest.outputStream().use { saved.compress(Bitmap.CompressFormat.JPEG, 90, it) }
             if (saved !== bitmap) saved.recycle()
             image = dest.absolutePath
-            if (caption.isNotBlank()) input = caption
             preview = null
         }
     }
@@ -5854,96 +4217,47 @@ private fun AiBubble(turn: AiMessage, palette: TgPalette, onCopy: () -> Unit, on
 }
 
 @Composable
-private fun MarkdownText(
-    source: String,
-    color: Color,
-    fontSize: androidx.compose.ui.unit.TextUnit = 15.sp,
-    lineHeight: androidx.compose.ui.unit.TextUnit = 22.sp,
-    modifier: Modifier = Modifier,
-) {
-    val blocks = remember(source) { parseMarkdownBlocks(source) }
-    Column(modifier.fillMaxWidth()) {
-        blocks.forEach { block ->
-            when (block) {
-                is MdBlock.Heading -> Text(
-                    inlineMarkdownAnnotated(block.text),
-                    color = color,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = when (block.level) {
-                        1 -> (fontSize.value * 1.45f).sp
-                        2 -> (fontSize.value * 1.25f).sp
-                        else -> (fontSize.value * 1.10f).sp
-                    },
-                    lineHeight = lineHeight,
-                    modifier = Modifier.padding(vertical = 2.dp),
-                )
-                is MdBlock.Bullet -> Row(
-                    Modifier.fillMaxWidth().padding(vertical = 1.dp),
-                    verticalAlignment = Alignment.Top,
-                ) {
-                    Text("•", color = color, fontSize = fontSize, lineHeight = lineHeight, modifier = Modifier.padding(end = 6.dp))
-                    Text(inlineMarkdownAnnotated(block.text), color = color, fontSize = fontSize, lineHeight = lineHeight, modifier = Modifier.weight(1f))
-                }
-                is MdBlock.Para -> Text(
-                    inlineMarkdownAnnotated(block.text),
-                    color = color,
-                    fontSize = fontSize,
-                    lineHeight = lineHeight,
-                )
-                is MdBlock.Divider -> HorizontalDivider(
-                    Modifier.padding(vertical = 6.dp),
-                    color = color.copy(alpha = 0.20f),
-                )
-                is MdBlock.Code -> Text(
-                    block.text,
-                    color = Color(0xFFE6EDF3),
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = (fontSize.value - 1f).coerceAtLeast(11f).sp,
-                    lineHeight = ((fontSize.value - 1f).coerceAtLeast(11f) * 1.5f).sp,
-                    modifier = Modifier
-                        .padding(vertical = 4.dp)
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(Color(0xFF1E2430))
-                        .padding(10.dp),
-                )
-                is MdBlock.Table -> {
-                    val cols = maxOf(block.header.size, block.rows.maxOfOrNull { it.size } ?: 0)
-                    val cellWidth = 96.dp
-                    Row(
-                        Modifier
-                            .padding(vertical = 4.dp)
-                            .horizontalScroll(rememberScrollState())
-                            .clip(RoundedCornerShape(8.dp))
-                            .border(1.dp, color.copy(alpha = 0.22f), RoundedCornerShape(8.dp)),
-                    ) {
-                        Column {
-                            Row(Modifier.background(color.copy(alpha = 0.10f))) {
-                                for (c in 0 until cols) TableCell(block.header.getOrNull(c).orEmpty(), color, true, cellWidth)
-                            }
-                            block.rows.forEachIndexed { index, row ->
-                                Row(Modifier.background(if (index % 2 == 1) color.copy(alpha = 0.05f) else Color.Transparent)) {
-                                    for (c in 0 until cols) TableCell(row.getOrNull(c).orEmpty(), color, false, cellWidth)
-                                }
-                            }
-                        }
+private fun MarkdownText(source: String, color: Color) {
+    val blocks = remember(source) { source.split("```") }
+    Column {
+        blocks.forEachIndexed { index, block ->
+            if (index % 2 == 1) {
+                Text(block.trim(), color = color, fontFamily = FontFamily.Monospace, fontSize = 13.sp, modifier = Modifier.padding(vertical = 4.dp).fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Color(0x14000000)).padding(8.dp))
+            } else {
+                block.lines().forEach { line ->
+                    val trimmed = line.trim()
+                    val shown = when {
+                        trimmed.startsWith("- ") -> "• ${trimmed.drop(2)}"
+                        trimmed.startsWith("* ") -> "• ${trimmed.drop(2)}"
+                        else -> line
                     }
+                    if (shown.isNotBlank()) Text(inlineMarkdown(shown), color = color, fontSize = 15.sp, modifier = Modifier.padding(vertical = 1.dp))
                 }
             }
         }
     }
 }
 
-@Composable
-private fun TableCell(text: String, color: Color, bold: Boolean, width: androidx.compose.ui.unit.Dp) {
-    Text(
-        inlineMarkdownAnnotated(text),
-        color = color,
-        fontWeight = if (bold) FontWeight.Bold else FontWeight.Normal,
-        fontSize = 13.sp,
-        lineHeight = 18.sp,
-        modifier = Modifier.width(width).padding(horizontal = 10.dp, vertical = 7.dp),
-    )
+private fun inlineMarkdown(line: String) = buildAnnotatedString {
+    var rest = line
+    while (rest.isNotEmpty()) {
+        val bold = rest.indexOf("**")
+        val code = rest.indexOf("`")
+        val next = listOf(bold, code).filter { it >= 0 }.minOrNull()
+        if (next == null) { append(rest); break }
+        append(rest.substring(0, next))
+        if (next == bold) {
+            val end = rest.indexOf("**", next + 2)
+            if (end < 0) { append(rest.substring(next)); break }
+            withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append(rest.substring(next + 2, end)) }
+            rest = rest.substring(end + 2)
+        } else {
+            val end = rest.indexOf("`", next + 1)
+            if (end < 0) { append(rest.substring(next)); break }
+            withStyle(SpanStyle(fontFamily = FontFamily.Monospace, background = Color(0x22000000))) { append(rest.substring(next + 1, end)) }
+            rest = rest.substring(end + 1)
+        }
+    }
 }
 
 private fun askAboutChat(app: App, userId: String, personId: String, turns: List<AiMessage>): String {
@@ -6049,7 +4363,7 @@ private fun GalaxyBackdrop() {
 
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun JournalBubble(entry: Entry, title: String, currentUserId: String, memberNameFor: (String) -> String?, onPin: () -> Unit, onDelete: () -> Unit, onEdit: () -> Unit) {
+private fun JournalBubble(entry: Entry, title: String, onPin: () -> Unit, onDelete: () -> Unit, onEdit: () -> Unit) {
     var open by remember { mutableStateOf(false) }
     var viewer by remember { mutableStateOf(false) }
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
@@ -6057,6 +4371,7 @@ private fun JournalBubble(entry: Entry, title: String, currentUserId: String, me
     val note = entry.kind == "note"
     val chatTheme = LocalChatPalette.current
     val bubble = when {
+        entry.kind == "voice" -> Color(0xFF1F8F4E)
         note -> if (palette.dark) Color(0xFF3B3524) else Color(0xFFFFF7D6)
         palette.dark -> palette.outgoing
         else -> chatTheme.outgoingBubble
@@ -6064,18 +4379,9 @@ private fun JournalBubble(entry: Entry, title: String, currentUserId: String, me
     val chatFont = LocalChatFont.current
     val bodySize = chatFont.sp
     val bodyLine = (chatFont * 1.5f).sp
-    val ink = if (palette.dark && !note) Color.White else palette.text
+    val ink = if (entry.kind == "voice") Color.White else if (palette.dark && !note) Color.White else palette.text
     val shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomEnd = 16.dp, bottomStart = 4.dp)
-    val photo = entry.kind == "photo" && entry.mediaPath != null
-    val timeText = persianDigits(SimpleDateFormat("HH:mm", Locale.US).format(Date(entry.occurredAt)))
-    
-    Row(
-        Modifier.fillMaxWidth(),
-        // Note messages: align to START (left)
-        // Regular messages: align to END (right)
-        horizontalArrangement = if (note) Arrangement.Start else Arrangement.End,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start, verticalAlignment = Alignment.CenterVertically) {
         AnimatedVisibility(open, enter = fadeIn(tween(160)) + scaleIn(tween(160), initialScale = 0.9f), exit = fadeOut(tween(120))) {
             Column(Modifier.padding(horizontal = 6.dp).clip(RoundedCornerShape(16.dp)).background(Color(0xFF2B2B2F)).padding(vertical = 4.dp)) {
                 MenuAction(Icons.Filled.PushPin, "سنجاق") { open = false; onPin() }
@@ -6087,103 +4393,61 @@ private fun JournalBubble(entry: Entry, title: String, currentUserId: String, me
                 MenuAction(Icons.Filled.Delete, "حذف") { open = false; onDelete() }
             }
         }
-        
-        Column(
-            Modifier
-                    .widthIn(max = 360.dp)
-                    .fillMaxWidth(0.85f)
-                    .shadow(1.dp, shape)
-                    .clip(shape)
-                    .background(bubble)
-                    .then(
-                        if (note) {
-                            Modifier.drawBehind {
-                                drawRoundRect(
-                                    color = Color(0xFFD4A373),
-                                    style = Stroke(
-                                        width = 2.dp.toPx(),
-                                        pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(12f, 8f), 0f),
-                                    ),
-                                    cornerRadius = CornerRadius(16.dp.toPx()),
-                                )
-                            }
-                        } else {
-                            Modifier
-                        },
-                    )
-                    .combinedClickable(onClick = {}, onLongClick = { open = !open })
-                    .padding(
-                        horizontal = if (photo) 0.dp else 14.dp,
-                        vertical = if (photo) 0.dp else 10.dp,
-                    ),
-        ) {
-            // عکس لبه‌به‌لبه است؛ فراداده‌ها (سنجاق/خصوصی/نام عضو) پدینگ خودشان را می‌گیرند
-            val metaOuter = if (photo) Modifier.padding(start = 12.dp, end = 12.dp, top = 8.dp) else Modifier
-            if (entry.pinned) Text("سنجاق", color = Blue, fontSize = 11.sp, modifier = metaOuter)
-            if (entry.targetRecipientId != null) {
-                val mine = entry.userId == currentUserId
-                val label = if (mine) {
-                    "🔒 پیام خصوصی به ${entry.memberName ?: memberNameFor(entry.targetRecipientId) ?: "عضو تیم"}"
-                } else {
-                    "🔒 پیام خصوصی از ${entry.memberName ?: "عضو تیم"}"
-                }
-                Text(
-                    label,
-                    color = Blue,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(Blue.copy(alpha = 0.14f)).padding(horizontal = 6.dp, vertical = 2.dp).then(metaOuter),
-                )
-            } else {
-                entry.memberName?.let { Text(it, color = Blue, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = metaOuter) }
-            }
-
-            // ردیف هدر حباب: برچسب نوع گفتگو + ساعت (برای عکس، ساعت روی تصویر رندر می‌شود)
-            if (!photo) {
-                val showLabel = entry.kind != "voice" && entry.kind != "file" && entry.kind != "video"
-                Row(
-                    Modifier.fillMaxWidth().padding(bottom = 2.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    if (showLabel) {
-                        Text(
-                            if (note) "یادداشت من" else mediumLabel(entry.channel),
-                            color = if (note) Color(0xFF8D6E00) else Blue,
-                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold),
-                        )
+    Column(
+        Modifier
+                .widthIn(max = 280.dp)
+                .fillMaxWidth(0.78f)
+                .shadow(1.dp, shape)
+                .clip(shape)
+                .background(bubble)
+                .then(
+                    if (note) {
+                        Modifier.drawBehind {
+                            drawRoundRect(
+                                color = Color(0xFFD4A373),
+                                style = Stroke(
+                                    width = 2.dp.toPx(),
+                                    pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(12f, 8f), 0f),
+                                ),
+                                cornerRadius = CornerRadius(16.dp.toPx()),
+                            )
+                        }
                     } else {
-                        Spacer(Modifier.weight(1f))
-                    }
-                    Text(timeText, fontSize = 10.sp, color = palette.subtext)
-                }
-            }
-
+                        Modifier
+                    },
+                )
+                .combinedClickable(onClick = {}, onLongClick = { open = !open })
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+        ) {
+            if (entry.pinned) Text("سنجاق", color = Blue, fontSize = 11.sp)
+            entry.memberName?.let { Text(it, color = Blue, fontSize = 12.sp, fontWeight = FontWeight.Bold) }
             if (entry.kind == "voice" && entry.voicePath != null) {
                 VoiceMessage(entry.voicePath)
             } else if (entry.kind == "file" && entry.mediaPath != null) {
                 FileMessage(entry.body, entry.mediaPath, ink)
-            } else if (photo) {
+            } else if (entry.kind == "photo" && entry.mediaPath != null) {
                 Box {
-                    MediaPreview(entry.mediaPath!!, entry.kind) { viewer = true }
-                    Text(
-                        timeText,
+                    MediaPreview(entry.mediaPath, entry.kind) { viewer = true }
+                Text(
+                        persianDigits(SimpleDateFormat("HH:mm", Locale.US).format(Date(entry.occurredAt))),
                         color = Color.White,
-                        fontSize = 11.sp,
+                    fontSize = 11.sp,
                         modifier = Modifier.align(Alignment.BottomEnd).padding(6.dp).clip(RoundedCornerShape(8.dp)).background(Color(0x99000000)).padding(horizontal = 6.dp, vertical = 2.dp),
                     )
                 }
-                if (entry.body.isNotBlank() && entry.body != "عکس") {
-                    Box(Modifier.padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 10.dp)) {
-                        MarkdownText(entry.body, ink, bodySize, bodyLine)
-                    }
-                }
+                if (entry.body.isNotBlank() && entry.body != "عکس") Text(entry.body, color = ink, fontSize = bodySize, lineHeight = bodyLine, modifier = Modifier.padding(top = 4.dp))
             } else {
                 entry.mediaPath?.let { path -> MediaPreview(path, entry.kind) }
-                if (entry.body.isNotBlank() && entry.body != "عکس") {
-                    MarkdownText(entry.body, ink, bodySize, bodyLine, Modifier.padding(top = 2.dp))
+                if (entry.kind != "photo" && entry.kind != "video") {
+                    Text(
+                        if (note) "یادداشت من" else mediumLabel(entry.channel),
+                        color = if (note) Color(0xFF8D6E00) else Blue,
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, fontWeight = FontWeight.Bold),
+                    )
                 }
+                if (entry.body.isNotBlank() && entry.body != "عکس") Text(entry.body, color = ink, fontSize = bodySize, lineHeight = bodyLine, modifier = Modifier.padding(top = 2.dp))
             }
+            if (entry.kind != "photo") Text(persianDigits(SimpleDateFormat("HH:mm", Locale.US).format(Date(entry.occurredAt))), fontSize = 11.sp, color = if (entry.kind == "voice") Color.White.copy(alpha = 0.8f) else palette.subtext, modifier = Modifier.align(Alignment.End).padding(top = 2.dp))
         }
     }
     if (viewer && entry.mediaPath != null) {
@@ -6193,9 +4457,6 @@ private fun JournalBubble(entry: Entry, title: String, currentUserId: String, me
 
 @Composable
 private fun VoiceMessage(path: String) {
-    val palette = LocalTg.current
-    val accent = LocalChatPalette.current.primary
-    val ink = if (palette.dark) Color.White else palette.text
     var player by remember(path) { mutableStateOf<android.media.MediaPlayer?>(null) }
     var playing by remember(path) { mutableStateOf(false) }
     var progress by remember(path) { mutableStateOf(0f) }
@@ -6212,68 +4473,44 @@ private fun VoiceMessage(path: String) {
             delay(80)
         }
     }
-    val bars = listOf(8, 14, 6, 16, 10, 18, 7, 13, 9, 15, 6, 12, 17, 8, 11, 10, 14, 9)
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp).clickable {
-            val current = player
-            if (playing && current != null) {
-                current.pause()
-                playing = false
-                return@clickable
-            }
-            if (current != null) {
-                current.start()
-                playing = true
-                return@clickable
-            }
-            runCatching {
-                android.media.MediaPlayer().apply {
-                    setDataSource(path)
-                    setOnCompletionListener {
-                        playing = false
-                        progress = 1f
-                        seekTo(0)
-                    }
-                    prepare()
-                    start()
-                    player = this
-                    playing = true
-                }
-            }
-        },
-    ) {
-        Box(Modifier.size(40.dp).clip(CircleShape).background(accent), contentAlignment = Alignment.Center) {
-            Icon(
-                if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                if (playing) "توقف" else "پخش",
-                tint = Color.White,
-                modifier = Modifier.size(22.dp),
-            )
+    val bars = listOf(8, 14, 6, 16, 10, 18, 7, 13, 9, 15, 6, 12, 17, 8, 11)
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable {
+        val current = player
+        if (playing && current != null) {
+            current.pause()
+            playing = false
+            return@clickable
         }
-        Row(
-            Modifier.padding(start = 10.dp).weight(1f),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(3.dp),
-        ) {
+        if (current != null) {
+            current.start()
+            playing = true
+            return@clickable
+        }
+        runCatching {
+            android.media.MediaPlayer().apply {
+                setDataSource(path)
+                setOnCompletionListener {
+                    playing = false
+                    progress = 1f
+                    seekTo(0)
+                }
+                prepare()
+                start()
+                player = this
+                playing = true
+            }
+        }
+    }) {
+        Box(Modifier.size(36.dp).clip(CircleShape).background(Color(0xFF39D353)), contentAlignment = Alignment.Center) {
+            Icon(if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, if (playing) "توقف" else "پخش", tint = Color.White)
+        }
+        Row(Modifier.padding(start = 8.dp).weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
             bars.forEachIndexed { index, bar ->
                 val played = progress >= index / bars.size.toFloat()
-                Box(
-                    Modifier
-                        .width(3.dp)
-                        .height(bar.dp)
-                        .clip(RoundedCornerShape(2.dp))
-                        .background(if (played) accent else ink.copy(alpha = 0.28f)),
-                )
+                Box(Modifier.width(3.dp).height(bar.dp).clip(RoundedCornerShape(2.dp)).background(if (played) Color.White else Color.White.copy(alpha = 0.35f)))
             }
         }
-        Text(
-            persianDigits(voiceLength(path)),
-            color = ink.copy(alpha = 0.85f),
-            fontSize = 12.sp,
-            fontFamily = FontFamily.Monospace,
-            modifier = Modifier.padding(start = 8.dp),
-        )
+        Text(voiceLength(path), color = Color.White, fontSize = 12.sp)
     }
 }
 
@@ -6694,12 +4931,10 @@ fun ProfileScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var user by remember(userId) { mutableStateOf(app.db.getOrCreateUser(userId)) }
+    var user by remember { mutableStateOf(app.db.user(userId)) }
     var editProfile by remember { mutableStateOf(false) }
-    var name by remember { mutableStateOf(user.name) }
-    var username by remember { mutableStateOf(user.username ?: "") }
-    var usernameError by remember { mutableStateOf("") }
-    var usernameLoading by remember { mutableStateOf(false) }
+    var name by remember { mutableStateOf(user?.name ?: "") }
+    var username by remember { mutableStateOf(user?.username ?: "") }
     var editPassword by remember { mutableStateOf(false) }
     var currentPassword by remember { mutableStateOf("") }
     var nextPassword by remember { mutableStateOf("") }
@@ -6713,28 +4948,21 @@ fun ProfileScreen(
         val dest = File(context.filesDir, "chat-bg-$userId.jpg")
         context.contentResolver.openInputStream(uri)?.use { input -> dest.outputStream().use { input.copyTo(it) } }
         app.db.setChatStyle(userId, dest.absolutePath, null)
-        user = app.db.getOrCreateUser(userId)
+        user = app.db.user(userId)
         wallpapersOpen = false
     }
     val avatarPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
         context.contentResolver.openInputStream(uri)?.use { crop = BitmapFactory.decodeStream(it) }
     }
-    val current = user
+    val current = user ?: return
     val dark = LocalDark.current
     val page = if (dark) Color(0xFF0F172A) else Color(0xFFE6E6FA)
     val card = if (dark) Color(0xFF1E293B) else Color.White
     val ink = if (dark) Color.White else Color(0xFF111827)
     val chatTheme = LocalChatPalette.current
-    val paid = current.plan == "plus" || current.plan == "smart" || current.plan == "basic" || current.plan == "advanced"
-    val subExpiresAt = current.planExpiresAt
-    val daysLeft = subExpiresAt?.let { ((it - System.currentTimeMillis()) / 86_400_000L).coerceAtLeast(0) } ?: 0
-    val subscriptionStatus = when {
-        !paid -> "اشتراک فعالی ندارید"
-        subExpiresAt == null -> "اشتراک فعال"
-        subExpiresAt <= System.currentTimeMillis() -> "اشتراک فعالی ندارید"
-        else -> "${persianDigits(daysLeft.coerceAtLeast(1).toString())} روز باقیمانده"
-    }
+    val paid = current.plan == "basic" || current.plan == "advanced"
+    val daysLeft = current.planExpiresAt?.let { ((it - System.currentTimeMillis()) / 86_400_000L).coerceAtLeast(0) } ?: 0
     val pulse = rememberInfiniteTransition(label = "cam")
     val camScale by pulse.animateFloat(0.92f, 1.08f, infiniteRepeatable(tween(900), RepeatMode.Reverse), label = "cam-scale")
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).background(page), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -6762,26 +4990,23 @@ fun ProfileScreen(
                     Text(current.phone, color = Color(0xFF707579), fontSize = 13.sp, modifier = Modifier.padding(top = 2.dp))
                     Text("@" + (current.username ?: "—"), color = chatTheme.primary, fontSize = 13.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 2.dp))
                 }
-                IconButton(onClick = { name = current.name; username = current.username ?: ""; editProfile = true }) { 
-                    Icon(Icons.Filled.Edit, "ویرایش پروفایل", tint = Blue) 
-                }
+                IconButton(onClick = { name = current.name; username = current.username ?: ""; editProfile = true }) { Icon(Icons.Filled.Edit, "ویرایش پروفایل", tint = Blue) }
             }
         }
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            StatusCapsule(Modifier.weight(1f).clickable { pricing() }, Icons.Filled.Wallet, Color(0xFF10B981), "اشتراک", subscriptionStatus, themeContainer(), dark)
+            StatusCapsule(Modifier.weight(1f).clickable { pricing() }, Icons.Filled.Wallet, Color(0xFF10B981), "موجودی", "${formatToman(current.balance)} تومان", themeContainer(), dark)
             StatusCapsule(Modifier.weight(1f).clickable { pricing() }, Icons.Filled.Star, Blue, "پلن فعلی", planDisplay(current.plan), themeContainer(), dark)
         }
         if (message.isNotEmpty()) Text(message, color = chatTheme.primary, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
         Column(Modifier.fillMaxWidth().padding(16.dp).clip(RoundedCornerShape(20.dp)).background(card)) {
-            // نمایش گزینه ادمین فقط برای شماره اختصاصی شما
-            if (app.db.isAdmin(current.phone)) {
-                SettingRow("پنل مدیریت ادمین", "داشبورد و بررسی تراکنش‌ها", Icons.Filled.AdminPanelSettings, Color(0xFFE3F2FD), Blue, onClick = onAdmin)
+            if (isAdmin(current.phone)) {
+                SettingRow("ادمین", "داشبورد", Icons.Filled.AdminPanelSettings, Color(0xFFE3F2FD), Blue, onClick = onAdmin)
                 RowDivider(dark)
             }
             SettingRow("تنظیمات گفتگو", "پس‌زمینه، اندازه قلم و ترکیب رنگ", Icons.Filled.Chat, Color(0xFFE0F7FA), Color(0xFF00ACC1)) { chatSettingsOpen = !chatSettingsOpen }
             AnimatedVisibility(chatSettingsOpen) { ChatSettingsSection(dark, ink, chatFont, chatPalette) { wallpapersOpen = true } }
             RowDivider(dark)
-            SettingRow("کیف پول و اشتراک", subscriptionStatus, Icons.Filled.Wallet, Color(0xFFE8F5E9), Color(0xFF2E7D32), onClick = pricing)
+            SettingRow("کیف پول و اشتراک", "${formatToman(current.balance)} تومان", Icons.Filled.Wallet, Color(0xFFE8F5E9), Color(0xFF2E7D32), onClick = pricing)
             RowDivider(dark)
             SettingRow("پرداخت‌های من", "مشاهده فیش‌ها و سوابق", Icons.Filled.Receipt, Color(0xFFF3E5F5), Color(0xFF7B1FA2), onClick = onPayments)
             RowDivider(dark)
@@ -6823,245 +5048,58 @@ fun ProfileScreen(
         Text("نسخه: V1", style = MaterialTheme.typography.bodySmall, color = Color.Gray, modifier = Modifier.padding(top = 16.dp, bottom = 24.dp))
     }
     if (editProfile) {
-        Dialog(onDismissRequest = { editProfile = false; usernameError = "" }) {
-            Surface(
-                modifier = Modifier.fillMaxWidth().widthIn(max = 480.dp),
-                shape = RoundedCornerShape(28.dp),
-                color = themeDialogContainer(),
-                tonalElevation = 6.dp,
-            ) {
-                Column(
-                    Modifier.fillMaxWidth().padding(20.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            Modifier.size(52.dp).clip(CircleShape).background(Blue.copy(alpha = 0.12f)),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(Icons.Filled.Edit, null, tint = Blue, modifier = Modifier.size(26.dp))
-                        }
-                        Text(
-                            "ویرایش پروفایل",
-                            fontSize = 20.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (dark) Color.White else Color(0xFF111827),
-                            modifier = Modifier.padding(start = 14.dp),
-                        )
-                    }
-
-                    OutlinedTextField(
-                        value = name,
-                        onValueChange = { name = it },
-                        modifier = Modifier.fillMaxWidth().padding(top = 20.dp),
-                        label = { Text("نام نمایشی") },
-                        shape = RoundedCornerShape(16.dp),
-                        leadingIcon = { Icon(Icons.Filled.Person, null, modifier = Modifier.size(20.dp)) },
-                        singleLine = true,
-                    )
-
-                    OutlinedTextField(
-                        value = username,
-                        onValueChange = { username = it },
-                        modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-                        label = { Text("نام کاربری") },
-                        shape = RoundedCornerShape(16.dp),
-                        leadingIcon = {
-                            Text("@", fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                        },
-                        placeholder = { Text("نام کاربری انگلیسی", fontSize = 12.sp) },
-                        isError = usernameError.isNotEmpty(),
-                        enabled = !usernameLoading,
-                        singleLine = true,
-                        supportingText = {
-                            if (usernameError.isNotEmpty()) {
-                                Text(usernameError, color = Color(0xFFE53935), fontSize = 12.sp)
-                            } else {
-                                Text("حروف انگلیسی، اعداد و _", fontSize = 11.sp, color = Color.Gray)
-                            }
-                        },
-                    )
-
-                    Row(
-                        Modifier.fillMaxWidth().padding(top = 16.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        OutlinedButton(
-                            onClick = { editProfile = false; usernameError = "" },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(16.dp),
-                            enabled = !usernameLoading,
-                        ) {
-                            Text("انصراف")
-                        }
-                        Button(
-                            onClick = {
-                                try {
-                                    val cleanUsername = username.trim().lowercase()
-                                    usernameError = ""
-
-                                    if (cleanUsername.isNotEmpty() && cleanUsername != (user.username ?: "")) {
-                                        if (cleanUsername.length < 3 || cleanUsername.length > 30) {
-                                            usernameError = "نام کاربری باید ۳ تا ۳۰ کاراکتر باشد"
-                                            return@Button
-                                        }
-                                        if (!Regex("^[a-z0-9_]+$").matches(cleanUsername)) {
-                                            usernameError = "فقط حروف کوچک انگلیسی، اعداد و خط زیرین مجاز است"
-                                            return@Button
-                                        }
-
-                                        usernameLoading = true
-                                        scope.launch {
-                                            try {
-                                                val api = NetworkModule.getApiService()
-                                                val response = api.updateUsername(userId, UpdateUsernameReq(cleanUsername))
-                                                if (response.isSuccessful) {
-                                                    app.db.setUsername(userId, cleanUsername)
-                                                    app.db.rename(userId, name)
-                                                    user = app.db.getOrCreateUser(userId)
-                                                    username = cleanUsername
-                                                    message = "پروفایل ذخیره شد"
-                                                    editProfile = false
-                                                } else {
-                                                    val errorBody = response.errorBody()?.string()
-                                                    usernameError = if (errorBody?.contains("قبلاً انتخاب شده") == true) {
-                                                        "این نام کاربری قبلاً انتخاب شده است"
-                                                    } else {
-                                                        "خطا در ذخیره: ${response.code()}"
-                                                    }
-                                                }
-                                            } catch (e: Exception) {
-                                                usernameError = "خطا در اتصال: ${e.message}"
-                                            } finally {
-                                                usernameLoading = false
-                                            }
-                                        }
-                                    } else {
-                                        app.db.rename(userId, name)
-                                        user = app.db.getOrCreateUser(userId)
-                                        message = "پروفایل ذخیره شد"
-                                        editProfile = false
-                                    }
-                                } catch (e: Exception) {
-                                    message = e.message ?: "خطا"
-                                }
-                            },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(16.dp),
-                            elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp),
-                            enabled = !usernameLoading,
-                        ) {
-                            Text(if (usernameLoading) "درحال ذخیره..." else "ذخیره تغییرات", maxLines = 1)
-                        }
-                    }
+        AlertDialog(
+            onDismissRequest = { editProfile = false },
+            shape = RoundedCornerShape(24.dp),
+            containerColor = themeDialogContainer(),
+            title = { Text("ویرایش پروفایل") },
+            text = {
+                Column {
+                    OutlinedTextField(name, { name = it }, Modifier.fillMaxWidth(), label = { Text("نام نمایشی") })
+                    OutlinedTextField(username, { username = it }, Modifier.fillMaxWidth().padding(top = 8.dp), label = { Text("نام کاربری (بدون @)") })
                 }
-            }
-        }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    try {
+                        app.db.rename(userId, name)
+                        app.db.setUsername(userId, username)
+                        user = app.db.user(userId)
+                        message = "پروفایل ذخیره شد"
+                        editProfile = false
+                    } catch (e: Exception) { message = e.message ?: "خطا" }
+                }) { Text("ذخیره") }
+            },
+            dismissButton = { TextButton(onClick = { editProfile = false }) { Text("بستن") } },
+        )
     }
     if (donation) PrettyAlert("حمایت مالی", "از حمایت شما سپاسگزاریم. برای هماهنگی حمایت با پشتیبانی در ارتباط باشید.", onConfirm = { donation = false })
     if (editPassword) {
-        Dialog(onDismissRequest = { editPassword = false }) {
-            var currentPassVisible by remember { mutableStateOf(false) }
-            var newPassVisible by remember { mutableStateOf(false) }
-            Surface(
-                modifier = Modifier.fillMaxWidth().widthIn(max = 480.dp),
-                shape = RoundedCornerShape(28.dp),
-                color = themeDialogContainer(),
-                tonalElevation = 6.dp,
-            ) {
-                Column(Modifier.fillMaxWidth().padding(20.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            Modifier.size(52.dp).clip(CircleShape).background(Blue.copy(alpha = 0.12f)),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(Icons.Filled.Lock, null, tint = Blue, modifier = Modifier.size(26.dp))
-                        }
-                        Text(
-                            "تغییر رمز عبور",
-                            fontSize = 20.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (dark) Color.White else Color(0xFF111827),
-                            modifier = Modifier.padding(start = 14.dp),
-                        )
-                    }
-
-                    OutlinedTextField(
-                        value = currentPassword,
-                        onValueChange = { currentPassword = it },
-                        modifier = Modifier.fillMaxWidth().padding(top = 20.dp),
-                        label = { Text("رمز فعلی") },
-                        shape = RoundedCornerShape(16.dp),
-                        leadingIcon = { Icon(Icons.Filled.Lock, null, modifier = Modifier.size(20.dp)) },
-                        trailingIcon = {
-                            IconButton(onClick = { currentPassVisible = !currentPassVisible }) {
-                                Icon(
-                                    if (currentPassVisible) Icons.Filled.Visibility else Icons.Filled.VisibilityOff,
-                                    if (currentPassVisible) "مخفی کردن رمز" else "نمایش رمز",
-                                    modifier = Modifier.size(20.dp),
-                                )
-                            }
-                        },
-                        visualTransformation = if (currentPassVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                        singleLine = true,
-                    )
-
-                    OutlinedTextField(
-                        value = nextPassword,
-                        onValueChange = { nextPassword = it },
-                        modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-                        label = { Text("رمز جدید") },
-                        shape = RoundedCornerShape(16.dp),
-                        leadingIcon = { Icon(Icons.Filled.Lock, null, modifier = Modifier.size(20.dp)) },
-                        trailingIcon = {
-                            IconButton(onClick = { newPassVisible = !newPassVisible }) {
-                                Icon(
-                                    if (newPassVisible) Icons.Filled.Visibility else Icons.Filled.VisibilityOff,
-                                    if (newPassVisible) "مخفی کردن رمز" else "نمایش رمز",
-                                    modifier = Modifier.size(20.dp),
-                                )
-                            }
-                        },
-                        visualTransformation = if (newPassVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                        singleLine = true,
-                    )
-
-                    Row(
-                        Modifier.fillMaxWidth().padding(top = 16.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        OutlinedButton(
-                            onClick = { editPassword = false },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(16.dp),
-                        ) {
-                            Text("انصراف")
-                        }
-                        Button(
-                            onClick = {
-                                try {
-                                    app.db.login(current.phone, currentPassword)
-                                    app.db.reset(current.phone, nextPassword)
-                                    currentPassword = ""
-                                    nextPassword = ""
-                                    message = "رمز عوض شد"
-                                    editPassword = false
-                                } catch (e: Exception) {
-                                    message = e.message ?: "خطا"
-                                }
-                            },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(16.dp),
-                            elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp),
-                        ) {
-                            Text("ثبت تغییر", maxLines = 1)
-                        }
-                    }
+        AlertDialog(
+            onDismissRequest = { editPassword = false },
+            shape = RoundedCornerShape(24.dp),
+            containerColor = themeDialogContainer(),
+            title = { Text("رمز عبور") },
+            text = {
+                Column {
+                    OutlinedTextField(currentPassword, { currentPassword = it }, Modifier.fillMaxWidth(), label = { Text("رمز فعلی") }, visualTransformation = PasswordVisualTransformation())
+                    OutlinedTextField(nextPassword, { nextPassword = it }, Modifier.fillMaxWidth(), label = { Text("رمز جدید") }, visualTransformation = PasswordVisualTransformation())
                 }
-            }
-        }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    try {
+                        app.db.login(current.phone, currentPassword)
+                        app.db.reset(current.phone, nextPassword)
+                        currentPassword = ""
+                        nextPassword = ""
+                        message = "رمز عوض شد"
+                        editPassword = false
+                    } catch (e: Exception) { message = e.message ?: "خطا" }
+                }) { Text("تغییر") }
+            },
+            dismissButton = { TextButton(onClick = { editPassword = false }) { Text("بستن") } },
+        )
     }
     crop?.let { bitmap ->
         CropDialog(bitmap, onCancel = { crop = null }) { saved ->
@@ -7069,7 +5107,7 @@ fun ProfileScreen(
             dest.outputStream().use { saved.compress(Bitmap.CompressFormat.JPEG, 90, it) }
             saved.recycle()
             app.db.setAvatar(userId, dest.absolutePath)
-            user = app.db.getOrCreateUser(userId)
+            user = app.db.user(userId)
             crop = null
             message = "عکس ذخیره شد"
         }
@@ -7114,7 +5152,7 @@ fun ProfileScreen(
                                                 val file = runCatching { cacheWallpaper(context, item) }.getOrNull() ?: return@launch
                                                 if (decodeWallpaper(file) == null) return@launch
                                                 app.db.setChatStyle(userId, file.absolutePath, null)
-                                                user = app.db.getOrCreateUser(userId)
+                                                user = app.db.user(userId)
                                                 wallpapersOpen = false
                                             }
                                         } else if (thumb == null && status != "در حال دریافت") attempt += 1
@@ -7135,7 +5173,7 @@ fun ProfileScreen(
                 }
                 TextButton(onClick = {
                     app.db.setChatStyle(userId, null, null)
-                    user = app.db.getOrCreateUser(userId)
+                    user = app.db.user(userId)
                     wallpapersOpen = false
                 }) { Text("پس‌زمینه کهکشانی") }
             }
@@ -7168,56 +5206,19 @@ fun ProfileScreen(
 
 @Composable
 private fun RowDivider(dark: Boolean) {
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .padding(start = 64.dp)
-            .height(1.dp)
-            .background(if (dark) Color(0xFF243242) else Color(0xFFE5E7EB))
-    )
+    Box(Modifier.fillMaxWidth().padding(start = 64.dp).height(1.dp).background(if (dark) Color(0xFF243242) else Color(0xFFE5E7EB)))
 }
 
 @Composable
-private fun StatusCapsule(
-    modifier: Modifier,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    tint: Color,
-    label: String,
-    value: String,
-    card: Color,
-    dark: Boolean
-) {
-    Column(
-        modifier
-            .clip(RoundedCornerShape(16.dp))
-            .background(card)
-            .border(1.dp, if (dark) Color(0xFF243242) else Color(0xFFE5E7EB), RoundedCornerShape(16.dp))
-            .padding(14.dp)
-    ) {
+private fun StatusCapsule(modifier: Modifier, icon: androidx.compose.ui.graphics.vector.ImageVector, tint: Color, label: String, value: String, card: Color, dark: Boolean) {
+    Column(modifier.clip(RoundedCornerShape(16.dp)).background(card).border(1.dp, if (dark) Color(0xFF243242) else Color(0xFFE5E7EB), RoundedCornerShape(16.dp)).padding(14.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                Modifier
-                    .size(30.dp)
-                    .clip(CircleShape)
-                    .background(tint.copy(alpha = 0.15f)),
-                contentAlignment = Alignment.Center
-            ) {
+            Box(Modifier.size(30.dp).clip(CircleShape).background(tint.copy(alpha = 0.15f)), contentAlignment = Alignment.Center) {
                 Icon(icon, null, tint = tint, modifier = Modifier.size(18.dp))
             }
-            Text(
-                label,
-                color = if (dark) Color(0xFF9CA3AF) else Color(0xFF707579),
-                fontSize = 12.sp,
-                modifier = Modifier.padding(start = 8.dp)
-            )
+            Text(label, color = if (dark) Color(0xFF9CA3AF) else Color(0xFF707579), fontSize = 12.sp, modifier = Modifier.padding(start = 8.dp))
         }
-        Text(
-            value,
-            color = if (dark) Color.White else Color(0xFF111827),
-            fontWeight = FontWeight.Bold,
-            fontSize = 14.sp,
-            modifier = Modifier.padding(top = 8.dp)
-        )
+        Text(value, color = if (dark) Color.White else Color(0xFF111827), fontWeight = FontWeight.Bold, fontSize = 14.sp, modifier = Modifier.padding(top = 8.dp))
     }
 }
 
@@ -7358,581 +5359,86 @@ private fun IconTile(icon: androidx.compose.ui.graphics.vector.ImageVector, tile
     }
 }
 
-/** ابزار فعال در لایه ویرایش صفحه پیش‌نمایش تصویر. */
-private enum class PhotoTool { None, Crop, Draw, Tune }
-
-/**
- * صفحه تمام‌صفحه و مینیمال پیش‌نمایش تصویر پیش از ارسال (سبک تلگرام).
- * تصویر روی پس‌زمینه مشکی خالص رندر می‌شود و ابزارهای ویرایش (برش، نقاشی، نور)
- * به صورت لایه ثانویه روی خود تصویر فعال می‌شوند، نه منوی متنی شلوغ.
- */
 @Composable
-private fun PhotoSendPreview(
-    bitmap: Bitmap,
-    title: String = "پیام‌های ذخیره شده",
-    onCancel: () -> Unit,
-    onSend: (Bitmap, String) -> Unit,
-) {
-    val accent = LocalChatPalette.current.primary
-    var working by remember { mutableStateOf(bitmap) }
-    var tool by remember { mutableStateOf(PhotoTool.None) }
-    var caption by remember { mutableStateOf("") }
-
-    // لایه برش و چرخش
-    var rotation by remember { mutableStateOf(0f) }              // چرخش پله‌ای ۹۰ درجه
-    var fineAngle by remember { mutableStateOf(0f) }             // چرخش دقیق (۴۵- تا ۴۵+)
-    var cropScale by remember { mutableStateOf(1f) }
-    var cropOffset by remember { mutableStateOf(Offset.Zero) }
-    var frameW by remember { mutableStateOf(1) }
-    var frameH by remember { mutableStateOf(1) }
-    var cropRect by remember { mutableStateOf<Rect?>(null) }     // کادر برش (نرمال ۰..۱ نسبت به ناحیه)
-    var cropAspect by remember { mutableStateOf<Float?>(null) }  // نسبت ابعاد قفل‌شده (null = آزاد)
-    var cropAreaW by remember { mutableStateOf(0) }
-    var cropAreaH by remember { mutableStateOf(0) }
-    var showAspectMenu by remember { mutableStateOf(false) }
-
-    // لایه تنظیم نور
-    var brightness by remember { mutableStateOf(0f) }
-
-    // لایه نقاشی (نقاط بر حسب پیکسل تصویر نگه‌داری می‌شوند)
-    var strokes by remember(working) { mutableStateOf(listOf<List<Offset>>()) }
-    var current by remember { mutableStateOf(listOf<Offset>()) }
-
-    fun resetTools() {
-        rotation = 0f
-        fineAngle = 0f
-        cropScale = 1f
-        cropOffset = Offset.Zero
-        cropRect = null
-        cropAspect = null
-        showAspectMenu = false
-        brightness = 0f
-        strokes = listOf()
-        current = listOf()
+private fun PhotoSendPreview(bitmap: Bitmap, onCancel: () -> Unit, onSend: (Bitmap) -> Unit) {
+    var rotation by remember { mutableStateOf(0f) }
+    var cropping by remember { mutableStateOf(false) }
+    var aspect by remember { mutableStateOf(0f) }
+    var scale by remember { mutableStateOf(1f) }
+    var offset by remember { mutableStateOf(Offset.Zero) }
+    var view by remember { mutableStateOf(1) }
+    val frameRatio = when (aspect) {
+        1f -> 1f
+        4f / 3f -> 4f / 3f
+        16f / 9f -> 16f / 9f
+        else -> if (rotation % 180f == 0f) bitmap.width / bitmap.height.toFloat() else bitmap.height / bitmap.width.toFloat()
     }
-
-    fun applyTool() {
-        working = when (tool) {
-            PhotoTool.Crop -> exportCroppedPhoto(
-                working,
-                rotation + fineAngle,
-                frameW / frameH.coerceAtLeast(1).toFloat(),
-                cropScale,
-                cropOffset,
-                frameW,
-            )
-            PhotoTool.Tune -> applyBrightness(working, brightness)
-            PhotoTool.Draw -> bakeStrokes(working, strokes, accent.toArgb())
-            PhotoTool.None -> working
-        }
-        resetTools()
-        tool = PhotoTool.None
-    }
-
     Dialog(onDismissRequest = onCancel, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
-        Box(Modifier.fillMaxSize().background(Color.Black)) {
-            /* ---------- سطح تصویر ---------- */
-            when (tool) {
-                PhotoTool.Crop -> BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    val dens = LocalDensity.current
-                    val areaW = constraints.maxWidth.toFloat()
-                    val areaH = constraints.maxHeight.toFloat()
-
-                    // مقداردهی اولیه کادر برش بر اساس نسبت تصویر (فقط یک‌بار در هر ورود به ابزار)
-                    LaunchedEffect(tool, working, areaW, areaH) {
-                        cropAreaW = areaW.toInt()
-                        cropAreaH = areaH.toInt()
-                        if (cropRect == null && areaW > 1f && areaH > 1f) {
-                            cropRect = defaultCropRect(working, rotation, areaW, areaH)
-                        }
-                    }
-
-                    val cr = cropRect ?: Rect(0.06f, 0.2f, 0.94f, 0.8f)
-                    val boxWpx = cr.width * areaW
-                    val boxHpx = cr.height * areaH
-                    val centerX = (cr.left + cr.right) / 2f * areaW
-                    val centerY = (cr.top + cr.bottom) / 2f * areaH
-
-                    fun dragHandle(corner: Int, delta: Offset) {
-                        val cur = cropRect ?: return
-                        cropRect = resizeCropRect(cur, corner, delta, areaW, areaH, cropAspect)
-                    }
-
-                    Box(
-                        Modifier
-                            .size(with(dens) { boxWpx.toDp() }, with(dens) { boxHpx.toDp() })
-                            .absoluteOffset(
-                                x = with(dens) { (centerX - areaW / 2f).toDp() },
-                                y = with(dens) { (centerY - areaH / 2f).toDp() },
-                            )
-                            .onSizeChanged { frameW = it.width; frameH = it.height },
-                    ) {
-                        // لایه حرکت/بزرگ‌نمایی تصویر (زیر دستگیره‌ها)
-                        Box(
-                            Modifier.fillMaxSize().pointerInput(working, rotation) {
-                                detectTransformGestures { _, pan, zoom, _ ->
-                                    cropScale = (cropScale * zoom).coerceIn(1f, 5f)
-                                    cropOffset += pan
-                                }
-                            },
-                        )
-                        Box(Modifier.fillMaxSize().clip(RoundedCornerShape(2.dp))) {
-                            Image(
-                                working.asImageBitmap(),
-                                null,
-                                Modifier.fillMaxSize().graphicsLayer {
-                                    scaleX = cropScale
-                                    scaleY = cropScale
-                                    translationX = cropOffset.x
-                                    translationY = cropOffset.y
-                                    rotationZ = rotation + fineAngle
-                                },
-                                contentScale = ContentScale.Crop,
-                            )
-                        }
-                        CropFrame(Modifier.fillMaxSize())
-                        // دستگیره‌های لمسی چهار گوشه برای تغییر اندازه کادر برش
-                        // (با جهت‌دهی LTR محلی تا Start/End همیشه با گوشه فیزیکی چپ/راست منطبق باشد)
-                        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-                            listOf(
-                                Alignment.TopStart to 0,
-                                Alignment.TopEnd to 1,
-                                Alignment.BottomStart to 2,
-                                Alignment.BottomEnd to 3,
-                            ).forEach { (alignment, corner) ->
-                                Box(
-                                    Modifier.align(alignment).size(44.dp).pointerInput(corner) {
-                                        detectDragGestures { change, drag ->
-                                            change.consume()
-                                            dragHandle(corner, drag)
-                                        }
-                                    },
-                                )
-                            }
-                        }
-                    }
-                }
-                PhotoTool.Draw -> Box(Modifier.fillMaxSize()) {
-                    Image(working.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
-                    Canvas(
-                        Modifier.fillMaxSize().pointerInput(working) {
-                            val areaW = size.width.toFloat()
-                            val areaH = size.height.toFloat()
-                            detectDragGestures(
-                                onDragStart = { current = listOf(toBitmapPoint(it, areaW, areaH, working.width, working.height)) },
-                                onDragEnd = {
-                                    if (current.isNotEmpty()) strokes = strokes + listOf(current)
-                                    current = listOf()
-                                },
-                                onDragCancel = { current = listOf() },
-                                onDrag = { change, _ ->
-                                    current = current + toBitmapPoint(change.position, areaW, areaH, working.width, working.height)
-                                    change.consume()
-                                },
-                            )
-                        },
-                    ) {
-                        val s = minOf(size.width / working.width, size.height / working.height)
-                        val left = (size.width - working.width * s) / 2f
-                        val top = (size.height - working.height * s) / 2f
-                        val strokeW = (working.width / 45f) * s
-                        (strokes + listOf(current)).forEach { line ->
-                            for (i in line.indices) {
-                                val from = line[i]
-                                val to = if (i + 1 < line.size) line[i + 1] else from
-                                drawLine(
-                                    accent,
-                                    Offset(left + from.x * s, top + from.y * s),
-                                    Offset(left + to.x * s, top + to.y * s),
-                                    strokeWidth = strokeW,
-                                    cap = StrokeCap.Round,
-                                )
-                            }
-                        }
-                    }
-                }
-                else -> Image(
-                    working.asImageBitmap(),
-                    null,
-                    Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Fit,
-                    colorFilter = if (tool == PhotoTool.Tune) ColorFilter.colorMatrix(androidx.compose.ui.graphics.ColorMatrix(brightnessFilter(brightness).array)) else null,
-                )
+        Column(Modifier.fillMaxSize().background(Color(0xE6000000)).padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = onCancel) { Text("انصراف", color = Color.White) }
+                Text("پیش‌نمایش تصویر", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp, modifier = Modifier.weight(1f), textAlign = TextAlign.Center)
+                TextButton(onClick = { rotation = 0f; cropping = false; scale = 1f; offset = Offset.Zero; aspect = 0f }) { Text("بازنشانی", color = Color.White) }
             }
-
-            /* ---------- نوار بالایی (شفاف با گرادینت تیره) ---------- */
-            Row(
-                Modifier.fillMaxWidth().align(Alignment.TopCenter)
-                    .background(Brush.verticalGradient(listOf(Color(0xCC000000), Color(0x00000000))))
-                    .statusBarsPadding().padding(horizontal = 6.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                IconButton(onClick = onCancel) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "بازگشت", tint = Color.White) }
-                Text(title, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp, maxLines = 1, modifier = Modifier.weight(1f).padding(horizontal = 6.dp))
-                Box(
-                    Modifier.size(40.dp).clip(CircleShape).background(accent).clickable { onSend(working, caption.trim()) },
-                    contentAlignment = Alignment.Center,
-                ) { Icon(Icons.Filled.Check, "تأیید و ارسال", tint = Color.White, modifier = Modifier.size(22.dp)) }
-            }
-
-            /* ---------- نوار پایینی (کپشن + اکشن‌ها یا لایه ابزار) ---------- */
-            Column(
-                Modifier.fillMaxWidth().align(Alignment.BottomCenter)
-                    .background(Brush.verticalGradient(listOf(Color(0x00000000), Color(0xCC000000))))
-                    .navigationBarsPadding().padding(horizontal = 12.dp, vertical = 10.dp),
-            ) {
-                if (tool == PhotoTool.None) {
-                    Row(
-                        Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(Color(0x33FFFFFF)).padding(horizontal = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Box(Modifier.weight(1f).padding(vertical = 12.dp)) {
-                            if (caption.isEmpty()) Text("توضیحات را اضافه کنید...", color = Color(0x99FFFFFF), fontSize = 14.sp)
-                            BasicTextField(
-                                caption,
-                                { caption = it },
-                                Modifier.fillMaxWidth(),
-                                textStyle = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 14.sp),
-                                cursorBrush = SolidColor(Color.White),
-                                maxLines = 4,
-                            )
-                        }
-                        IconButton(onClick = {}) { Icon(Icons.Filled.CameraAlt, "افزودن استیکر", tint = Color(0xCCFFFFFF)) }
-                    }
-                    Spacer(Modifier.height(12.dp))
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                        Box(
-                            Modifier.size(52.dp).clip(CircleShape).background(accent).clickable { onSend(working, caption.trim()) },
-                            contentAlignment = Alignment.Center,
-                        ) { Icon(Icons.AutoMirrored.Filled.Send, "ارسال", tint = Color.White, modifier = Modifier.size(24.dp)) }
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            PhotoToolButton(Icons.Filled.Crop, "برش و چرخش") { tool = PhotoTool.Crop }
-                            PhotoToolButton(Icons.Filled.Brush, "نقاشی") { tool = PhotoTool.Draw }
-                            PhotoToolButton(Icons.Filled.Tune, "تنظیم نور") { tool = PhotoTool.Tune }
-                        }
-                    }
-                } else if (tool == PhotoTool.Tune) {
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        PhotoToolButton(Icons.Filled.Close, "انصراف") { resetTools(); tool = PhotoTool.None }
-                        Slider(
-                            brightness,
-                            { brightness = it },
-                            Modifier.weight(1f).padding(horizontal = 10.dp),
-                            valueRange = -1f..1f,
-                            colors = SliderDefaults.colors(thumbColor = accent, activeTrackColor = accent, inactiveTrackColor = Color(0x55FFFFFF)),
-                        )
-                        PhotoToolButton(Icons.Filled.Check, "اعمال", primary = true, accent = accent) { applyTool() }
-                    }
-                } else if (tool == PhotoTool.Crop) {
-                    /* ---------- ادیتور برش به سبک تلگرام: خط‌کش زاویه + اکشن‌ها ---------- */
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        // سمت راست خط‌کش: چرخش پله‌ای ۹۰ درجه
-                        PhotoToolButton(Icons.AutoMirrored.Filled.RotateRight, "چرخش ۹۰ درجه") { rotation = (rotation + 90f) % 360f }
-                        // وسط: خط‌کش چرخش دقیق
-                        AngleRuler(
-                            value = fineAngle,
-                            onValue = { fineAngle = it },
-                            accent = accent,
-                            modifier = Modifier.weight(1f).height(60.dp).padding(horizontal = 10.dp),
-                        )
-                        // سمت چپ خط‌کش: منوی سریع نسبت ابعاد
-                        Box {
-                            PhotoToolButton(Icons.Filled.AspectRatio, "نسبت ابعاد") { showAspectMenu = true }
-                            DropdownMenu(
-                                expanded = showAspectMenu,
-                                onDismissRequest = { showAspectMenu = false },
-                                modifier = Modifier.background(Color(0xFF1C1C1E)),
-                            ) {
-                                listOf<Pair<String, Float?>>(
-                                    "آزاد" to null,
-                                    "۱:۱" to 1f,
-                                    "۴:۳" to 4f / 3f,
-                                    "۱۶:۹" to 16f / 9f,
-                                ).forEach { (label, ratio) ->
-                                    DropdownMenuItem(
-                                        text = { Text(label, color = Color.White, fontSize = 14.sp) },
-                                        onClick = {
-                                            cropAspect = ratio
-                                            if (ratio != null && cropAreaW > 0 && cropAreaH > 0) {
-                                                cropRect = fitCropRect(cropRect, ratio, cropAreaW.toFloat(), cropAreaH.toFloat())
-                                            }
-                                            showAspectMenu = false
-                                        },
-                                    )
-                                }
-                            }
-                        }
-                    }
-                    Spacer(Modifier.height(12.dp))
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                        // سمت راست (RTL): ثبت برش
-                        Text(
-                            "بریدن",
-                            color = Color(0xFFFF6D00),
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 16.sp,
-                            modifier = Modifier.clip(RoundedCornerShape(10.dp)).clickable { applyTool() }.padding(horizontal = 14.dp, vertical = 8.dp),
-                        )
-                        // سمت چپ (RTL): لغو
-                        Text(
-                            "لغو",
-                            color = Color.White,
-                            fontSize = 16.sp,
-                            modifier = Modifier.clip(RoundedCornerShape(10.dp)).clickable { resetTools(); tool = PhotoTool.None }.padding(horizontal = 14.dp, vertical = 8.dp),
-                        )
-                    }
+            Box(Modifier.weight(1f).fillMaxWidth().padding(vertical = 12.dp), contentAlignment = Alignment.Center) {
+                if (!cropping) {
+                    Image(
+                        bitmap.asImageBitmap(),
+                        null,
+                        Modifier.fillMaxWidth().heightIn(max = 520.dp).graphicsLayer { rotationZ = rotation },
+                        contentScale = ContentScale.Fit,
+                    )
                 } else {
-                    /* ---------- نوار ابزار نقاشی ---------- */
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        PhotoToolButton(Icons.Filled.Close, "انصراف") { resetTools(); tool = PhotoTool.None }
-                        Spacer(Modifier.weight(1f))
-                        PhotoToolButton(Icons.Filled.Refresh, "پاک کردن نقاشی") { strokes = listOf(); current = listOf() }
-                        Spacer(Modifier.width(8.dp))
-                        PhotoToolButton(Icons.Filled.Check, "اعمال", primary = true, accent = accent) { applyTool() }
+                    Box(
+                        Modifier.fillMaxWidth(0.92f).aspectRatio(frameRatio.coerceIn(0.4f, 2.2f)).clip(RoundedCornerShape(12.dp)).border(2.dp, Color.White, RoundedCornerShape(12.dp)).background(Color.Black).onSizeChanged { view = it.width }.pointerInput(bitmap) {
+                            detectTransformGestures { _, pan, zoom, _ ->
+                                scale = (scale * zoom).coerceIn(1f, 4f)
+                                offset += pan
+                            }
+                        },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Image(bitmap.asImageBitmap(), null, Modifier.fillMaxSize().graphicsLayer {
+                            scaleX = scale
+                            scaleY = scale
+                            translationX = offset.x
+                            translationY = offset.y
+                            rotationZ = rotation
+                        }, contentScale = ContentScale.Crop)
                     }
+                }
+            }
+            if (cropping) {
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(0f to "آزاد", 1f to "۱:۱", 4f / 3f to "۴:۳", 16f / 9f to "۱۶:۹").forEach { (value, label) ->
+                        val on = aspect == value
+                        Text(label, color = if (on) Color.White else Color(0xFFD1D5DB), fontSize = 12.sp, modifier = Modifier.clip(CircleShape).background(if (on) Blue else Color(0xFF243042)).clickable { aspect = value }.padding(horizontal = 12.dp, vertical = 6.dp))
+                    }
+                }
+            }
+            Row(Modifier.fillMaxWidth().padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                TextButton(onClick = { rotation = (rotation + 90f) % 360f }) {
+                    Icon(Icons.AutoMirrored.Filled.RotateRight, null, tint = Color.White)
+                    Text("چرخش", color = Color.White)
+                }
+                TextButton(onClick = { cropping = !cropping }) {
+                    Icon(Icons.Filled.Crop, null, tint = if (cropping) Blue else Color.White)
+                    Text(if (cropping) "برش روشن" else "برش تصویر", color = if (cropping) Blue else Color.White)
+                }
+                Button(onClick = { onSend(exportSendPhoto(bitmap, rotation, cropping, aspect, scale, offset, view)) }, shape = CircleShape, colors = ButtonDefaults.buttonColors(containerColor = Blue, contentColor = LocalAppTheme.current.onButtonColor)) {
+                    Icon(Icons.AutoMirrored.Filled.Send, null, tint = Color.White)
+                    Text("ارسال", modifier = Modifier.padding(start = 6.dp))
                 }
             }
         }
     }
 }
 
-/** دکمه دایره‌ای فقط-آیکون برای نوار ابزار صفحه پیش‌نمایش. */
-@Composable
-private fun PhotoToolButton(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    label: String,
-    primary: Boolean = false,
-    accent: Color = Color(0xFF2AABEE),
-    onClick: () -> Unit,
-) {
-    Box(
-        Modifier.size(if (primary) 48.dp else 44.dp).clip(CircleShape)
-            .background(if (primary) accent else Color(0x33FFFFFF))
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(icon, label, tint = Color.White, modifier = Modifier.size(if (primary) 22.dp else 20.dp))
-    }
-}
-
-/** خط‌کش چرخش دقیق به سبک ادیتور تلگرام: نمایش درجه در مرکز و کشیدن پیوسته (۴۵- تا ۴۵+). */
-@Composable
-private fun AngleRuler(
-    value: Float,
-    onValue: (Float) -> Unit,
-    accent: Color,
-    modifier: Modifier = Modifier,
-) {
-    val range = 45f
-    val pxPerDeg = with(LocalDensity.current) { 3.6.dp.toPx() }
-    val currentValue by rememberUpdatedState(value)
-    Box(
-        modifier.pointerInput(Unit) {
-            detectDragGestures { change, drag ->
-                change.consume()
-                onValue((currentValue - drag.x / pxPerDeg).coerceIn(-range, range))
-            }
-        },
-    ) {
-        Canvas(Modifier.fillMaxSize()) {
-            val centerX = size.width / 2f
-            val baseY = size.height * 0.86f
-            val majorLen = size.height * 0.34f
-            val minorLen = size.height * 0.18f
-            val half = (size.width / 2f / pxPerDeg).toInt() + 2
-            val startDeg = value.toInt() - half
-            val endDeg = value.toInt() + half
-            for (d in startDeg..endDeg) {
-                val x = centerX + (d - value) * pxPerDeg
-                if (x < 0f || x > size.width) continue
-                val major = d % 5 == 0
-                drawLine(
-                    color = Color(0x88FFFFFF),
-                    start = Offset(x, baseY - if (major) majorLen else minorLen),
-                    end = Offset(x, baseY),
-                    strokeWidth = if (major) 1.5.dp.toPx() else 1.dp.toPx(),
-                )
-            }
-            // نشانگر مرکزی ثابت به رنگ تم
-            drawLine(
-                accent,
-                Offset(centerX, baseY - majorLen - 6.dp.toPx()),
-                Offset(centerX, baseY),
-                strokeWidth = 2.dp.toPx(),
-                cap = StrokeCap.Round,
-            )
-        }
-        Text(
-            "${persianDigits(value.roundToInt().toString())}°",
-            color = Color.White,
-            fontSize = 12.sp,
-            modifier = Modifier.align(Alignment.TopCenter).padding(top = 4.dp),
-        )
-    }
-}
-
-/** کادر برش پیش‌فرض بر اساس نسبت تصویر، در مرکز ناحیه با حاشیه. */
-private fun defaultCropRect(src: Bitmap, rotation: Float, areaW: Float, areaH: Float): Rect {
-    val imgRatio =
-        if (rotation % 180f == 0f) src.width / src.height.toFloat()
-        else src.height / src.width.toFloat()
-    val margin = 0.08f
-    var w = areaW * (1f - 2f * margin)
-    var h = w / imgRatio
-    val maxH = areaH * (1f - 2f * margin)
-    if (h > maxH) {
-        h = maxH
-        w = h * imgRatio
-    }
-    val left = (areaW - w) / 2f
-    val top = (areaH - h) / 2f
-    return Rect(left / areaW, top / areaH, (left + w) / areaW, (top + h) / areaH)
-}
-
-/** تغییر اندازه کادر برش با کشیدن یک گوشه (۰=چپ‌بالا، ۱=راست‌بالا، ۲=چپ‌پایین، ۳=راست‌پایین). */
-private fun resizeCropRect(
-    cur: Rect,
-    corner: Int,
-    delta: Offset,
-    areaW: Float,
-    areaH: Float,
-    lockedAspect: Float?,
-): Rect {
-    var l = cur.left * areaW
-    var t = cur.top * areaH
-    var r = cur.right * areaW
-    var b = cur.bottom * areaH
-    when (corner) {
-        0 -> { l += delta.x; t += delta.y }
-        1 -> { r += delta.x; t += delta.y }
-        2 -> { l += delta.x; b += delta.y }
-        else -> { r += delta.x; b += delta.y }
-    }
-    val minPx = 96f
-    l = l.coerceIn(0f, areaW - minPx)
-    r = r.coerceIn(minPx, areaW)
-    t = t.coerceIn(0f, areaH - minPx)
-    b = b.coerceIn(minPx, areaH)
-    if (r - l < minPx) {
-        if (corner == 0 || corner == 2) l = r - minPx else r = l + minPx
-    }
-    if (b - t < minPx) {
-        if (corner == 0 || corner == 1) t = b - minPx else b = t + minPx
-    }
-    if (lockedAspect != null) {
-        var w = r - l
-        var h = b - t
-        if (w / h > lockedAspect) w = h * lockedAspect else h = w / lockedAspect
-        if (corner == 0 || corner == 2) l = (r - w).coerceAtLeast(0f) else r = (l + w).coerceAtMost(areaW)
-        if (corner == 0 || corner == 1) t = (b - h).coerceAtLeast(0f) else b = (t + h).coerceAtMost(areaH)
-    }
-    return Rect(l / areaW, t / areaH, r / areaW, b / areaH)
-}
-
-/** جای‌گذاری کادر برش موجود در نسبت ابعاد انتخاب‌شده، حول همان مرکز. */
-private fun fitCropRect(cur: Rect?, aspect: Float, areaW: Float, areaH: Float): Rect {
-    val base = cur ?: Rect(0.06f, 0.06f, 0.94f, 0.94f)
-    val cx = (base.left + base.right) / 2f * areaW
-    val cy = (base.top + base.bottom) / 2f * areaH
-    var w = areaW * 0.86f
-    var h = w / aspect
-    if (h > areaH * 0.86f) {
-        h = areaH * 0.86f
-        w = h * aspect
-    }
-    val l = (cx - w / 2f).coerceIn(0f, areaW - w)
-    val t = (cy - h / 2f).coerceIn(0f, areaH - h)
-    return Rect(l / areaW, t / areaH, (l + w) / areaW, (t + h) / areaH)
-}
-
-/** کادر برش با خطوط راهنمای یک‌سوم و براکت گوشه‌ها. */
-@Composable
-private fun CropFrame(modifier: Modifier) {
-    Canvas(modifier) {
-        val guide = Color(0x66FFFFFF)
-        val thin = 1.dp.toPx()
-        for (i in 1..2) {
-            val x = size.width * i / 3f
-            val y = size.height * i / 3f
-            drawLine(guide, Offset(x, 0f), Offset(x, size.height), strokeWidth = thin)
-            drawLine(guide, Offset(0f, y), Offset(size.width, y), strokeWidth = thin)
-        }
-        val arm = 22.dp.toPx()
-        val thick = 3.dp.toPx()
-        val corners = listOf(
-            Offset(0f, 0f) to Offset(1f, 1f),
-            Offset(size.width, 0f) to Offset(-1f, 1f),
-            Offset(0f, size.height) to Offset(1f, -1f),
-            Offset(size.width, size.height) to Offset(-1f, -1f),
-        )
-        corners.forEach { (o, d) ->
-            drawLine(Color.White, o, Offset(o.x + d.x * arm, o.y), strokeWidth = thick)
-            drawLine(Color.White, o, Offset(o.x, o.y + d.y * arm), strokeWidth = thick)
-        }
-    }
-}
-
-/** تبدیل نقطه لمس (مختصات صفحه) به مختصات تصویر با در نظر گرفتن ContentScale.Fit. */
-private fun toBitmapPoint(p: Offset, areaW: Float, areaH: Float, w: Int, h: Int): Offset {
-    val s = minOf(areaW / w, areaH / h)
-    val left = (areaW - w * s) / 2f
-    val top = (areaH - h * s) / 2f
-    return Offset(
-        ((p.x - left) / s).coerceIn(0f, w.toFloat()),
-        ((p.y - top) / s).coerceIn(0f, h.toFloat()),
-    )
-}
-
-/** ماتریس رنگ تنظیم نور (مقدار ۱- تا ۱+). */
-private fun brightnessFilter(value: Float): android.graphics.ColorMatrix {
-    val s = (1f + value * 0.5f).coerceAtLeast(0f)
-    val t = value * 70f
-    return android.graphics.ColorMatrix(
-        floatArrayOf(
-            s, 0f, 0f, 0f, t,
-            0f, s, 0f, 0f, t,
-            0f, 0f, s, 0f, t,
-            0f, 0f, 0f, 1f, 0f,
-        ),
-    )
-}
-
-private fun applyBrightness(src: Bitmap, value: Float): Bitmap {
-    if (value == 0f) return src
-    val out = Bitmap.createBitmap(src.width, src.height, Bitmap.Config.ARGB_8888)
-    val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-        colorFilter = android.graphics.ColorMatrixColorFilter(brightnessFilter(value))
-    }
-    android.graphics.Canvas(out).drawBitmap(src, 0f, 0f, paint)
-    return out
-}
-
-/** سوزاندن خطوط نقاشی روی نسخه‌ای قابل‌تغییر از تصویر. */
-private fun bakeStrokes(src: Bitmap, strokes: List<List<Offset>>, color: Int): Bitmap {
-    if (strokes.isEmpty()) return src
-    val out = src.copy(Bitmap.Config.ARGB_8888, true) ?: return src
-    val canvas = android.graphics.Canvas(out)
-    val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-        this.color = color
-        style = android.graphics.Paint.Style.STROKE
-        strokeCap = android.graphics.Paint.Cap.ROUND
-        strokeJoin = android.graphics.Paint.Join.ROUND
-        strokeWidth = src.width / 45f
-    }
-    strokes.forEach { line ->
-        for (i in line.indices) {
-            val from = line[i]
-            val to = if (i + 1 < line.size) line[i + 1] else from
-            canvas.drawLine(from.x, from.y, to.x, to.y, paint)
-        }
-    }
-    return out
-}
-
-/** اعمال چرخش و برش روی تصویر بر اساس کادر انتخاب‌شده در لایه برش. */
-private fun exportCroppedPhoto(src: Bitmap, rotation: Float, ratio: Float, scale: Float, offset: Offset, view: Int): Bitmap {
+private fun exportSendPhoto(src: Bitmap, rotation: Float, cropping: Boolean, aspect: Float, scale: Float, offset: Offset, view: Int): Bitmap {
     val turn = android.graphics.Matrix().apply { postRotate(rotation) }
     val rotated = if (rotation % 360f == 0f) src else Bitmap.createBitmap(src, 0, 0, src.width, src.height, turn, true)
+    if (!cropping) return rotated
+    val ratio = if (aspect <= 0f) rotated.width / rotated.height.toFloat() else aspect
     val outW = 1080
     val outH = (outW / ratio).toInt().coerceAtLeast(1)
     val out = Bitmap.createBitmap(outW, outH, Bitmap.Config.ARGB_8888)
@@ -8036,7 +5542,6 @@ fun PayScreen(app: App, userId: String, back: () -> Unit, selectedPlan: Subscrip
     var receiptPath by remember { mutableStateOf<String?>(null) }
     var copiedCard by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
-    val scope = rememberCoroutineScope()
     
     val page = if (dark) Color(0xFF0F172A) else Color(0xFFE6E6FA)
     val card = if (dark) Color(0xFF1E293B) else Color.White
@@ -8245,30 +5750,6 @@ fun PayScreen(app: App, userId: String, back: () -> Unit, selectedPlan: Subscrip
                             "دفتر گفتگو - ثبت پرداخت",
                             "رسید پرداخت ${selectedSubscriptionPlan?.name} ثبت شد و در انتظار بررسی است."
                         )
-
-                        // اطلاع‌رسانی پلن جدید به سرور تا پس از ری‌استارت/سینک، پلن به free برنگردد
-                        val selectedId = selectedSubscriptionPlan?.id
-                        val newPlan = if (selectedId == "seasonal") "smart" else "plus"
-                        val newDuration = if (selectedId == "seasonal") 90 else 30
-                        scope.launch {
-                            runCatching {
-                                val planResponse = withContext(Dispatchers.IO) {
-                                    NetworkModule.getApiService().updateUserPlan(
-                                        userId,
-                                        UpdatePlanReq(plan = newPlan, durationDays = newDuration),
-                                    )
-                                }
-                                if (planResponse.isSuccessful) {
-                                    val dto = planResponse.body()
-                                    app.db.setUserPlan(
-                                        userId,
-                                        dto?.plan ?: newPlan,
-                                        dto?.planExpiresAt,
-                                    )
-                                    user = app.db.user(userId)
-                                }
-                            }
-                        }
                     } catch (e: Exception) {
                         error = e.message ?: "خطا در ثبت رسید"
                     }
@@ -8432,12 +5913,9 @@ private fun showPaymentNotification(context: android.content.Context, title: Str
 }
 
 private fun planDisplay(plan: String) = when (plan) {
-    "plus" -> "پلاس"
-    "smart" -> "هوشمند"
-    "basic" -> "پایه"
-    "advanced" -> "پیشرفته"
-    "guest" -> "مهمان (اعتبار ۱ روزه)"
-    "expired_guest" -> "مهمان منقضی‌شده"
+    "basic" -> "پلاس"
+    "advanced" -> "هوشمند"
+    "guest" -> "مهمان"
     else -> "رایگان"
 }
 
@@ -8445,687 +5923,4 @@ private fun planTitle(plan: String) = when (plan) {
     "basic" -> "پایه"
     "advanced" -> "پیشرفته"
     else -> "رایگان"
-}
-
-
-
-/**
- * AdminScreen - ادمین پنل کا مرکزی صفحہ
- * یہ AdminDashboard کو براہ راست کال کرتا ہے
- */
-@Composable
-fun AdminScreen(
-    app: App,
-    userId: String,
-    onBack: () -> Unit
-) {
-    AdminDashboard(app = app, userId = userId, onBack = onBack)
-}
-
-@Composable
-fun AdminDashboard(app: App, userId: String, onBack: () -> Unit) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val palette = LocalTg.current
-    val dark = palette.dark
-
-    var searchQuery by remember { mutableStateOf("") }
-    var sortBy by remember { mutableStateOf("highest_usage") }
-    var planFilter by remember { mutableStateOf("all") }
-    var stats by remember { mutableStateOf<AdminStatsResponse?>(null) }
-    var loading by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf("") }
-    var activeTab by remember { mutableStateOf("users") }  // "users" یا "ai_chat"
-
-    val api = NetworkModule.getApiService()
-
-    fun loadStats() {
-        loading = true
-        error = ""
-        scope.launch {
-            try {
-                val response = api.getAdminStats(
-                    query = searchQuery,
-                    sortBy = sortBy,
-                    plan = planFilter
-                )
-                if (response.isSuccessful) {
-                    stats = response.body()
-                } else {
-                    error = "خطا در بارگذاری آمار"
-                }
-            } catch (e: Exception) {
-                error = "خطا در اتصال: ${e.message}"
-            } finally {
-                loading = false
-            }
-        }
-    }
-
-    // بارگذاری اولیه
-    LaunchedEffect(searchQuery, sortBy, planFilter) {
-        loadStats()
-    }
-
-    val card = if (dark) Color(0xFF1E293B) else Color.White
-    val ink = if (dark) Color.White else Color(0xFF111827)
-    val muted = if (dark) Color(0xFF9CA3AF) else Color(0xFF6B7280)
-
-    Scaffold(
-        containerColor = palette.bg,
-        topBar = {
-            Row(
-                Modifier.fillMaxWidth().padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = ink)
-                }
-                Text("پنل مدیریت", color = ink, fontWeight = FontWeight.Bold, fontSize = 20.sp, modifier = Modifier.padding(start = 8.dp))
-            }
-        }
-    ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding)) {
-            // Tab Navigation
-            Row(
-                Modifier.fillMaxWidth().background(card).padding(horizontal = 16.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                TextButton(
-                    onClick = { activeTab = "users" },
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Text(
-                        "کاربران",
-                        color = if (activeTab == "users") Color(0xFF3B82F6) else muted,
-                        fontWeight = if (activeTab == "users") FontWeight.Bold else FontWeight.Normal
-                    )
-                }
-                TextButton(
-                    onClick = { activeTab = "ai_chat" },
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Text(
-                        "دستیار",
-                        color = if (activeTab == "ai_chat") Color(0xFF3B82F6) else muted,
-                        fontWeight = if (activeTab == "ai_chat") FontWeight.Bold else FontWeight.Normal
-                    )
-                }
-            }
-
-            // Content
-            if (activeTab == "users") {
-                LazyColumn(Modifier.fillMaxSize()) {
-                    // Header Stats Card
-                    item {
-                        Card(
-                            modifier = Modifier.fillMaxWidth().padding(16.dp),
-                            shape = RoundedCornerShape(24.dp),
-                            colors = CardDefaults.cardColors(containerColor = Color(0xFF1E40AF)),
-                            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
-                        ) {
-                            Column(
-                                Modifier.padding(24.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally
-                            ) {
-                                Icon(
-                                    Icons.Filled.TableChart,
-                                    null,
-                                    tint = Color(0xFF60A5FA),
-                                    modifier = Modifier.size(40.dp)
-                                )
-                                Text(
-                                    "مجموع توکن‌های مصرفی",
-                                    color = Color(0xFFBFDBFE),
-                                    fontSize = 14.sp,
-                                    modifier = Modifier.padding(top = 12.dp)
-                                )
-                                Text(
-                                    persianDigits((stats?.totalTokensUsed ?: 0).toString()),
-                                    color = Color.White,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 32.sp,
-                                    modifier = Modifier.padding(top = 8.dp)
-                                )
-                                Text(
-                                    "کاربر فعال: ${persianDigits((stats?.totalUsers ?: 0).toString())}",
-                                    color = Color(0xFFBFDBFE),
-                                    fontSize = 12.sp,
-                                    modifier = Modifier.padding(top = 12.dp)
-                                )
-                            }
-                        }
-                    }
-
-                    // Search Bar
-                    item {
-                        OutlinedTextField(
-                            value = searchQuery,
-                            onValueChange = { searchQuery = it },
-                            label = { Text("جستجو (نام، شماره، آیدی)") },
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                            shape = RoundedCornerShape(12.dp),
-                            leadingIcon = {
-                                Icon(Icons.Filled.Search, null, tint = muted)
-                            }
-                        )
-                    }
-
-                    // Filter Chips Row
-                    item {
-                        Column(Modifier.fillMaxWidth().padding(16.dp)) {
-                            Text("مرتب‌سازی:", color = ink, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
-                            Row(
-                                Modifier.fillMaxWidth().padding(top = 8.dp).horizontalScroll(rememberScrollState()),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                listOf(
-                                    "highest_usage" to "بیشترین مصرف",
-                                    "lowest_usage" to "کمترین مصرف",
-                                    "newest" to "جدیدترین"
-                                ).forEach { (value, label) ->
-                                    FilterChip(
-                                        selected = sortBy == value,
-                                        onClick = { sortBy = value },
-                                        label = { Text(label, fontSize = 12.sp) },
-                                        shape = RoundedCornerShape(8.dp)
-                                    )
-                                }
-                            }
-
-                            Text("فیلتر پلن:", color = ink, fontWeight = FontWeight.SemiBold, fontSize = 12.sp, modifier = Modifier.padding(top = 12.dp))
-                            Row(
-                                Modifier.fillMaxWidth().padding(top = 8.dp).horizontalScroll(rememberScrollState()),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                listOf(
-                                    "all" to "همه",
-                                    "free" to "رایگان",
-                                    "plus" to "پلاس",
-                                    "smart" to "هوشمند",
-                                    "guest" to "مهمان"
-                                ).forEach { (value, label) ->
-                                    FilterChip(
-                                        selected = planFilter == value,
-                                        onClick = { planFilter = value },
-                                        label = { Text(label, fontSize = 12.sp) },
-                                        shape = RoundedCornerShape(8.dp)
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    // Error Message
-                    if (error.isNotEmpty()) {
-                        item {
-                            Text(
-                                error,
-                                color = Color(0xFFDC2626),
-                                fontSize = 12.sp,
-                                modifier = Modifier.fillMaxWidth().padding(16.dp)
-                            )
-                        }
-                    }
-
-                    // Loading
-                    if (loading) {
-                        item {
-                            Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
-                                CircularProgressIndicator()
-                            }
-                        }
-                    }
-
-                    // User Cards
-                    stats?.users?.let { users ->
-                        items(users) { user ->
-                            UserAdminCard(
-                                user = user,
-                                onChatClick = {
-                                    // Navigate to support chat
-                                },
-                                palette = palette
-                            )
-                        }
-                    }
-                }
-            } else {
-                // AI Chat Tab
-                Box(Modifier.fillMaxSize()) {
-                    AdminAiChatScreen(app, userId, onBack = { activeTab = "users" })
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun UserAdminCard(
-    user: UserStatsResponse,
-    onChatClick: () -> Unit,
-    palette: TgPalette
-) {
-    val dark = palette.dark
-    val card = if (dark) Color(0xFF111827) else Color.White
-    val ink = if (dark) Color.White else Color(0xFF111827)
-    val muted = if (dark) Color(0xFF9CA3AF) else Color(0xFF6B7280)
-    val badgeBg = when (user.plan) {
-        "smart" -> Color(0xFFA855F7)
-        "plus" -> Color(0xFF3B82F6)
-        "free" -> Color(0xFF6B7280)
-        else -> Color(0xFFEF4444)
-    }
-    
-    Card(
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = card),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)
-    ) {
-        Row(
-            Modifier.fillMaxWidth().padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            // Avatar
-            Box(
-                Modifier.size(48.dp).clip(CircleShape).background(Color(0xFF3B82F6).copy(alpha = 0.1f)),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(Icons.Filled.AccountCircle, null, tint = Color(0xFF3B82F6), modifier = Modifier.size(32.dp))
-            }
-            
-            // User Info
-            Column(Modifier.weight(1f)) {
-                Row(
-                    Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(user.name ?: "کاربر", color = ink, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Text(user.phone, color = muted, fontSize = 11.sp)
-                            Text("•", color = muted, fontSize = 10.sp)
-                            Text(
-                                user.id.take(8),
-                                color = muted,
-                                fontSize = 11.sp,
-                                modifier = Modifier.clickable {
-                                    // Copy to clipboard
-                                }
-                            )
-                        }
-                    }
-                    
-                    // Plan Badge
-                    Box(
-                        Modifier.clip(RoundedCornerShape(6.dp)).background(badgeBg).padding(4.dp, 2.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            user.plan,
-                            color = Color.White,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-                }
-                
-                // Token Usage
-                Row(
-                    Modifier.fillMaxWidth().padding(top = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Icon(
-                        Icons.Filled.TableChart,
-                        null,
-                        tint = Color(0xFF8B5CF6),
-                        modifier = Modifier.size(14.dp)
-                    )
-                    Text(
-                        "توکن‌های مصرفی: ${persianDigits(user.tokensUsed.toString())}",
-                        color = Color(0xFF8B5CF6),
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
-                
-                // Join Date
-                Text(
-                    "عضویت: ${jalaliShort(user.createdAt)}",
-                    color = muted,
-                    fontSize = 10.sp,
-                    modifier = Modifier.padding(top = 4.dp)
-                )
-            }
-            
-            // Chat Button
-            Button(
-                onClick = onChatClick,
-                modifier = Modifier.height(40.dp),
-                shape = RoundedCornerShape(8.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3B82F6))
-            ) {
-                Icon(Icons.Filled.Chat, null, tint = Color.White, modifier = Modifier.size(16.dp))
-            }
-        }
-    }
-}
-
-
-/**
- * صفحه چت هوشمند برای ادمین
- * تاریخچه جداگانه‌ای از پیام‌های رفت‌وبرگشت با دستیار مدیریت
- */
-@Composable
-fun AdminAiChatScreen(app: App, userId: String, onBack: () -> Unit) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val palette = LocalTg.current
-    val dark = palette.dark
-    
-    var messages by remember { mutableStateOf<List<AdminChatMessageDto>>(emptyList()) }
-    var inputMessage by remember { mutableStateOf("") }
-    var loading by remember { mutableStateOf(false) }
-    var sending by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf("") }
-    
-    val api = NetworkModule.getApiService()
-    val listState = rememberLazyListState()
-    
-    // بارگذاری تاریخچه
-    LaunchedEffect(userId) {
-        loading = true
-        try {
-            val response = api.getAdminAiHistory(userId)
-            if (response.isSuccessful) {
-                messages = response.body() ?: emptyList()
-            } else {
-                error = "خطا در بارگذاری تاریخچه"
-            }
-        } catch (e: Exception) {
-            error = "خطا در اتصال: ${e.message}"
-        } finally {
-            loading = false
-        }
-    }
-    
-    // پرش به آخر لیست هنگام اضافه‌شدن پیام جدید
-    LaunchedEffect(messages.size) {
-        if (messages.isNotEmpty()) {
-            listState.animateScrollToItem(messages.size - 1)
-        }
-    }
-    
-    val card = if (dark) Color(0xFF1E293B) else Color.White
-    val ink = if (dark) Color.White else Color(0xFF111827)
-    val muted = if (dark) Color(0xFF9CA3AF) else Color(0xFF6B7280)
-    val userBubble = if (dark) palette.outgoing else Color(0xFFE0F2FE)
-    val assistantBubble = if (dark) Color(0xFF2F3E4E) else Color(0xFFF1F5F9)
-    
-    Scaffold(
-        containerColor = palette.bg,
-        topBar = {
-            Row(
-                Modifier.fillMaxWidth().padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = ink)
-                }
-                Text(
-                    "دستیار مدیریت",
-                    color = ink,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 18.sp,
-                    modifier = Modifier.padding(start = 8.dp)
-                )
-            }
-        }
-    ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding)) {
-            if (error.isNotEmpty()) {
-                Box(
-                    Modifier.fillMaxWidth().background(Color(0xFFFFEBEE)).padding(12.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(error, color = Color(0xFFEF4444), fontSize = 12.sp)
-                }
-            }
-            
-            // لیست پیام‌ها
-            LazyColumn(
-                Modifier.weight(1f).fillMaxWidth().padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                state = listState
-            ) {
-                if (loading && messages.isEmpty()) {
-                    item {
-                        Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
-                            Text("بارگذاری...", color = muted)
-                        }
-                    }
-                }
-                
-                items(messages, key = { it.id }) { msg ->
-                    AdminChatBubble(
-                        message = msg,
-                        isUser = msg.role == "user",
-                        userBubble = userBubble,
-                        assistantBubble = assistantBubble,
-                        ink = ink,
-                        muted = muted
-                    )
-                }
-                
-                if (sending) {
-                    item {
-                        Box(Modifier.fillMaxWidth().padding(8.dp), contentAlignment = Alignment.Center) {
-                            Text("درحال پاسخ...", color = muted, fontSize = 12.sp)
-                        }
-                    }
-                }
-            }
-            
-            // نوار ارسال پیام
-            Row(
-                Modifier.fillMaxWidth().padding(12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                OutlinedTextField(
-                    value = inputMessage,
-                    onValueChange = { inputMessage = it },
-                    placeholder = { Text("پیام خود را بنویسید...", fontSize = 12.sp) },
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(24.dp),
-                    enabled = !sending,
-                    maxLines = 3
-                )
-                
-                IconButton(
-                    onClick = {
-                        if (inputMessage.isNotBlank() && !sending) {
-                            val userMsg = inputMessage
-                            // اضافه‌کردن پیام کاربر به لیست فوری
-                            messages = messages + AdminChatMessageDto(
-                                id = UUID.randomUUID().toString(),
-                                role = "user",
-                                content = userMsg,
-                                createdAt = System.currentTimeMillis()
-                            )
-                            inputMessage = ""
-                            
-                            // ارسال پیام
-                            sending = true
-                            scope.launch {
-                                try {
-                                    val response = api.sendAdminAiMessage(
-                                        AdminAiChatRequest(userId, userMsg)
-                                    )
-                                    if (response.isSuccessful) {
-                                        val aiReply = response.body()?.reply ?: "خطا در دریافت پاسخ"
-                                        // اضافه‌کردن پاسخ
-                                        messages = messages + AdminChatMessageDto(
-                                            id = UUID.randomUUID().toString(),
-                                            role = "assistant",
-                                            content = aiReply,
-                                            createdAt = System.currentTimeMillis()
-                                        )
-                                    } else {
-                                        error = "خطا: ${response.code()}"
-                                    }
-                                } catch (e: Exception) {
-                                    error = "خطا: ${e.message}"
-                                } finally {
-                                    sending = false
-                                }
-                            }
-                        }
-                    },
-                    enabled = inputMessage.isNotBlank() && !sending,
-                    modifier = Modifier.size(48.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Send,
-                        contentDescription = "Send"
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun AdminChatBubble(
-    message: AdminChatMessageDto,
-    isUser: Boolean,
-    userBubble: Color,
-    assistantBubble: Color,
-    ink: Color,
-    muted: Color
-) {
-    Row(
-        Modifier.fillMaxWidth(),
-        horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
-    ) {
-        Card(
-            modifier = Modifier
-                .widthIn(max = 300.dp)
-                .fillMaxWidth(0.85f),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = if (isUser) userBubble else assistantBubble
-            )
-        ) {
-            Column(Modifier.padding(12.dp)) {
-                Text(
-                    message.content,
-                    color = ink,
-                    fontSize = 14.sp,
-                    lineHeight = 18.sp
-                )
-                Text(
-                    formatTime(message.createdAt),
-                    color = muted,
-                    fontSize = 10.sp,
-                    modifier = Modifier.padding(top = 4.dp).align(Alignment.End)
-                )
-            }
-        }
-    }
-}
-
-fun formatTime(timestamp: Long): String {
-    val sdf = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
-    return sdf.format(java.util.Date(timestamp))
-}
-
-
-/**
- * صفحه چت مستقیم هوش مصنوعی - بدون نیاز به انتخاب گفتگو
- * کاربران plus/smart/advanced و ادمین می‌توانند با دستیار عمومی چت کنند
- */
-@Composable
-fun DirectAiChatScreen(app: App, userId: String, onBack: () -> Unit) {
-    val user = remember(userId) { app.db.getOrCreateUser(userId) }
-    val palette = LocalTg.current
-    
-    // بررسی دسترسی بر اساس plan
-    val allowedPlans = AppConstants.AI_UNLIMITED_PLANS
-    val isAdmin = user.phone == AppConstants.ADMIN_PHONE
-    val hasAccess = user.plan in allowedPlans || isAdmin
-    
-    if (!hasAccess) {
-        // نمایش صفحه upgrade
-        Box(Modifier.fillMaxSize().background(palette.bg), contentAlignment = Alignment.Center) {
-            Card(
-                shape = RoundedCornerShape(28.dp),
-                colors = CardDefaults.cardColors(containerColor = palette.surface),
-                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
-                modifier = Modifier.padding(24.dp).fillMaxWidth()
-            ) {
-                Column(
-                    Modifier.padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Box(
-                        Modifier.size(80.dp).clip(CircleShape).background(Color(0xFF3B82F6).copy(alpha = 0.1f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(Icons.Filled.AutoAwesome, null, tint = Color(0xFF3B82F6), modifier = Modifier.size(40.dp))
-                    }
-                    Text(
-                        "دسترسی محدود",
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = palette.text,
-                        modifier = Modifier.padding(top = 16.dp)
-                    )
-                    Text(
-                        "چت نامحدود با هوش مصنوعی فقط برای کاربران پلن پلاس و بالاتر",
-                        fontSize = 14.sp,
-                        color = palette.subtext,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.padding(top = 8.dp)
-                    )
-                    Button(
-                        onClick = onBack,
-                        modifier = Modifier.padding(top = 20.dp).fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Text("بازگشت")
-                    }
-                }
-            }
-        }
-        return
-    }
-    
-    // ایجاد شخصیت دستیار عمومی (یا دریافت از DB)
-    // ایجاد شخصیت دستیار عمومی
-    val aiAssistant = Person(
-        id = AppConstants.AI_GENERAL_ASSISTANT_ID,
-        name = AppConstants.AI_GENERAL_ASSISTANT_NAME,
-        phone = "",
-        role = "assistant",
-        pinned = false,
-        avatar = null,
-        isGroup = false,
-        saved = true,
-        lastBody = "سلام! من دستیار هوش مصنوعی شما هستم",
-        lastAt = System.currentTimeMillis(),
-        lastKind = "text",
-        lastChannel = "ai",
-        hasNote = false
-    )
-
-// فراخوانی مستقیم AiThread (چت دوطرفه)
-    AiThread(app, userId, aiAssistant, palette, onBack = onBack)
 }

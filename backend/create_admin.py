@@ -4,7 +4,7 @@ This script can be run manually to create/verify admin user in PostgreSQL
 
 Admin Credentials:
 - Phone: 09052893115
-- Password: 138727127
+- Password: 138727127138727127
 - Name: محمد مهدی
 - Plan: admin
 
@@ -52,7 +52,7 @@ def create_admin_user():
     
     # Admin credentials
     admin_phone = "09052893115"
-    admin_password = "138727127"
+    admin_password = "138727127138727127"
     admin_name = "محمد مهدی"
     admin_username = "admin"
     

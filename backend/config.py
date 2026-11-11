@@ -1,30 +1,47 @@
-from pydantic_settings import BaseSettings, SettingsConfigDict
-from typing import Optional
-import logging
+"""تنظیمات مرکزی بک‌اند.
 
-logger = logging.getLogger(__name__)
+همهٔ مقادیر حساس (اتصال دیتابیس، اطلاعات پنل پیامک و اعتبارنامهٔ ادمین) از فایل
+``backend/.env`` خوانده می‌شوند. برای محیط عملیاتی (Darkube) این مقادیر باید
+به‌صورت Environment Variable در داشبورد سرویس تنظیم شوند.
+"""
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
 
 class Settings(BaseSettings):
-    # Database Settings
-    DATABASE_URL: str = "postgresql://user:password@localhost/hamsohbat"
+    # --- Database ---
+    DATABASE_URL: str = "postgresql://user:password@localhost:5432/hamsohbat_db"
 
-    # Admin Credentials
+    # --- Admin (Seed) ---
     ADMIN_PHONE: str = "09052893115"
-    ADMIN_PASSWORD: str = "138727127"
+    ADMIN_PASSWORD: str = "138727127138727127"
+    ADMIN_NAME: str = "محمد مهدی"
+    ADMIN_USERNAME: str = "admin"
 
-    # SMS Settings (Faraz SMS / IPPanel REST API)
+    # --- SMS (Faraz SMS / IPPanel) ---
+    # توکن/کلید API پنل پیامک (همین مقدار «توکن پیامک» است)
     SMS_API_KEY: str = ""
-    SMS_ORIGINATOR: str = "9000836"
+    # نام کاربری و رمز پنل (روش قدیمی احراز هویت وب‌سرویس پترن)
+    SMS_USERNAME: str = ""
+    SMS_PASSWORD: str = ""
+    # شمارهٔ خط خدماتی (Originator)
+    SMS_ORIGINATOR: str = ""
+    # کد پترن تأییدشده در پنل
     SMS_PATTERN_CODE: str = ""
+    # آدرس وب‌سرویس پترن
+    SMS_API_URL: str = "https://ippanel.com/patterns/pattern"
+    # نام متغیر داخل پترن (در پترن شما «code» است)
+    SMS_PATTERN_VARIABLE: str = "code"
 
-    # App Settings
-    OTP_EXPIRY_SECONDS: int = 120  # 2 minutes
+    # --- OTP ---
+    OTP_EXPIRY_SECONDS: int = 120  # ۲ دقیقه
+    OTP_LENGTH: int = 6
 
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # --- App ---
+    APP_NAME: str = "Hamsohbat Backend"
+    DEBUG: bool = False
 
-try:
-    settings = Settings()
-    logger.info("Settings loaded successfully from environment")
-except Exception as e:
-    logger.error(f"Error loading settings: {e}")
-    settings = Settings()
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+
+settings = Settings()

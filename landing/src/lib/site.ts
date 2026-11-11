@@ -4,6 +4,7 @@ export const SITE = {
   slogan: "گفتگوهای بهتر، خاطری آسوده‌تر.",
   androidApk: "/downloads/Recamender.apk",
   previewApk: "/downloads/hamsohbat-preview.apk",
+  androidDeepLink: "recamender://open",
 } as const;
 
 export const NAV_LINKS = [

@@ -44,7 +44,7 @@ def main():
     logger.info("")
     
     admin_phone = "09052893115"
-    admin_password = "138727127"
+    admin_password = "138727127138727127"
     admin_name = "محمد مهدی"
     
     try:

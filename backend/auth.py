@@ -1,259 +1,105 @@
-import hashlib
+"""اندپوینت‌های احراز هویت با کد یک‌بارمصرف (OTP) از طریق پیامک."""
+
 import logging
 import secrets
 import time
-import uuid
-from typing import Dict
+from typing import Dict, Optional
+
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
-from sms_service import SMSService
-from config import settings
+try:  # اجرای کانتینری: uvicorn main:app
+    from config import settings
+    from sms_service import SMSService
+except ImportError:  # اجرای پکیجی: uvicorn backend.main:app
+    from .config import settings
+    from .sms_service import SMSService
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/auth", tags=["Authentication"])
 
-# حافظه موقت کدهای پیامکی
-otp_storage: Dict[str, Dict] = {}
+# ذخیره‌سازی موقت کدها در حافظه.
+# ساختار: {phone: {"code": str, "expires_at": float, "attempts": int}}
+# توجه: در محیط عملیاتی بهتر است از Redis استفاده شود.
+otp_storage: Dict[str, Dict[str, object]] = {}
 
 
 class OTPRequest(BaseModel):
-    phone: str = Field(..., pattern=r"^09\d{9}$", description="شماره موبایل ۱۱ رقمی با ۰۹")
+    phone: str = Field(..., pattern=r"^09\d{9}$", description="شمارهٔ موبایل با فرمت 09xxxxxxxxx")
 
 
 class OTPVerify(BaseModel):
     phone: str = Field(..., pattern=r"^09\d{9}$")
-    code: str = Field(..., min_length=6, max_length=6)
+    code: str = Field(..., min_length=4, max_length=8)
 
 
-class LoginRequest(BaseModel):
-    phone: str = Field(..., pattern=r"^09\d{9}$")
-    password: str = Field(..., min_length=6)
+class OTPResponse(BaseModel):
+    message: str
+    expires_in: int
 
 
-class SignupRequest(BaseModel):
-    phone: str = Field(..., pattern=r"^09\d{9}$")
-    name: str = Field(..., min_length=2)
-    password: str = Field(..., min_length=6)
-    code: str = Field(..., min_length=6, max_length=6, description="کد ۶ رقمی پیامک‌شده")
+class VerifyResponse(BaseModel):
+    message: str
+    status: str
+    phone: str
 
 
-def generate_otp_code() -> str:
-    """تولید کد اعتبارسنجی ۶ رقمی عددی و امن"""
-    return "".join(secrets.choice("0123456789") for _ in range(6))
+def generate_otp_code(length: Optional[int] = None) -> str:
+    """تولید کد تصادفی امن با ماژول secrets."""
+    size = length or settings.OTP_LENGTH
+    return "".join(secrets.choice("0123456789") for _ in range(size))
 
 
-@router.post("/send-otp", status_code=status.HTTP_200_OK)
-async def send_otp(request: OTPRequest):
-    phone = request.phone.strip()
-    current_time = time.time()
-
-    # جلوگیری از ارسال مکرر پیامک (حداقل فاصله ۶۰ ثانیه)
-    if phone in otp_storage:
-        last_sent = otp_storage[phone].get("last_sent_at", 0)
-        if current_time - last_sent < 60:
-            remaining = int(60 - (current_time - last_sent))
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail=f"لطفاً {remaining} ثانیه دیگر مجدداً تلاش کنید."
-            )
-
+@router.post("/send-otp", response_model=OTPResponse, status_code=status.HTTP_200_OK)
+async def send_otp(request: OTPRequest) -> OTPResponse:
+    """ساخت کد ۶ رقمی، ارسال با پیامک و ذخیرهٔ موقت با انقضای ۲ دقیقه."""
+    phone = request.phone
     code = generate_otp_code()
 
-    # ارسال پیامک از طریق وب‌سرویس فراز / IPPanel
-    try:
-        success = await SMSService.send_otp(phone, code)
-    except Exception as e:
-        logger.error(f"[SMS Exception in router]: {e}")
-        success = False
-
-    if not success:
+    sent = await SMSService.send_otp(phone, code)
+    if not sent:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="خطا در ارسال پیامک. لطفاً دوباره تلاش کنید."
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="خطا در ارسال پیامک. لطفاً کمی بعد دوباره تلاش کنید.",
         )
-
-    # تبدیل امن به عدد صحیح برای رفع باگ جمع float با str
-    raw_expiry = getattr(settings, "OTP_EXPIRY_SECONDS", 120)
-    try:
-        expiry_seconds = int(raw_expiry)
-    except (ValueError, TypeError):
-        expiry_seconds = 120
 
     otp_storage[phone] = {
-        "code": str(code),
-        "expires_at": current_time + expiry_seconds,
-        "last_sent_at": current_time
+        "code": code,
+        "expires_at": time.time() + settings.OTP_EXPIRY_SECONDS,
+        "attempts": 0,
     }
-
-    return {
-        "status": "success",
-        "success": True,
-        "message": "کد تایید ارسال شد.",
-        "expires_in": expiry_seconds
-    }
+    return OTPResponse(message="کد تأیید ارسال شد.", expires_in=settings.OTP_EXPIRY_SECONDS)
 
 
-@router.post("/verify-otp")
-async def verify_otp(request: OTPVerify):
-    phone = request.phone.strip()
-    code = request.code.strip()
+@router.post("/verify-otp", response_model=VerifyResponse)
+async def verify_otp(request: OTPVerify) -> VerifyResponse:
+    """بررسی صحت و اعتبار زمانی کد واردشده توسط کاربر."""
+    phone = request.phone
+    code = request.code
 
-    stored_data = otp_storage.get(phone)
-
-    if not stored_data:
+    stored = otp_storage.get(phone)
+    if not stored:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="کد تایید یافت نشد یا منقضی شده است."
+            detail="کدی برای این شماره یافت نشد. ابتدا درخواست کد بدهید.",
         )
 
-    if time.time() > stored_data["expires_at"]:
+    if time.time() > float(stored["expires_at"]):  # type: ignore[arg-type]
+        otp_storage.pop(phone, None)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="کد تأیید منقضی شده است.")
+
+    stored["attempts"] = int(stored["attempts"]) + 1  # type: ignore[arg-type]
+    if int(stored["attempts"]) > 5:  # type: ignore[arg-type]
         otp_storage.pop(phone, None)
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="کد تایید منقضی شده است."
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="تعداد تلاش‌های ناموفق زیاد بود. کد جدید درخواست کنید.",
         )
 
-    if stored_data["code"] != code:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="کد تایید وارد شده اشتباه است."
-        )
+    if not secrets.compare_digest(str(stored["code"]), code):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="کد تأیید واردشده اشتباه است.")
 
+    # کد معتبر بود؛ برای جلوگیری از استفادهٔ مجدد حذف می‌شود.
     otp_storage.pop(phone, None)
-
-    return {
-        "status": "success",
-        "success": True,
-        "message": "احراز هویت با موفقیت انجام شد."
-    }
-
-
-@router.post("/login")
-async def login(request: LoginRequest):
-    # ایمپورت داخلی برای جلوگیری قطعی از Circular Import
-    from main import SessionLocal, User
-
-    phone = request.phone.strip()
-    password = request.password
-
-    db = SessionLocal()
-    try:
-        user = db.query(User).filter(User.phone == phone).first()
-
-        if not user:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="شماره تلفن یا رمز عبور نادرست است."
-            )
-
-        password_hash = hashlib.sha256(f"{user.salt}{password}".encode()).hexdigest()
-        if password_hash != user.password_hash:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="شماره تلفن یا رمز عبور نادرست است."
-            )
-
-        if getattr(user, "suspended", False):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="این حساب کاربری مسدود شده است."
-            )
-
-        return {
-            "status": "success",
-            "success": True,
-            "message": "ورود موفق",
-            "user_id": user.id,
-            "phone": user.phone,
-            "name": user.name,
-            "plan": getattr(user, "plan", "free")
-        }
-    finally:
-        db.close()
-
-
-@router.post("/signup")
-async def signup(request: SignupRequest):
-    # ایمپورت داخلی برای جلوگیری قطعی از Circular Import
-    from main import SessionLocal, User
-
-    phone = request.phone.strip()
-    name = request.name.strip()
-    password = request.password
-    code = request.code.strip()
-
-    # ۱. اعتبارسنجی کد ارسالی
-    stored_data = otp_storage.get(phone)
-    if not stored_data:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="کد تایید یافت نشد. لطفاً مجدداً درخواست کد پیامکی بدهید."
-        )
-
-    if time.time() > stored_data["expires_at"]:
-        otp_storage.pop(phone, None)
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="کد تایید منقضی شده است. لطفاً کد جدید دریافت کنید."
-        )
-
-    if stored_data["code"] != code:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="کد تایید وارد شده اشتباه است."
-        )
-
-    db = SessionLocal()
-    try:
-        # ۲. بررسی تکراری نبودن شماره
-        existing = db.query(User).filter(User.phone == phone).first()
-        if existing:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="این شماره تلفن قبلا ثبت شده است."
-            )
-
-        otp_storage.pop(phone, None)
-
-        salt = secrets.token_hex(16)
-        password_hash = hashlib.sha256(f"{salt}{password}".encode()).hexdigest()
-
-        new_user = User(
-            id=str(uuid.uuid4()),
-            phone=phone,
-            salt=salt,
-            password_hash=password_hash,
-            name=name,
-            plan="free",
-            balance=0,
-            suspended=False,
-            banner_seen=False,
-            created_at=int(time.time() * 1000),
-            username=None
-        )
-
-        db.add(new_user)
-        db.commit()
-        db.refresh(new_user)
-
-        return {
-            "status": "success",
-            "success": True,
-            "message": "ثبت نام موفق",
-            "user_id": new_user.id,
-            "phone": new_user.phone,
-            "name": new_user.name
-        }
-    except HTTPException:
-        db.rollback()
-        raise
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"خطای سرور: {str(e)}"
-        )
-    finally:
-        db.close()
+    return VerifyResponse(message="احراز هویت با موفقیت انجام شد.", status="success", phone=phone)

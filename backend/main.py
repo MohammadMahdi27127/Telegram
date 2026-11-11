@@ -1,59 +1,63 @@
-import os
+"""نقطهٔ ورود بک‌اند «مکالمات من» (هم‌صحبت).
+
+نکتهٔ مهم: این ماژول به دو صورت قابل اجراست و importها باید هر دو حالت را پوشش دهند:
+    1. اجرای کانتینر:  uvicorn main:app         (main به‌عنوان ماژول سطح‌بالا)
+    2. اجرای پکیجی:    uvicorn backend.main:app (main به‌عنوان زیرماژول پکیج)
+"""
+
 import logging
-import secrets
-import hashlib
 import time
-import uuid
-import re
-from typing import List, Optional
 from contextlib import asynccontextmanager
+from typing import List, Optional
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from sqlalchemy import (
-    Column, String, Integer, BigInteger, Boolean, Float, Text, create_engine, text
+    BigInteger,
+    Boolean,
+    Column,
+    Float,
+    Integer,
+    String,
+    Text,
+    create_engine,
+    text,
 )
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, Session
-from pydantic import BaseModel
+from sqlalchemy.orm import declarative_base, sessionmaker
 
-# تنظیم لاگر در بالاترین نقطه فایل
+logger = logging.getLogger("hamsohbat.backend")
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
-# بارگذاری تنظیمات و روتر احراز هویت
-try:
+# --- تنظیمات (سازگار با هر دو حالت اجرا) ---
+try:  # اجرای کانتینری: uvicorn main:app
     from config import settings
-    from auth import router as auth_router
-except ImportError as e:
-    import sys
-    logger.error(f"Import error: {e}", exc_info=True)
-    raise RuntimeError(f"Failed to import modules: {e}")
+except ImportError:  # اجرای پکیجی: uvicorn backend.main:app
+    from .config import settings
 
-# تنظیم آدرس اتصال به پایگاه داده PostgreSQL دارکوب
-def get_database_url(url: str) -> str:
-    """Convert postgres:// to postgresql+psycopg2:// for SQLAlchemy 2.0+ compatibility."""
+
+def get_database_url(raw_url: Optional[str] = None) -> str:
+    """نرمال‌سازی آدرس دیتابیس برای SQLAlchemy.
+
+    Darkube/Railway/Heroku اغلب آدرس را با طرح ``postgres://`` می‌دهند که
+    نسخه‌های جدید SQLAlchemy آن را نمی‌شناسند؛ همچنین برای اطمینان از استفادهٔ
+    درایور ``psycopg2``، طرح را به ``postgresql+psycopg2://`` تبدیل می‌کنیم.
+    """
+    url = (raw_url or settings.DATABASE_URL or "").strip()
     if url.startswith("postgres://"):
         url = url.replace("postgres://", "postgresql+psycopg2://", 1)
     elif url.startswith("postgresql://"):
         url = url.replace("postgresql://", "postgresql+psycopg2://", 1)
     return url
 
-DATABASE_URL = get_database_url(settings.DATABASE_URL)
-logger.info("Database URL configured (masked): postgresql+psycopg2://***")
 
-try:
-    engine = create_engine(DATABASE_URL, echo=False, pool_pre_ping=True)
-    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-except Exception as e:
-    logger.error(f"Failed to create database engine: {e}")
-    DATABASE_URL = "sqlite:///./hamsohbat.db"
-    engine = create_engine(DATABASE_URL, echo=False)
-    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-    logger.info("Fell back to SQLite database")
+DATABASE_URL = get_database_url()
 
+# ``pool_pre_ping`` از خطاهای قطع اتصال موقت در PostgreSQL جلوگیری می‌کند.
+engine = create_engine(DATABASE_URL, pool_pre_ping=True, future=True)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-# --- مدل‌های جدول‌های پایگاه داده PostgreSQL ---
+
+# --- مدل‌های دیتابیس (همه از یک Base مشترک ارث‌بری می‌کنند) ---
 
 class User(Base):
     __tablename__ = "users"
@@ -64,31 +68,25 @@ class User(Base):
     name = Column(String)
     plan = Column(String, default="free")
     balance = Column(Integer, default=0)
-    # زمان‌ها به صورت epoch-millis (BIGINT) ذخیره می‌شوند تا با کلاینت اندروید سازگار بمانند
-    plan_purchased_at = Column(BigInteger)
     plan_expires_at = Column(BigInteger)
     suspended = Column(Boolean, default=False)
     banner_seen = Column(Boolean, default=False)
     chat_bg = Column(String)
     chat_color = Column(String)
     avatar = Column(String)
-    username = Column(String, unique=True, nullable=True, index=True)
+    username = Column(String)
     created_at = Column(BigInteger)
     monthly_download_count = Column(Integer, default=0)
     monthly_ai_usage_count = Column(Integer, default=0)
     last_quota_reset_month = Column(String)
-    tokens_used = Column(BigInteger, default=0)
-    # --- تنظیمات هوش مصنوعی اختصاصی کاربر (Cloud-Driven) ---
-    ai_provider = Column(String, default="gapgpt")
-    ai_model_name = Column(String, default="gemini-2.5-flash")
-    ai_api_key = Column(String)
-    # به صورت رشتهٔ JSON ذخیره می‌شود (سازگار با هر دو PostgreSQL و SQLite)
-    ai_settings_json = Column(Text)
+    tokens_used = Column(Integer, default=0)
+
 
 class Person(Base):
     __tablename__ = "people"
     id = Column(String, primary_key=True)
-    user_id = Column(String, index=True)
+    # مالک پرونده/گروه؛ ایندکس‌شده تا کوئری‌های واکشی بدون cast و Full Scan اجرا شوند.
+    user_id = Column(String, index=True, nullable=True)
     name = Column(String)
     phone = Column(String)
     role = Column(String)
@@ -98,11 +96,13 @@ class Person(Base):
     is_group = Column(Boolean, default=False)
     saved = Column(Boolean, default=False)
 
+
 class Entry(Base):
     __tablename__ = "entries"
     id = Column(String, primary_key=True)
-    user_id = Column(String, index=True)
-    person_id = Column(String, index=True)
+    # مالک پیام و شناسهٔ چت؛ هر دو ایندکس‌شده برای واکشی سریع بدون cast.
+    user_id = Column(String, index=True, nullable=True)
+    person_id = Column(String, index=True, nullable=True)
     body = Column(Text)
     kind = Column(String)
     channel = Column(String)
@@ -115,6 +115,7 @@ class Entry(Base):
     media_path = Column(String)
     member_id = Column(String)
 
+
 class Notice(Base):
     __tablename__ = "notices"
     id = Column(String, primary_key=True)
@@ -124,6 +125,7 @@ class Notice(Base):
     read = Column(Boolean, default=False)
     created_at = Column(BigInteger)
 
+
 class Banner(Base):
     __tablename__ = "banners"
     id = Column(String, primary_key=True)
@@ -132,6 +134,7 @@ class Banner(Base):
     image = Column(String)
     active = Column(Boolean, default=True)
     created_at = Column(BigInteger, nullable=False)
+
 
 class AiModel(Base):
     __tablename__ = "ai_models"
@@ -145,12 +148,14 @@ class AiModel(Base):
     active = Column(Boolean, default=False)
     created_at = Column(BigInteger)
 
+
 class Announcement(Base):
     __tablename__ = "announcements"
     id = Column(String, primary_key=True)
     title = Column(String)
     body = Column(Text)
     created_at = Column(BigInteger)
+
 
 class Slip(Base):
     __tablename__ = "slips"
@@ -164,12 +169,14 @@ class Slip(Base):
     ref_code = Column(String)
     created_at = Column(BigInteger)
 
+
 class Member(Base):
     __tablename__ = "members"
     id = Column(String, primary_key=True)
     person_id = Column(String, index=True)
     name = Column(String)
     created_at = Column(BigInteger)
+
 
 class Wallpaper(Base):
     __tablename__ = "wallpapers"
@@ -179,12 +186,14 @@ class Wallpaper(Base):
     path = Column(String)
     created_at = Column(BigInteger)
 
+
 class Outbox(Base):
     __tablename__ = "outbox"
     id = Column(String, primary_key=True)
     kind = Column(String)
     payload = Column(Text)
     created_at = Column(BigInteger)
+
 
 class AiMessage(Base):
     __tablename__ = "ai_messages"
@@ -195,6 +204,7 @@ class AiMessage(Base):
     body = Column(Text)
     image_path = Column(String)
     created_at = Column(BigInteger)
+
 
 class SupportMessage(Base):
     __tablename__ = "support_messages"
@@ -208,6 +218,7 @@ class SupportMessage(Base):
     read_user = Column(Boolean, default=False)
     created_at = Column(BigInteger)
 
+
 class ExportLog(Base):
     __tablename__ = "export_logs"
     id = Column(String, primary_key=True)
@@ -217,159 +228,130 @@ class ExportLog(Base):
     target_name = Column(String)
     records_count = Column(Integer)
 
+
+# --- مدل‌های تیم (مورد استفاده در teams.py) ---
+
 class Team(Base):
     __tablename__ = "teams"
     id = Column(String, primary_key=True)
     name = Column(String, nullable=False)
-    description = Column(Text)
-    creator_id = Column(String, index=True)
+    description = Column(String)
+    creator_id = Column(String, index=True, nullable=False)
     created_at = Column(BigInteger, nullable=False)
+
 
 class TeamMember(Base):
     __tablename__ = "team_members"
     id = Column(String, primary_key=True)
-    team_id = Column(String, index=True)
-    user_id = Column(String, index=True)
+    team_id = Column(String, index=True, nullable=False)
+    user_id = Column(String, index=True, nullable=False)
     role = Column(String, default="member")
-    joined_at = Column(BigInteger, nullable=False)
+    joined_at = Column(BigInteger)
 
-class AdminAiChat(Base):
-    __tablename__ = "admin_ai_chats"
-    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    admin_id = Column(String, nullable=False, index=True)
-    role = Column(String(16), nullable=False)
-    content = Column(Text, nullable=False)
-    created_at = Column(BigInteger, default=lambda: int(time.time() * 1000))
 
 class TeamMessage(Base):
     __tablename__ = "team_messages"
-    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    team_id = Column(String, nullable=False, index=True)
-    sender_id = Column(String, nullable=False, index=True)
-    content = Column(Text, nullable=False)
-    recipient_id = Column(String, nullable=True, default=None)  # None = Broadcast to all
-    created_at = Column(BigInteger, nullable=False, default=lambda: int(time.time() * 1000))
+    id = Column(String, primary_key=True)
+    team_id = Column(String, index=True, nullable=False)
+    sender_id = Column(String, index=True, nullable=False)
+    content = Column(Text)
+    recipient_id = Column(String)
+    created_at = Column(BigInteger)
 
-# ساخت جداول و اعمال دستورات SQL با استفاده از text()
-def init_db():
-    try:
-        logger.info("Initializing database tables...")
-        Base.metadata.create_all(bind=engine)
-        
-        db = SessionLocal()
+
+# ایندکس‌های ضروری برای واکشی سریع سینک (بدون cast و Full Table Scan).
+# نام‌گذاری مطابق قرارداد SQLAlchemy (ix_...) است تا با create_all تکراری ساخته نشود.
+_REQUIRED_INDEXES: tuple[str, ...] = (
+    "CREATE INDEX IF NOT EXISTS ix_people_user_id ON people (user_id);",
+    "CREATE INDEX IF NOT EXISTS ix_entries_user_id ON entries (user_id);",
+    "CREATE INDEX IF NOT EXISTS ix_entries_person_id ON entries (person_id);",
+)
+
+
+def _ensure_indexes() -> None:
+    """اجرای ایمن مایگریشن ایندکس‌ها روی جداول موجود (idempotent)."""
+    with engine.begin() as conn:
+        for statement in _REQUIRED_INDEXES:
+            try:
+                conn.execute(text(statement))
+            except Exception as exc:  # noqa: BLE001 - نبود یک ایندکس کل استارت‌آپ را نباید بخواباند
+                logger.warning("⚠️ ساخت ایندکس ناموفق بود: %s | %s", statement, exc)
+    logger.info("✅ ایندکس‌های سینک بررسی/ایجاد شدند.")
+
+
+def init_db(max_attempts: int = 5, delay_seconds: int = 3) -> bool:
+    """ساخت جداول با تلاش مجدد؛ تا خطای موقت اتصال باعث CrashLoopBackOff نشود."""
+    for attempt in range(1, max_attempts + 1):
         try:
-            # استفاده استاندارد از text() برای سازگاری با SQLAlchemy 2.0+
-            db.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS tokens_used BIGINT DEFAULT 0;"))
-            db.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS username VARCHAR(64) UNIQUE;"))
-            # --- مایگریشن ستون‌های اشتراک و تنظیمات هوش مصنوعی ---
-            db.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS plan_purchased_at BIGINT;"))
-            db.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS ai_provider VARCHAR(64) DEFAULT 'gapgpt';"))
-            db.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS ai_model_name VARCHAR(128) DEFAULT 'gemini-2.5-flash';"))
-            db.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS ai_api_key VARCHAR(255);"))
-            db.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS ai_settings_json TEXT;"))
-            
-            db.execute(text("""
-                CREATE TABLE IF NOT EXISTS admin_ai_chats (
-                    id VARCHAR(64) PRIMARY KEY,
-                    admin_id VARCHAR(64) NOT NULL,
-                    role VARCHAR(16) NOT NULL,
-                    content TEXT NOT NULL,
-                    created_at BIGINT NOT NULL
-                );
-            """))
-            db.execute(text("CREATE INDEX IF NOT EXISTS idx_admin_ai_chats_admin_id ON admin_ai_chats(admin_id);"))
-            
-            db.execute(text("""
-                CREATE TABLE IF NOT EXISTS team_messages (
-                    id VARCHAR(64) PRIMARY KEY,
-                    team_id VARCHAR(64) NOT NULL,
-                    sender_id VARCHAR(64) NOT NULL,
-                    content TEXT NOT NULL,
-                    recipient_id VARCHAR(64),
-                    created_at BIGINT NOT NULL
-                );
-            """))
-            db.execute(text("ALTER TABLE team_messages ADD COLUMN IF NOT EXISTS recipient_id VARCHAR(64);"))
-            db.execute(text("CREATE INDEX IF NOT EXISTS idx_team_messages_team_id ON team_messages(team_id);"))
-            db.execute(text("CREATE INDEX IF NOT EXISTS idx_team_messages_created_at ON team_messages(created_at);"))
-            
-            db.commit()
-            logger.info("Database migrations executed successfully.")
-        except Exception as e:
-            logger.warning(f"Could not add/update columns: {e}")
-            db.rollback()
-        finally:
-            db.close()
-        
-        logger.info("Database tables created successfully.")
-    except Exception as e:
-        logger.error(f"Database initialization failed: {e}")
+            Base.metadata.create_all(bind=engine)
+            _ensure_indexes()
+            logger.info("✅ جداول دیتابیس با موفقیت ایجاد/تأیید شدند.")
+            return True
+        except Exception as exc:  # noqa: BLE001 - می‌خواهیم هر خطای اتصال را مهار کنیم
+            logger.warning(
+                "⚠️ تلاش %s/%s برای اتصال به دیتابیس ناموفق بود: %s",
+                attempt,
+                max_attempts,
+                exc,
+            )
+            if attempt < max_attempts:
+                time.sleep(delay_seconds)
+    logger.error(
+        "❌ اتصال به دیتابیس برقرار نشد؛ سرویس در حالت degraded بالا می‌آید و "
+        "اندپوینت /api/health وضعیت را گزارش می‌کند."
+    )
+    return False
 
-def hash_password(password: str, salt: str) -> str:
-    return hashlib.sha256(f"{salt}{password}".encode()).hexdigest()
-
-def create_admin_user():
-    db = SessionLocal()
-    try:
-        admin_phone = "09052893115"
-        admin_password = "138727127"
-        admin_name = "محمد مهدی"
-        
-        existing_admin = db.query(User).filter(User.phone == admin_phone).first()
-        if existing_admin:
-            logger.info(f"Admin user already exists: {existing_admin.phone}")
-            return
-        
-        salt = secrets.token_hex(16)
-        password_hash = hash_password(admin_password, salt)
-        
-        admin_user = User(
-            id=str(uuid.uuid4()),
-            phone=admin_phone,
-            salt=salt,
-            password_hash=password_hash,
-            name=admin_name,
-            plan="smart",
-            balance=1000000,
-            suspended=False,
-            banner_seen=True,
-            created_at=int(time.time() * 1000),
-            username="admin"
-        )
-        
-        db.add(admin_user)
-        db.commit()
-        logger.info("Admin user created successfully.")
-    except Exception as e:
-        logger.error(f"Error creating admin user: {e}", exc_info=True)
-        db.rollback()
-    finally:
-        db.close()
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(_: FastAPI):
+    # استارت‌آپ: تلاش برای ساخت جداول بدون کرش کردن کانتینر
     init_db()
-    create_admin_user()
     yield
-    if engine:
-        engine.dispose()
+    # خاموشی: آزادسازی منابع موتور دیتابیس
+    engine.dispose()
 
-app = FastAPI(title="Hamsohbat Backend", lifespan=lifespan)
 
-# روتر احراز هویت
-app.include_router(auth_router)
+app = FastAPI(title="Hamsohbat Backend", version="2.3", lifespan=lifespan)
 
-# روترهای دیگر
-from sync import router as sync_router
-app.include_router(sync_router, prefix="/api/v1")
+# --- ثبت روترها (با تحمل خطا تا نبود یک ماژول کل سرویس را نخواباند) ---
+try:
+    try:
+        from auth import router as auth_router
+    except ImportError:
+        from .auth import router as auth_router
+    app.include_router(auth_router)
+    logger.info("✅ روتر احراز هویت ثبت شد.")
+except Exception as exc:  # noqa: BLE001
+    logger.error("❌ ثبت روتر auth ناموفق بود: %s", exc)
 
-from teams import router as teams_router
-app.include_router(teams_router, prefix="/api/v1")
+try:
+    from sync import router as sync_router
 
-from admin import router as admin_router
-app.include_router(admin_router, prefix="/api/v1")
+    app.include_router(sync_router, prefix="/api/v1")
+    logger.info("✅ روتر سینک ثبت شد.")
+except Exception as exc:  # noqa: BLE001
+    logger.warning("⚠️ روتر sync ثبت نشد: %s", exc)
 
-# مدیریت اتصالات وب‌سوکت چت
+try:
+    from teams import router as teams_router
+
+    app.include_router(teams_router, prefix="/api/v1")
+    logger.info("✅ روتر تیم‌ها ثبت شد.")
+except Exception as exc:  # noqa: BLE001
+    logger.warning("⚠️ روتر teams ثبت نشد: %s", exc)
+
+try:
+    from admin import router as admin_router
+
+    app.include_router(admin_router, prefix="/api/v1")
+    logger.info("✅ روتر ادمین ثبت شد.")
+except Exception as exc:  # noqa: BLE001
+    logger.warning("⚠️ روتر admin ثبت نشد: %s", exc)
+
+
+# --- مدیریت اتصالات وب‌سوکت چت ---
+
 class ConnectionManager:
     def __init__(self):
         self.active_connections: List[WebSocket] = []
@@ -379,17 +361,31 @@ class ConnectionManager:
         self.active_connections.append(websocket)
 
     def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
 
     async def broadcast(self, message: str):
-        for connection in self.active_connections:
-            await connection.send_text(message)
+        for connection in list(self.active_connections):
+            try:
+                await connection.send_text(message)
+            except Exception:  # noqa: BLE001
+                self.disconnect(connection)
+
 
 manager = ConnectionManager()
 
+
 @app.get("/api/health")
 def health_check():
-    return {"status": "ok", "app": "Daftar Goftogu"}
+    """بررسی سلامت سرویس؛ وضعیت دیتابیس هم گزارش می‌شود."""
+    db_status = "up"
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+    except Exception as exc:  # noqa: BLE001
+        db_status = f"down: {exc}"
+    return {"status": "ok", "app": "Daftar Goftogu", "database": db_status}
+
 
 @app.websocket("/ws/chat")
 async def websocket_endpoint(websocket: WebSocket):
@@ -400,286 +396,3 @@ async def websocket_endpoint(websocket: WebSocket):
             await manager.broadcast(data)
     except WebSocketDisconnect:
         manager.disconnect(websocket)
-
-class UserCheckRequest(BaseModel):
-    phone: str
-
-class UserCheckResponse(BaseModel):
-    exists: bool
-    user_id: Optional[str] = None
-    name: Optional[str] = None
-    username: Optional[str] = None
-
-@app.post("/api/v1/users/check", response_model=UserCheckResponse)
-def check_user_exists(payload: UserCheckRequest, db: Session = Depends(lambda: SessionLocal())):
-    clean_phone = payload.phone.strip().replace(" ", "")
-    user = db.query(User).filter(User.phone == clean_phone).first()
-    if user:
-        return UserCheckResponse(
-            exists=True,
-            user_id=user.id,
-            name=user.name,
-            username=user.username
-        )
-    return UserCheckResponse(exists=False)
-
-class UpdateUsernameRequest(BaseModel):
-    username: str
-
-class UserProfileResponse(BaseModel):
-    user_id: str
-    phone: str
-    name: str
-    username: Optional[str] = None
-    plan: str
-    balance: int
-    plan_purchased_at: Optional[int] = None
-    plan_expires_at: Optional[int] = None
-    suspended: bool
-    # تنظیمات هوش مصنوعی کاربر (منبع اصلی: سرور)
-    ai_provider: Optional[str] = None
-    ai_model_name: Optional[str] = None
-    ai_api_key: Optional[str] = None
-
-@app.get("/api/v1/users/{user_id}/profile", response_model=UserProfileResponse)
-def get_user_profile(user_id: str, db: Session = Depends(lambda: SessionLocal())):
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="کاربر یافت نشد")
-    return UserProfileResponse(
-        user_id=user.id,
-        phone=user.phone or "",
-        name=user.name or "",
-        username=user.username,
-        plan=user.plan or "free",
-        balance=user.balance or 0,
-        plan_purchased_at=user.plan_purchased_at,
-        plan_expires_at=user.plan_expires_at,
-        suspended=user.suspended or False,
-        ai_provider=user.ai_provider or "gapgpt",
-        ai_model_name=user.ai_model_name or "gemini-2.5-flash",
-        ai_api_key=user.ai_api_key,
-    )
-
-class AiConfigRequest(BaseModel):
-    ai_provider: Optional[str] = None
-    ai_model_name: Optional[str] = None
-    ai_api_key: Optional[str] = None
-    ai_settings_json: Optional[str] = None
-
-class AiConfigResponse(BaseModel):
-    status: str
-    user_id: str
-    ai_provider: Optional[str] = None
-    ai_model_name: Optional[str] = None
-    ai_api_key: Optional[str] = None
-
-@app.put("/api/v1/users/{user_id}/ai-config", response_model=AiConfigResponse)
-def update_user_ai_config(user_id: str, req: AiConfigRequest, db: Session = Depends(lambda: SessionLocal())):
-    """
-    ذخیرهٔ تنظیمات هوش مصنوعی اختصاصی کاربر (مدل، ارائه‌دهنده، کلید API) در PostgreSQL.
-    این اندپوینت منبع اصلی (Single Source of Truth) تنظیمات AI کاربر است.
-    """
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="کاربر یافت نشد")
-
-    if req.ai_provider is not None:
-        user.ai_provider = req.ai_provider.strip() or "gapgpt"
-    if req.ai_model_name is not None:
-        user.ai_model_name = req.ai_model_name.strip()
-    if req.ai_api_key is not None:
-        user.ai_api_key = req.ai_api_key.strip()
-    if req.ai_settings_json is not None:
-        user.ai_settings_json = req.ai_settings_json
-
-    db.commit()
-    db.refresh(user)
-    logger.info(f"User {user.id} AI config updated (provider={user.ai_provider}, model={user.ai_model_name})")
-
-    return AiConfigResponse(
-        status="ok",
-        user_id=user.id,
-        ai_provider=user.ai_provider,
-        ai_model_name=user.ai_model_name,
-        ai_api_key=user.ai_api_key,
-    )
-
-class UpdatePlanRequest(BaseModel):
-    plan: str
-    duration_days: int = 30
-
-class UpdatePlanResponse(BaseModel):
-    status: str
-    user_id: str
-    plan: str
-    plan_purchased_at: Optional[int] = None
-    plan_expires_at: Optional[int] = None
-
-# پلن‌های مجاز برای ارتقا/تأیید اشتراک
-ALLOWED_PLANS = {"free", "guest", "plus", "smart", "advanced", "basic", "admin"}
-
-@app.post("/api/v1/users/{user_id}/plan", response_model=UpdatePlanResponse)
-def update_user_plan(user_id: str, req: UpdatePlanRequest, db: Session = Depends(lambda: SessionLocal())):
-    """
-    تغییر/تأیید پلن کاربر (هنگام خرید یا تأیید اشتراک).
-    مقدار plan و plan_expires_at را در PostgreSQL ذخیره می‌کند.
-    """
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="کاربر یافت نشد")
-
-    plan = (req.plan or "").strip().lower()
-    if plan not in ALLOWED_PLANS:
-        raise HTTPException(status_code=400, detail="پلن نامعتبر است")
-
-    duration_days = req.duration_days if (req.duration_days and req.duration_days > 0) else 30
-
-    now_ms = int(time.time() * 1000)
-    user.plan = plan
-    if plan == "free":
-        user.plan_purchased_at = None
-        user.plan_expires_at = None
-    else:
-        # تاریخ خرید و تاریخ انقضای دقیق در سرور ثبت می‌شود (منبع اصلی: PostgreSQL)
-        user.plan_purchased_at = now_ms
-        user.plan_expires_at = now_ms + duration_days * 24 * 60 * 60 * 1000
-
-    db.commit()
-    db.refresh(user)
-
-    logger.info(f"User {user.id} plan updated to '{user.plan}' (purchased_at={user.plan_purchased_at}, expires_at={user.plan_expires_at})")
-
-    return UpdatePlanResponse(
-        status="ok",
-        user_id=user.id,
-        plan=user.plan,
-        plan_purchased_at=user.plan_purchased_at,
-        plan_expires_at=user.plan_expires_at,
-    )
-
-@app.put("/api/v1/users/{user_id}/username")
-def update_username(user_id: str, req: UpdateUsernameRequest, db: Session = Depends(lambda: SessionLocal())):
-    username = req.username.strip().lstrip('@').lower() if req.username else ""
-    
-    if not username:
-        raise HTTPException(status_code=400, detail="نام کاربری خالی است")
-    
-    if len(username) < 3 or len(username) > 30:
-        raise HTTPException(status_code=400, detail="نام کاربری باید ۳ تا ۳۰ کاراکتر باشد")
-    
-    if not re.match(r"^[a-z0-9_]+$", username):
-        raise HTTPException(status_code=400, detail="نام کاربری فقط می‌تواند حروف انگلیسی کوچک، اعداد و خط زیرین را شامل باشد")
-    
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="کاربر یافت نشد")
-    
-    existing_user = db.query(User).filter(
-        User.username == username,
-        User.id != user_id
-    ).first()
-    if existing_user:
-        raise HTTPException(status_code=400, detail="این نام کاربری قبلاً انتخاب شده است")
-    
-    user.username = username
-    db.commit()
-    
-    return {
-        "user_id": user.id,
-        "username": user.username,
-        "message": "نام کاربری با موفقیت به‌روزرسانی شد"
-    }
-
-class AdminAiChatMessage(BaseModel):
-    id: str
-    role: str
-    content: str
-    created_at: int
-
-class AdminAiChatRequest(BaseModel):
-    admin_id: str
-    message: str
-
-class AdminAiChatResponse(BaseModel):
-    reply: str
-
-@app.get("/api/v1/admin/ai/history")
-def get_admin_ai_history(admin_id: str, db: Session = Depends(lambda: SessionLocal())):
-    user = db.query(User).filter(User.id == admin_id).first()
-    if not user or user.phone != "09052893115":
-        raise HTTPException(status_code=403, detail="دسترسی رد شد")
-    
-    messages = db.query(AdminAiChat).filter(
-        AdminAiChat.admin_id == admin_id
-    ).order_by(AdminAiChat.created_at.asc()).all()
-    
-    return [
-        AdminAiChatMessage(
-            id=msg.id,
-            role=msg.role,
-            content=msg.content,
-            created_at=msg.created_at
-        )
-        for msg in messages
-    ]
-
-@app.post("/api/v1/admin/ai/chat")
-def send_admin_ai_message(req: AdminAiChatRequest, db: Session = Depends(lambda: SessionLocal())):
-    user = db.query(User).filter(User.id == req.admin_id).first()
-    if not user or user.phone != "09052893115":
-        raise HTTPException(status_code=403, detail="دسترسی رد شد")
-    
-    user_message = AdminAiChat(
-        id=str(uuid.uuid4()),
-        admin_id=req.admin_id,
-        role="user",
-        content=req.message,
-        created_at=int(time.time() * 1000)
-    )
-    db.add(user_message)
-    db.flush()
-    
-    try:
-        ai_response = generate_admin_ai_response(req.message)
-    except Exception as e:
-        logger.error(f"AI generation failed: {e}")
-        ai_response = "متأسفانه در این لحظه نتوانستم پاسخ دهم. لطفاً دوباره تلاش کنید."
-    
-    assistant_message = AdminAiChat(
-        id=str(uuid.uuid4()),
-        admin_id=req.admin_id,
-        role="assistant",
-        content=ai_response,
-        created_at=int(time.time() * 1000)
-    )
-    db.add(assistant_message)
-    db.commit()
-    
-    return AdminAiChatResponse(reply=ai_response)
-
-def generate_admin_ai_response(message: str) -> str:
-    system_prompt = """You are an Executive System Copilot for the Admin of DaftarGoftogu. 
-You have direct context of system stats, users, and platform mechanics. 
-Speak formally, analytically, and provide direct technical and management insights. 
-Always respond in Persian (Farsi)."""
-    
-    openai_key = os.getenv("OPENAI_API_KEY")
-    if openai_key:
-        try:
-            import openai
-            openai.api_key = openai_key
-            response = openai.ChatCompletion.create(
-                model="gpt-3.5-turbo",
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": message}
-                ],
-                temperature=0.7,
-                max_tokens=500
-            )
-            return response.choices[0].message.content
-        except Exception as e:
-            logger.warning(f"OpenAI API error: {e}")
-    
-    return f"تشکر از پیام شما. من به عنوان دستیار مدیریت در خدمتم برای کمک به:\n- تجزیه‌تحلیل آمار کاربران\n- نظارت بر سیستم\n- ارائه توصیه‌های بهبود\n\nپیام شما: {message[:100]}"

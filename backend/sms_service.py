@@ -1,78 +1,82 @@
-import os
-import logging
-import requests
-from dotenv import load_dotenv
+"""سرویس ارسال پیامک (فراز اس‌ام‌اس / IPPanel).
 
-load_dotenv()
+روش کار وب‌سرویس پترن:
+    POST https://ippanel.com/patterns/pattern
+    Content-Type: application/x-www-form-urlencoded
+    user=...&pass=...&from=...&to=...&pattern_code=...&input_data={"code":"1234"}
+
+اگر ``SMS_API_KEY`` تنظیم شده باشد، توکن در هدر ``Authorization`` ارسال می‌شود
+(روش جدید پنل)؛ در غیر این صورت از نام کاربری/رمز پنل استفاده می‌شود.
+"""
+
+import json
+import logging
+from typing import Optional
+
+import httpx
+
+from config import settings
 
 logger = logging.getLogger(__name__)
 
-FARAZ_API_KEY = os.getenv("FARAZ_API_KEY", "")
-FARAZ_ORIGINATOR = os.getenv("FARAZ_ORIGINATOR", "90008361")
-PATTERN_CODE = os.getenv("FARAZ_PATTERN_CODE", "wbprpwbxQg")
-
-BASE_URL = "https://api.iranpayamak.com/ws/v1/sms/pattern"
-
-
-def normalize_phone_number(phone: str) -> str:
-    p = phone.strip().replace(" ", "")
-
-    if p.startswith("+98"):
-        p = "0" + p[3:]
-    elif p.startswith("98") and len(p) == 12:
-        p = "0" + p[2:]
-
-    return p
-
-
-def send_otp_sms(phone: str, code: str) -> bool:
-    if not FARAZ_API_KEY:
-        logger.error("[SMS] خطا: FARAZ_API_KEY تعریف نشده است.")
-        return False
-
-    normalized_phone = normalize_phone_number(phone)
-
-    headers = {
-        "apikey": FARAZ_API_KEY,
-        "Api-Key": FARAZ_API_KEY,
-        "Authorization": f"AccessKey {FARAZ_API_KEY}",
-        "Accept": "application/json",
-        "Content-Type": "application/json",
-    }
-
-    # کلیدهای دقیق و الزامی وب‌سرویس پترن جدید فراز اس‌ام‌اس
-    payload = {
-        "code": PATTERN_CODE,
-        "line_number": FARAZ_ORIGINATOR,      # الزامی: به جای sender
-        "recipient": normalized_phone,
-        "number_format": "english",            # الزامی: فرمت اعداد
-        "attributes": {                        # متغیرهای پترن
-            "code": str(code).strip()
-        },
-        "variable": {                          # برای سازگاری کامل
-            "code": str(code).strip()
-        }
-    }
-
-    try:
-        response = requests.post(BASE_URL, headers=headers, json=payload, timeout=10)
-        
-        status_code = int(response.status_code)
-        
-        # وضعیت 200 یا 201 یعنی پیامک با موفقیت در صف ارسال قرار گرفت
-        if status_code in (200, 201):
-            logger.info(f"[SMS Success] پیامک با موفقیت ارسال شد: {response.text}")
-            return True
-        else:
-            logger.error(f"[SMS Error] کد وضعیت: {status_code} - پاسخ سرور: {response.text}")
-            return False
-
-    except requests.RequestException as e:
-        logger.error(f"[SMS Exception] خطای شبکه: {e}")
-        return False
-
 
 class SMSService:
+    """کلاینت آسنکرون ارسال پیامک الگومحور (Pattern)."""
+
     @staticmethod
-    async def send_otp(phone: str, code: str) -> bool:
-        return send_otp_sms(phone, code)
+    def _build_headers() -> dict[str, str]:
+        headers = {"Content-Type": "application/x-www-form-urlencoded"}
+        if settings.SMS_API_KEY:
+            # توکن پیامک در این هدر ارسال می‌شود.
+            headers["Authorization"] = f"AccessKey {settings.SMS_API_KEY}"
+        return headers
+
+    @staticmethod
+    async def send_otp(phone: str, code: str, variable: Optional[str] = None) -> bool:
+        """ارسال کد یک‌بارمصرف با پترن تأییدشده.
+
+        Args:
+            phone: شمارهٔ گیرنده (مثلاً 09121234567)
+            code: کد ۶ رقمی تولیدشده
+            variable: نام متغیر پترن؛ پیش‌فرض از تنظیمات خوانده می‌شود.
+
+        Returns:
+            True در صورت ارسال موفق، در غیر این صورت False.
+        """
+        variable_name = variable or settings.SMS_PATTERN_VARIABLE
+
+        if not settings.SMS_PATTERN_CODE or not settings.SMS_ORIGINATOR:
+            logger.error("پیکربندی پیامک ناقص است: SMS_PATTERN_CODE یا SMS_ORIGINATOR تنظیم نشده.")
+            return False
+
+        payload: dict[str, str] = {
+            "from": settings.SMS_ORIGINATOR,
+            "to": phone,
+            "pattern_code": settings.SMS_PATTERN_CODE,
+            # مقادیر متغیر پترن باید به‌صورت رشتهٔ JSON ارسال شوند.
+            "input_data": json.dumps({variable_name: code}, ensure_ascii=False),
+        }
+        # روش قدیمی احراز هویت (در صورت نبود توکن)
+        if settings.SMS_USERNAME:
+            payload["user"] = settings.SMS_USERNAME
+        if settings.SMS_PASSWORD:
+            payload["pass"] = settings.SMS_PASSWORD
+
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                response = await client.post(
+                    settings.SMS_API_URL,
+                    data=payload,
+                    headers=SMSService._build_headers(),
+                )
+                response.raise_for_status()
+                body = (response.text or "").strip()
+                logger.info("پیامک برای %s ارسال شد. پاسخ سرور: %s", phone, body)
+                # وب‌سرویس در صورت موفقیت، شناسهٔ عددی پیام را برمی‌گرداند.
+                return body.lstrip("-").isdigit() and not body.startswith("-")
+        except httpx.HTTPStatusError as exc:
+            logger.error("خطای HTTP در ارسال پیامک: %s | %s", exc.response.status_code, exc.response.text)
+            return False
+        except Exception as exc:  # noqa: BLE001
+            logger.error("خطای غیرمنتظره در ارسال پیامک: %s", exc)
+            return False

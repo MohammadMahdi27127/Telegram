@@ -40,9 +40,16 @@ interface ApiService {
         @Path("user_id") userId: String
     ): Response<List<SyncPersonItem>>
 
+    /**
+     * واکشی پیام‌های کاربر با پشتیبانی از همگام‌سازی افزایشی (Delta Sync).
+     *
+     * @param since مهر زمانی میلی‌ثانیه‌ای؛ اگر null باشد فول‌سینک انجام می‌شود و
+     *              در غیر این صورت فقط پیام‌های جدیدتر از این زمان برگردانده می‌شوند.
+     */
     @GET("sync/entries/{user_id}")
     suspend fun getAllUserEntries(
-        @Path("user_id") userId: String
+        @Path("user_id") userId: String,
+        @Query("since") since: Long? = null
     ): Response<List<SyncEntryItem>>
 
     @GET("sync/support-messages/{user_id}")

@@ -1,6 +1,6 @@
 "use client";
 
-import { Info, Landmark, ShieldCheck, Wallet } from "lucide-react";
+import { Info, Landmark, ShieldCheck } from "lucide-react";
 import { CopyRow } from "@/components/donate/copy-row";
 
 /** اطلاعات واقعی مقصد واریز که از تنظیمات سامانه دریافت می‌شود. */

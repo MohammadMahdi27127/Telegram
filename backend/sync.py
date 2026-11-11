@@ -4,7 +4,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from sqlalchemy import or_, cast, String
+from sqlalchemy import or_
 
 logger = logging.getLogger(__name__)
 
@@ -542,10 +542,10 @@ def get_user_people(user_id: str, db: Session = Depends(get_db)):
     try:
         # شمارش کل رکوردهای موجود برای دیباگ سریع در لاگ سرور
         total_in_db = db.query(Person).count()
-        # مقایسه مقاوم در برابر تفاوت نوع داده (UUID/رشته) با cast به رشته
+        # مقایسهٔ مستقیم رشته‌ای روی ستون ایندکس‌شده (بدون cast تا از Full Scan جلوگیری شود)
         rows = (
             db.query(Person)
-            .filter(cast(Person.user_id, String) == clean_user_id)
+            .filter(Person.user_id == clean_user_id)
             .order_by(Person.created_at.asc())
             .all()
         )
@@ -571,33 +571,48 @@ def get_user_people(user_id: str, db: Session = Depends(get_db)):
         logger.error(f"Error pulling people: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
-# ۱۱. واکشی تمام پیام‌ها و یادداشت‌های کاربر
+# ۱۱. واکشی پیام‌ها و یادداشت‌های کاربر (با پشتیبانی از همگام‌سازی افزایشی)
 @router.get("/entries/{user_id}", response_model=List[EntryResponse])
-def get_user_entries(user_id: str, db: Session = Depends(get_db)):
+def get_user_entries(
+    user_id: str,
+    since: Optional[int] = 0,
+    db: Session = Depends(get_db),
+):
+    """واکشی پیام‌های کاربر.
+
+    Args:
+        user_id: شناسهٔ کاربر.
+        since: مهر زمانی (میلی‌ثانیه) برای همگام‌سازی افزایشی. اگر بزرگ‌تر از صفر
+            باشد فقط پیام‌های جدیدتر برگردانده می‌شوند؛ مقدار صفر یعنی فول‌سینک.
+    """
     import main
     Person = main.Person
     Entry = main.Entry
     clean_user_id = str(user_id).strip()
+    since_ts = int(since or 0)
     try:
         total_in_db = db.query(Entry).count()
-        # شناسه‌های چت متعلق به کاربر (با cast مقاوم در برابر نوع داده)
-        person_ids = [
-            row[0] for row in
-            db.query(Person.id).filter(cast(Person.user_id, String) == clean_user_id).all()
+        # شناسه‌های چت متعلق به کاربر (کوئری مستقیم روی ایندکس، بدون cast)
+        user_person_ids = [
+            row[0]
+            for row in db.query(Person.id).filter(Person.user_id == clean_user_id).all()
         ]
         # پیام‌ها: چه با user_id مستقیم و چه منتسب به چت‌های کاربر
-        conditions = [cast(Entry.user_id, String) == clean_user_id]
-        if person_ids:
-            conditions.append(cast(Entry.person_id, String).in_(person_ids))
-        rows = (
-            db.query(Entry)
-            .filter(or_(*conditions))
-            .order_by(Entry.occurred_at.asc(), Entry.created_at.asc())
-            .all()
-        )
+        conditions = [Entry.user_id == clean_user_id]
+        if user_person_ids:
+            conditions.append(Entry.person_id.in_(user_person_ids))
+
+        query = db.query(Entry).filter(or_(*conditions))
+        # فیلتر زمانی همگام‌سازی افزایشی؛ باید با AND به گروه or_ اضافه شود.
+        if since_ts > 0:
+            # از >= استفاده می‌شود تا پیام‌هایی که دقیقاً هم‌زمان با آخرین مهر زمانی
+            # محلی ثبت شده‌اند از دست نروند (upsert در سمت کلاینت تکراری‌ها را حذف می‌کند).
+            query = query.filter(Entry.occurred_at >= since_ts)
+
+        rows = query.order_by(Entry.occurred_at.asc(), Entry.created_at.asc()).all()
         logger.info(
-            f"[SYNC-DEBUG] entries | user={clean_user_id} | "
-            f"total_in_db={total_in_db} | person_ids={len(person_ids)} | found={len(rows)}"
+            f"[SYNC-DEBUG] entries | user={clean_user_id} | since={since_ts} | "
+            f"total_in_db={total_in_db} | person_ids={len(user_person_ids)} | found={len(rows)}"
         )
         return [
             EntryResponse(

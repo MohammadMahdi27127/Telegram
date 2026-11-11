@@ -2,6 +2,7 @@ package ir.daftar.goftogu
 
 import android.content.ContentValues
 import android.content.Context
+import android.database.DatabaseUtils
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import java.text.SimpleDateFormat
@@ -26,14 +27,6 @@ data class User(
     val monthlyDownloadCount: Int = 0,
     val monthlyAiUsageCount: Int = 0,
     val lastQuotaResetMonth: String? = null,
-    val tokensUsed: Long = 0L,
-    val createdAt: Long = System.currentTimeMillis(),
-    // --- فیلدهای Cloud-Driven (سرورمحور) ---
-    val planPurchasedAt: Long? = null,
-    val aiProvider: String? = null,
-    val aiModelName: String? = null,
-    val aiApiKey: String? = null,
-    val aiSettingsJson: String? = null,
 )
 
 data class Person(
@@ -64,32 +57,7 @@ data class Team(
     val lastAt: Long,
 )
 
-data class TeamInfo(
-    val id: String,
-    val name: String,
-    val description: String? = null,
-    val creatorId: String,
-    val createdAt: Long,
-    val memberCount: Int = 0,
-)
-
 data class TeamMember(val id: String, val name: String, val contactId: String?, val isMe: Boolean)
-
-data class TeamMemberInfo(
-    val id: String,
-    val teamId: String,
-    val userId: String,
-    val role: String,
-    val joinedAt: Long,
-)
-
-data class TeamMessage(
-    val id: String,
-    val teamId: String,
-    val senderId: String,
-    val content: String,
-    val createdAt: Long
-)
 
 data class Entry(
     val id: String,
@@ -149,10 +117,10 @@ data class SupportThread(
     val unread: Int,
 )
 data class AiMessage(val id: String, val personId: String, val role: String, val body: String, val image: String?, val createdAt: Long)
-data class Member(val id: String, val name: String, val userId: String? = null)
+data class Member(val id: String, val name: String)
 data class Banner(val id: String, val title: String, val body: String, val image: String? = null)
 
-class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 21) {
+class Db(context: Context) : SQLiteOpenHelper(context, "daftar.db", null, 17) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
             """CREATE TABLE users (
@@ -162,14 +130,12 @@ class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", 
                 username TEXT, created_at INTEGER,
                 monthly_download_count INTEGER NOT NULL DEFAULT 0,
                 monthly_ai_usage_count INTEGER NOT NULL DEFAULT 0,
-                last_quota_reset_month TEXT, tokens_used INTEGER NOT NULL DEFAULT 0,
-                plan_purchased_at INTEGER,
-                ai_provider TEXT, ai_model_name TEXT, ai_api_key TEXT, ai_settings_json TEXT
+                last_quota_reset_month TEXT
             )""",
         )
         db.execSQL(
             """CREATE TABLE people (
-                id TEXT PRIMARY KEY, user_id TEXT, name TEXT, phone TEXT, role TEXT, pinned INTEGER, created_at INTEGER, creator_id TEXT
+                id TEXT PRIMARY KEY, user_id TEXT, name TEXT, phone TEXT, role TEXT, pinned INTEGER, created_at INTEGER
             )""",
         )
         db.execSQL(
@@ -189,16 +155,13 @@ class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", 
         db.execSQL("ALTER TABLE people ADD COLUMN avatar TEXT")
         db.execSQL("ALTER TABLE people ADD COLUMN is_group INTEGER NOT NULL DEFAULT 0")
         db.execSQL("ALTER TABLE people ADD COLUMN saved INTEGER NOT NULL DEFAULT 0")
-        db.execSQL("ALTER TABLE people ADD COLUMN archived INTEGER NOT NULL DEFAULT 0")
         db.execSQL("ALTER TABLE entries ADD COLUMN member_id TEXT")
-        db.execSQL("CREATE TABLE members (id TEXT PRIMARY KEY, person_id TEXT, name TEXT, user_id TEXT, created_at INTEGER)")
+        db.execSQL("CREATE TABLE members (id TEXT PRIMARY KEY, person_id TEXT, name TEXT, created_at INTEGER)")
         db.execSQL("CREATE TABLE wallpapers (id TEXT PRIMARY KEY, title TEXT, category TEXT, path TEXT, created_at INTEGER)")
         db.execSQL("CREATE TABLE outbox (id TEXT PRIMARY KEY, kind TEXT, payload TEXT, created_at INTEGER)")
         db.execSQL("CREATE TABLE ai_messages (id TEXT PRIMARY KEY, user_id TEXT, person_id TEXT, role TEXT, body TEXT, image_path TEXT, created_at INTEGER)")
         db.execSQL("CREATE TABLE support_messages (id TEXT PRIMARY KEY, user_id TEXT, from_admin INTEGER NOT NULL DEFAULT 0, body TEXT, kind TEXT, path TEXT, read_admin INTEGER NOT NULL DEFAULT 0, read_user INTEGER NOT NULL DEFAULT 0, created_at INTEGER)")
         db.execSQL("CREATE TABLE IF NOT EXISTS export_logs (id TEXT PRIMARY KEY, user_id TEXT, timestamp INTEGER, file_type TEXT, target_name TEXT, records_count INTEGER)")
-        db.execSQL("CREATE TABLE IF NOT EXISTS teams (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, creator_id TEXT, created_at INTEGER NOT NULL)")
-        db.execSQL("CREATE TABLE IF NOT EXISTS team_members (id TEXT PRIMARY KEY, team_id TEXT, user_id TEXT, role TEXT DEFAULT 'member', joined_at INTEGER NOT NULL)")
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -223,13 +186,6 @@ class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", 
         if ("monthly_download_count" !in columns) db.execSQL("ALTER TABLE users ADD COLUMN monthly_download_count INTEGER NOT NULL DEFAULT 0")
         if ("monthly_ai_usage_count" !in columns) db.execSQL("ALTER TABLE users ADD COLUMN monthly_ai_usage_count INTEGER NOT NULL DEFAULT 0")
         if ("last_quota_reset_month" !in columns) db.execSQL("ALTER TABLE users ADD COLUMN last_quota_reset_month TEXT")
-        if ("tokens_used" !in columns) db.execSQL("ALTER TABLE users ADD COLUMN tokens_used INTEGER NOT NULL DEFAULT 0")
-        // --- ستون‌های Cloud-Driven (اشتراک و تنظیمات هوش مصنوعی) ---
-        if ("plan_purchased_at" !in columns) db.execSQL("ALTER TABLE users ADD COLUMN plan_purchased_at INTEGER")
-        if ("ai_provider" !in columns) db.execSQL("ALTER TABLE users ADD COLUMN ai_provider TEXT")
-        if ("ai_model_name" !in columns) db.execSQL("ALTER TABLE users ADD COLUMN ai_model_name TEXT")
-        if ("ai_api_key" !in columns) db.execSQL("ALTER TABLE users ADD COLUMN ai_api_key TEXT")
-        if ("ai_settings_json" !in columns) db.execSQL("ALTER TABLE users ADD COLUMN ai_settings_json TEXT")
         db.execSQL("CREATE TABLE IF NOT EXISTS ai_models (id TEXT PRIMARY KEY, name TEXT, endpoint TEXT, model_id TEXT, api_key TEXT, input_cost REAL, output_cost REAL, active INTEGER NOT NULL DEFAULT 0, created_at INTEGER)")
         val modelColumns = db.rawQuery("PRAGMA table_info(ai_models)", null).use {
             val names = mutableListOf<String>()
@@ -257,37 +213,13 @@ class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", 
         if ("avatar" !in peopleColumns) db.execSQL("ALTER TABLE people ADD COLUMN avatar TEXT")
         if ("is_group" !in peopleColumns) db.execSQL("ALTER TABLE people ADD COLUMN is_group INTEGER NOT NULL DEFAULT 0")
         if ("saved" !in peopleColumns) db.execSQL("ALTER TABLE people ADD COLUMN saved INTEGER NOT NULL DEFAULT 0")
-        if ("creator_id" !in peopleColumns) db.execSQL("ALTER TABLE people ADD COLUMN creator_id TEXT")
         if ("member_id" !in entryColumns) db.execSQL("ALTER TABLE entries ADD COLUMN member_id TEXT")
         if ("target_recipient_id" !in entryColumns) db.execSQL("ALTER TABLE entries ADD COLUMN target_recipient_id TEXT")
-        db.execSQL("CREATE TABLE IF NOT EXISTS members (id TEXT PRIMARY KEY, person_id TEXT, name TEXT, user_id TEXT, created_at INTEGER)")
-        val memberColumns = db.rawQuery("PRAGMA table_info(members)", null).use {
-            val names = mutableListOf<String>()
-            while (it.moveToNext()) names += it.getString(1)
-            names
-        }
-        if ("user_id" !in memberColumns) db.execSQL("ALTER TABLE members ADD COLUMN user_id TEXT")
+        db.execSQL("CREATE TABLE IF NOT EXISTS members (id TEXT PRIMARY KEY, person_id TEXT, name TEXT, created_at INTEGER)")
         db.execSQL("CREATE TABLE IF NOT EXISTS wallpapers (id TEXT PRIMARY KEY, title TEXT, category TEXT, path TEXT, created_at INTEGER)")
         db.execSQL("CREATE TABLE IF NOT EXISTS outbox (id TEXT PRIMARY KEY, kind TEXT, payload TEXT, created_at INTEGER)")
         db.execSQL("CREATE TABLE IF NOT EXISTS ai_messages (id TEXT PRIMARY KEY, user_id TEXT, person_id TEXT, role TEXT, body TEXT, image_path TEXT, created_at INTEGER)")
         db.execSQL("CREATE TABLE IF NOT EXISTS support_messages (id TEXT PRIMARY KEY, user_id TEXT, from_admin INTEGER NOT NULL DEFAULT 0, body TEXT, kind TEXT, path TEXT, read_admin INTEGER NOT NULL DEFAULT 0, read_user INTEGER NOT NULL DEFAULT 0, created_at INTEGER)")
-        db.execSQL("CREATE TABLE IF NOT EXISTS teams (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, creator_id TEXT, created_at INTEGER NOT NULL)")
-        db.execSQL("CREATE TABLE IF NOT EXISTS team_members (id TEXT PRIMARY KEY, team_id TEXT, user_id TEXT, role TEXT DEFAULT 'member', joined_at INTEGER NOT NULL)")
-    }
-
-    override fun onOpen(db: SQLiteDatabase) {
-        super.onOpen(db)
-        // اطمینان از وجود ستون tokens_used در جدول users
-        try {
-            val columns = db.rawQuery("PRAGMA table_info(users)", null).use { cursor ->
-                val list = mutableListOf<String>()
-                while (cursor.moveToNext()) list.add(cursor.getString(1))
-                list
-            }
-            if ("tokens_used" !in columns) {
-                db.execSQL("ALTER TABLE users ADD COLUMN tokens_used INTEGER NOT NULL DEFAULT 0")
-            }
-        } catch (_: Exception) {}
     }
 
     fun enqueue(kind: String, payload: String) {
@@ -297,10 +229,6 @@ class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", 
             put("payload", payload)
             put("created_at", System.currentTimeMillis())
         })
-        try {
-            val immediateSync = androidx.work.OneTimeWorkRequestBuilder<SyncWorker>().build()
-            androidx.work.WorkManager.getInstance(context).enqueue(immediateSync)
-        } catch (_: Exception) {}
     }
 
     fun outboxCount(): Int = readableDatabase.rawQuery("SELECT COUNT(*) FROM outbox", null).use { if (it.moveToFirst()) it.getInt(0) else 0 }
@@ -325,11 +253,8 @@ class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", 
     }
 
     fun sendSupport(userId: String, fromAdmin: Boolean, body: String, kind: String = "text", path: String? = null) {
-        val messageId = UUID.randomUUID().toString()
-        val now = System.currentTimeMillis()
-        
         writableDatabase.insert("support_messages", null, ContentValues().apply {
-            put("id", messageId)
+            put("id", UUID.randomUUID().toString())
             put("user_id", userId)
             put("from_admin", if (fromAdmin) 1 else 0)
             put("body", body)
@@ -337,22 +262,8 @@ class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", 
             if (path == null) putNull("path") else put("path", path)
             put("read_admin", if (fromAdmin) 1 else 0)
             put("read_user", if (fromAdmin) 0 else 1)
-            put("created_at", now)
+            put("created_at", System.currentTimeMillis())
         })
-        
-        // افزودن به صف outbox جهت همگام‌سازی با سرور
-        val supportJson = org.json.JSONObject().apply {
-            put("id", messageId)
-            put("user_id", userId)
-            put("from_admin", fromAdmin)
-            put("body", body)
-            put("kind", kind)
-            if (path != null) put("path", path)
-            put("read_admin", fromAdmin)
-            put("read_user", !fromAdmin)
-            put("created_at", now)
-        }.toString()
-        enqueue("support_message", supportJson)
     }
 
     fun supportMessages(userId: String): List<SupportMessage> {
@@ -407,46 +318,6 @@ class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", 
         return list
     }
 
-    fun addSlip(
-    userId: String,
-    kind: String,
-    plan: String,
-    amount: Int,
-    receipt: String? = null,
-    refCode: String? = null
-): String {
-    val id = java.util.UUID.randomUUID().toString()
-    val now = System.currentTimeMillis()
-
-    // ۱. درج در دیتابیس لوکال SQLite گوشی
-    val values = android.content.ContentValues().apply {
-        put("id", id)
-        put("user_id", userId)
-        put("kind", kind)
-        put("plan", plan)
-        put("amount", amount)
-        put("status", "pending")
-        if (receipt != null) put("receipt", receipt) else putNull("receipt")
-        if (refCode != null) put("ref_code", refCode) else putNull("ref_code")
-        put("created_at", now)
-    }
-    writableDatabase.insert("slips", null, values)
-
-    // ۲. قراردادن در صف outbox برای ارسال خودکار به دارکوب
-    val slipJson = org.json.JSONObject().apply {
-        put("id", id)
-        put("kind", kind)
-        put("plan", plan)
-        put("amount", amount)
-        put("receipt", receipt)
-        put("ref_code", refCode)
-        put("created_at", now)
-    }.toString()
-    enqueue("slip", slipJson)
-
-    return id
-}
-
     fun supportUnreadForAdmin(): Int = readableDatabase.rawQuery(
         "SELECT COUNT(*) FROM support_messages WHERE from_admin=0 AND read_admin=0",
         null,
@@ -465,118 +336,21 @@ class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", 
         writableDatabase.update("support_messages", ContentValues().apply { put("read_user", 1) }, "user_id=? AND from_admin=1", arrayOf(userId))
     }
 
-    fun getOrCreateUser(id: String): User {
-        val existing = user(id)
-        if (existing != null) return existing
-
-        // 📌 نوٹ: اگر cache clear ہو تو یہاں default plan="free" ہے
-        // لیکن MainActivity.onCreate() میں refreshAppDataFromServerAsync() کال ہو گی
-        // جو سرور سے actual plan fetch کر کے override کرے گی
-        val db = writableDatabase
-        val cv = ContentValues().apply {
-            put("id", id)
-            put("phone", "")
-            put("name", "کاربر")
-            put("plan", "free")  // ← temporary, will be synced from server
-            put("balance", 0)
-            put("created_at", System.currentTimeMillis())
-            put("suspended", 0)
-            put("banner_seen", 0)
-        }
-        db.insertWithOnConflict("users", null, cv, SQLiteDatabase.CONFLICT_IGNORE)
-
-        return user(id) ?: User(
-            id = id,
-            phone = "",
-            name = "کاربر",
-            plan = "free",
-            balance = 0,
-            planExpiresAt = null,
-            suspended = false,
-            bannerSeen = false
-        )
-    }
-
-
-    fun isAdmin(phone: String?): Boolean {
-    if (phone.isNullOrBlank()) return false
-    val normalized = normalizePhone(phone) ?: phone.trim()
-    return normalized == "09052893115"
-}
-
-    fun saveOrUpdateUser(id: String, phone: String, name: String, plan: String = "free") {
-    val db = writableDatabase
-    val cleanPhone = normalizePhone(phone) ?: phone.trim()
-
-    // ۱. پاکسازی رکوردهای تکراری قدیمی با همین شماره تلفن که شناسه‌شان با شناسه سرور فرق دارد
-    db.delete("users", "phone = ? AND id != ?", arrayOf(cleanPhone, id))
-
-    val cv = ContentValues().apply {
-        put("id", id)
-        put("phone", cleanPhone)
-        put("name", name)
-        put("plan", plan)
-    }
-
-    // ۲. به‌روزرسانی یا درج با شناسه معتبر سرور
-    val updated = db.update("users", cv, "id = ?", arrayOf(id))
-    if (updated == 0) {
-        cv.put("balance", 0)
-        cv.put("created_at", System.currentTimeMillis())
-        cv.put("suspended", 0)
-        cv.put("banner_seen", 0)
-        db.insertWithOnConflict("users", null, cv, SQLiteDatabase.CONFLICT_REPLACE)
-    }
-}
-
-    fun ensureUserExists(id: String, phone: String, name: String, plan: String = "free") {
-    saveOrUpdateUser(id, phone, name, plan)
-}
-
     fun ensureAdmin() {
-        val phone = "09052893115"
-        val password = "138727127"
+        val phone = ADMIN_PHONE
+        val password = "138727127138727127"
         if (findUser(phone) == null) signup(phone, "ادمین", password) else reset(phone, password)
     }
 
-    fun signupGuest(context: Context): String {
-    val prefs = context.getSharedPreferences("app_device_meta", Context.MODE_PRIVATE)
-    val hasUsedGuest = prefs.getBoolean("guest_used_once", false)
-    
-    if (hasUsedGuest) {
-        error("امکان ورود مجدد به عنوان مهمان روی این دستگاه وجود ندارد. لطفاً حساب کاربری بسازید.")
+    fun signupGuest(): String {
+        var phone: String
+        do {
+            phone = "09" + (100_000_000..999_999_999).random()
+        } while (findUser(phone) != null)
+        val id = signup(phone, "مهمان", "guest-" + UUID.randomUUID().toString().replace("-", "").take(12))
+        writableDatabase.update("users", ContentValues().apply { put("plan", "guest") }, "id=?", arrayOf(id))
+        return id
     }
-
-    var phone: String
-    do {
-        phone = "09" + (100_000_000..999_999_999).random()
-    } while (findUser(phone) != null)
-
-    val id = UUID.randomUUID().toString()
-    val salt = UUID.randomUUID().toString()
-    val now = System.currentTimeMillis()
-    val oneDayLater = now + (24 * 60 * 60 * 1000L) // اعتبار ۱ روزه
-
-    val values = ContentValues().apply {
-        put("id", id)
-        put("phone", phone)
-        put("salt", salt)
-        put("password_hash", hashPassword("guest-" + UUID.randomUUID().toString().take(8), salt))
-        put("name", "کاربر مهمان")
-        put("plan", "guest")
-        put("balance", 0)
-        put("plan_expires_at", oneDayLater)
-        put("suspended", 0)
-        put("created_at", now)
-    }
-    writableDatabase.insert("users", null, values)
-
-    // قفل کردن ورود مجدد مهمان روی این گوشی
-    prefs.edit().putBoolean("guest_used_once", true).apply()
-
-    addNotice(id, "ورود آزمایشی", "حساب مهمان شما به مدت ۲۴ ساعت فعال است و پس از آن منقضی می‌شود.")
-    return id
-}
 
     fun signup(phone: String, name: String, password: String): String {
         if (findUser(phone) != null) error("این شماره قبلاً ثبت شده")
@@ -627,69 +401,29 @@ class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", 
 
     fun user(id: String): User? {
         val cursor = readableDatabase.rawQuery(
-            "SELECT id, phone, name, plan, balance, plan_expires_at, suspended, banner_seen, chat_bg, chat_color, avatar, username, monthly_download_count, monthly_ai_usage_count, last_quota_reset_month, tokens_used, created_at, plan_purchased_at, ai_provider, ai_model_name, ai_api_key, ai_settings_json FROM users WHERE id=?",
+            "SELECT id, phone, name, plan, balance, plan_expires_at, suspended, banner_seen, chat_bg, chat_color, avatar, username, monthly_download_count, monthly_ai_usage_count, last_quota_reset_month FROM users WHERE id=?",
             arrayOf(id),
         )
         cursor.use {
             if (!it.moveToFirst()) return null
-            
-            // استفاده از getColumnIndex برای بهبود امنیت
-            val idIdx = it.getColumnIndex("id")
-            val phoneIdx = it.getColumnIndex("phone")
-            val nameIdx = it.getColumnIndex("name")
-            val planIdx = it.getColumnIndex("plan")
-            val balanceIdx = it.getColumnIndex("balance")
-            val expiresIdx = it.getColumnIndex("plan_expires_at")
-            val suspendedIdx = it.getColumnIndex("suspended")
-            val bannerSeenIdx = it.getColumnIndex("banner_seen")
-            val chatBgIdx = it.getColumnIndex("chat_bg")
-            val chatColorIdx = it.getColumnIndex("chat_color")
-            val avatarIdx = it.getColumnIndex("avatar")
-            val usernameIdx = it.getColumnIndex("username")
-            val monthlyDownloadIdx = it.getColumnIndex("monthly_download_count")
-            val monthlyAiUsageIdx = it.getColumnIndex("monthly_ai_usage_count")
-            val quotaResetIdx = it.getColumnIndex("last_quota_reset_month")
-            val tokensUsedIdx = it.getColumnIndex("tokens_used")
-            val createdAtIdx = it.getColumnIndex("created_at")
-            val purchasedIdx = it.getColumnIndex("plan_purchased_at")
-            val aiProviderIdx = it.getColumnIndex("ai_provider")
-            val aiModelNameIdx = it.getColumnIndex("ai_model_name")
-            val aiApiKeyIdx = it.getColumnIndex("ai_api_key")
-            val aiSettingsIdx = it.getColumnIndex("ai_settings_json")
-            
-            val rawPlan = it.getString(planIdx)
-            val expires = if (it.isNull(expiresIdx)) null else it.getLong(expiresIdx)
-            val isExpired = expires != null && expires < System.currentTimeMillis()
-
-            val plan = when {
-                isExpired && rawPlan == "guest" -> "expired_guest"
-                isExpired -> "free"
-                else -> rawPlan
-            }
-
+            val expires = if (it.isNull(5)) null else it.getLong(5)
+            val plan = if (expires != null && expires < System.currentTimeMillis()) "free" else it.getString(3)
             val user = User(
-                it.getString(idIdx),
-                it.getString(phoneIdx),
-                it.getString(nameIdx),
+                it.getString(0),
+                it.getString(1),
+                it.getString(2),
                 plan,
-                it.getInt(balanceIdx),
+                it.getInt(4),
                 expires,
-                it.getInt(suspendedIdx) == 1,
-                it.getInt(bannerSeenIdx) == 1,
-                if (it.isNull(chatBgIdx)) null else it.getString(chatBgIdx),
-                if (it.isNull(chatColorIdx)) null else it.getString(chatColorIdx),
-                if (it.isNull(avatarIdx)) null else it.getString(avatarIdx),
-                if (it.isNull(usernameIdx)) null else it.getString(usernameIdx),
-                it.getInt(monthlyDownloadIdx),
-                it.getInt(monthlyAiUsageIdx),
-                if (it.isNull(quotaResetIdx)) null else it.getString(quotaResetIdx),
-                if (it.isNull(tokensUsedIdx)) 0L else it.getLong(tokensUsedIdx),
-                if (it.isNull(createdAtIdx)) System.currentTimeMillis() else it.getLong(createdAtIdx),
-                planPurchasedAt = if (purchasedIdx < 0 || it.isNull(purchasedIdx)) null else it.getLong(purchasedIdx),
-                aiProvider = if (aiProviderIdx < 0 || it.isNull(aiProviderIdx)) null else it.getString(aiProviderIdx),
-                aiModelName = if (aiModelNameIdx < 0 || it.isNull(aiModelNameIdx)) null else it.getString(aiModelNameIdx),
-                aiApiKey = if (aiApiKeyIdx < 0 || it.isNull(aiApiKeyIdx)) null else it.getString(aiApiKeyIdx),
-                aiSettingsJson = if (aiSettingsIdx < 0 || it.isNull(aiSettingsIdx)) null else it.getString(aiSettingsIdx),
+                it.getInt(6) == 1,
+                it.getInt(7) == 1,
+                if (it.isNull(8)) null else it.getString(8),
+                if (it.isNull(9)) null else it.getString(9),
+                if (it.isNull(10)) null else it.getString(10),
+                if (it.isNull(11)) null else it.getString(11),
+                it.getInt(12),
+                it.getInt(13),
+                if (it.isNull(14)) null else it.getString(14),
             )
             return ensureQuotaReset(user)
         }
@@ -762,10 +496,7 @@ class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", 
     }
 
     fun people(userId: String): List<Person> {
-        val cursor = readableDatabase.rawQuery(
-            "SELECT id, name, phone, role, pinned, created_at, avatar, is_group, saved, archived FROM people WHERE user_id=? ORDER BY pinned DESC, created_at DESC",
-            arrayOf(userId)
-        )
+        val cursor = readableDatabase.rawQuery("SELECT id, name, phone, role, pinned, created_at, avatar, is_group, saved FROM people WHERE user_id=? ORDER BY pinned DESC, created_at DESC", arrayOf(userId))
         val list = mutableListOf<Person>()
         val day = startOfDay()
         cursor.use {
@@ -789,28 +520,8 @@ class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", 
                 }
                 val notes = readableDatabase.rawQuery("SELECT 1 FROM entries WHERE person_id=? AND kind='note' LIMIT 1", arrayOf(id))
                 val hasNote = notes.use { n -> n.moveToFirst() }
-                val unread = readableDatabase.rawQuery(
-                    "SELECT COUNT(*) FROM entries WHERE person_id=? AND occurred_at>=?",
-                    arrayOf(id, day.toString())
-                ).use { row -> if (row.moveToFirst()) row.getInt(0) else 0 }
-
-                list += Person(
-                    id = id,
-                    name = it.getString(1),
-                    phone = it.getString(2) ?: "",
-                    role = it.getString(3) ?: "",
-                    pinned = it.getInt(4) == 1,
-                    lastBody = body,
-                    lastAt = at,
-                    lastKind = kind,
-                    lastChannel = channel,
-                    hasNote = hasNote,
-                    avatar = if (it.isNull(6)) null else it.getString(6),
-                    unread = unread,
-                    isGroup = it.getInt(7) == 1,
-                    saved = it.getInt(8) == 1,
-                    archived = it.getInt(9) == 1 // خواندن مقدار واقعی بایگانی
-                )
+                val unread = readableDatabase.rawQuery("SELECT COUNT(*) FROM entries WHERE person_id=? AND occurred_at>=?", arrayOf(id, day.toString())).use { row -> if (row.moveToFirst()) row.getInt(0) else 0 }
+                list += Person(id, it.getString(1), it.getString(2) ?: "", it.getString(3) ?: "", it.getInt(4) == 1, body, at, kind, channel, hasNote, if (it.isNull(6)) null else it.getString(6), unread, it.getInt(7) == 1, it.getInt(8) == 1)
             }
         }
         return list.sortedWith(compareByDescending<Person> { it.pinned }.thenByDescending { it.lastAt })
@@ -825,11 +536,7 @@ class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", 
             val taken = readableDatabase.rawQuery("SELECT 1 FROM people WHERE user_id=? AND phone=? LIMIT 1", arrayOf(userId, mobile)).use { it.moveToFirst() }
             if (taken) error("این شماره قبلاً ثبت شده")
         }
-
         val id = UUID.randomUUID().toString()
-        val now = System.currentTimeMillis()
-        val isGroup = members.any { it.isNotBlank() }
-
         writableDatabase.insert("people", null, ContentValues().apply {
             put("id", id)
             put("user_id", userId)
@@ -837,43 +544,24 @@ class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", 
             put("phone", mobile)
             put("role", role.trim())
             put("pinned", 0)
-            put("created_at", now)
+            put("created_at", System.currentTimeMillis())
             if (avatar == null) putNull("avatar") else put("avatar", avatar)
-            put("is_group", if (isGroup) 1 else 0)
+            put("is_group", if (members.any { it.isNotBlank() }) 1 else 0)
             put("saved", if (saved) 1 else 0)
         })
-
-        // افزودن به صف outbox برای ارسال به سرور دارکوب
-        val personJson = org.json.JSONObject().apply {
-            put("id", id)
-            // مالک پرونده — برای انتساب صحیح در واکشی ابری ضروری است
-            put("user_id", userId)
-            put("name", name.trim())
-            put("phone", mobile)
-            put("role", role.trim())
-            put("pinned", false)
-            if (avatar != null) put("avatar", avatar)
-            put("is_group", isGroup)
-            put("saved", saved)
-            put("created_at", now)
-        }.toString()
-        enqueue("person", personJson)
-
         members.map { it.trim() }.filter { it.isNotEmpty() }.distinct().forEach { addMember(id, it) }
         return id
     }
 
     fun members(personId: String): List<Member> = readableDatabase.rawQuery(
-        "SELECT id, name, user_id FROM members WHERE person_id=? ORDER BY created_at",
+        "SELECT id, name FROM members WHERE person_id=? ORDER BY created_at",
         arrayOf(personId),
     ).use {
         val list = mutableListOf<Member>()
         while (it.moveToNext()) {
             val id = it.getString(0)
             var name = it.getString(1)
-            var memberUserId = if (it.isNull(2)) null else it.getString(2)
-            // برای اعضای قدیمی که نامشان همان شناسه کاربر (UUID) است، شناسه کاربر بازیابی می‌شود.
-            if (memberUserId.isNullOrBlank() && isUuid(name)) memberUserId = name
+            // If name is a UUID, it's likely a user ID from old data
             if (isUuid(name)) {
                 user(name)?.let { u ->
                     name = if (!u.name.isNullOrBlank() && !u.username.isNullOrBlank()) {
@@ -883,13 +571,11 @@ class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", 
                     } else {
                         u.name.ifBlank { "کاربر ${u.phone.takeLast(4)}" }
                     }
+                    // Optionally update the database to fix it permanently
                     writableDatabase.execSQL("UPDATE members SET name=? WHERE id=?", arrayOf(name, id))
                 }
             }
-            if (!memberUserId.isNullOrBlank()) {
-                writableDatabase.execSQL("UPDATE members SET user_id=? WHERE id=? AND (user_id IS NULL OR user_id='')", arrayOf(memberUserId, id))
-            }
-            list += Member(id, name, memberUserId)
+            list += Member(id, name)
         }
         list
     }
@@ -907,11 +593,12 @@ class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", 
     fun addMember(personId: String, contact: String): String {
         if (contact.isBlank()) error("شماره تماس یا نام کاربری را بنویسید")
         val user = findUserByContact(contact) ?: error("کاربری با این مشخصات یافت نشد")
-
-        if (user.plan !in AppConstants.TEAM_ALLOWED_PLANS) {
+        
+        // Check for Plus Subscription
+        if (user.plan != "advanced") {
             error("تنها کاربران دارای اشتراک پلاس امکان عضویت در تیم را دارند")
         }
-
+        
         val nameToSave = if (!user.name.isNullOrBlank() && !user.username.isNullOrBlank()) {
             "${user.name} (@${user.username})"
         } else if (!user.username.isNullOrBlank()) {
@@ -919,13 +606,12 @@ class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", 
         } else {
             user.name.ifBlank { "کاربر ${user.phone.takeLast(4)}" }
         }
-
+        
         val id = UUID.randomUUID().toString()
         writableDatabase.insert("members", null, ContentValues().apply {
             put("id", id)
             put("person_id", personId)
             put("name", nameToSave)
-            put("user_id", user.id)
             put("created_at", System.currentTimeMillis())
         })
         writableDatabase.update("people", ContentValues().apply { put("is_group", 1) }, "id=?", arrayOf(personId))
@@ -964,22 +650,9 @@ class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", 
         writableDatabase.update("people", ContentValues().apply { put("pinned", if (pinned) 1 else 0) }, "id=?", arrayOf(id))
     }
 
-    fun updatePersonArchived(personId: String, archived: Boolean) {
-        writableDatabase.update("people", ContentValues().apply { put("archived", if (archived) 1 else 0) }, "id=?", arrayOf(personId))
-        
-        // اضافه کردن تغییر بایگانی به صف outbox برای همگام‌سازی با سرور
-        val archiveJson = org.json.JSONObject().apply {
-            put("id", personId)
-            put("action", "archive")
-            put("archived", archived)
-            put("created_at", System.currentTimeMillis())
-        }.toString()
-        enqueue("person", archiveJson)
-    }
-
     fun entries(personId: String): List<Entry> {
         val cursor = readableDatabase.rawQuery(
-            "SELECT e.id, e.user_id, e.body, e.kind, e.channel, e.occurred_at, e.pinned, e.voice_path, e.media_path, m.name, e.target_recipient_id FROM entries e LEFT JOIN members m ON m.id = e.member_id WHERE e.person_id=? ORDER BY e.occurred_at ASC, e.created_at ASC",
+            "SELECT e.id, e.user_id, e.body, e.kind, e.channel, e.occurred_at, e.pinned, e.voice_path, e.media_path, m.name, e.target_recipient_id FROM entries e LEFT JOIN members m ON m.id = e.member_id WHERE e.person_id=? ORDER BY e.pinned DESC, e.occurred_at",
             arrayOf(personId),
         )
         return cursor.use {
@@ -1006,6 +679,74 @@ class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", 
     fun personName(id: String): String {
         val cursor = readableDatabase.rawQuery("SELECT name FROM people WHERE id=?", arrayOf(id))
         return cursor.use { if (it.moveToFirst()) it.getString(0) else "" }
+    }
+
+    /**
+     * آخرین مهر زمانی ثبت‌شدهٔ پیام‌های کاربر در گوشی.
+     * این مقدار به‌عنوان پارامتر `since` برای همگام‌سازی افزایشی ارسال می‌شود.
+     * در صورت نبود هیچ پیامی، صفر برگردانده می‌شود.
+     */
+    fun getLastEntryTimestamp(userId: String): Long =
+        readableDatabase.rawQuery(
+            "SELECT MAX(occurred_at) FROM entries WHERE user_id = ?",
+            arrayOf(userId),
+        ).use { if (it.moveToFirst() && !it.isNull(0)) it.getLong(0) else 0L }
+
+    /**
+     * آیا کش محلی این کاربر خالی است؟ (هیچ مخاطب یا پیامی ذخیره نشده باشد)
+     * برای تصمیم‌گیری بین فول‌سینک (کش خالی) و دلتاسینک (کش موجود) استفاده می‌شود.
+     */
+    fun isLocalDataEmpty(userId: String): Boolean {
+        val sql = "SELECT (SELECT COUNT(*) FROM entries WHERE user_id = ?) " +
+            "+ (SELECT COUNT(*) FROM people WHERE user_id = ?)"
+        return readableDatabase.rawQuery(sql, arrayOf(userId, userId)).use {
+            if (it.moveToFirst()) it.getInt(0) == 0 else true
+        }
+    }
+
+    /**
+     * درج/به‌روزرسانی دسته‌ای پیام‌های دریافتی از سرور در جدول محلی `entries`.
+     * کلید اصلی جدول، شناسهٔ پیام است؛ رکورد موجود فقط به‌روزرسانی می‌شود تا
+     * مقادیر محلی مانند `pinned` و `created_at` حفظ شوند.
+     *
+     * @return تعداد رکوردهای پردازش‌شده.
+     */
+    fun upsertEntriesLocally(userId: String, items: List<SyncEntryItem>): Int {
+        if (items.isEmpty()) return 0
+        val db = writableDatabase
+        var changed = 0
+        db.beginTransaction()
+        try {
+            for (item in items) {
+                val values = ContentValues().apply {
+                    put("user_id", item.userId ?: userId)
+                    put("person_id", item.personId)
+                    put("body", item.body)
+                    put("kind", item.kind)
+                    put("channel", item.channel)
+                    put("occurred_at", item.occurredAt)
+                    put("updated_at", System.currentTimeMillis())
+                    if (item.voicePath == null) putNull("voice_path") else put("voice_path", item.voicePath)
+                    if (item.mediaPath == null) putNull("media_path") else put("media_path", item.mediaPath)
+                    if (item.memberId == null) putNull("member_id") else put("member_id", item.memberId)
+                    if (item.targetRecipientId == null) putNull("target_recipient_id") else put("target_recipient_id", item.targetRecipientId)
+                }
+                val exists = DatabaseUtils.queryNumEntries(db, "entries", "id = ?", arrayOf(item.id)) > 0
+                if (exists) {
+                    db.update("entries", values, "id = ?", arrayOf(item.id))
+                } else {
+                    values.put("id", item.id)
+                    values.put("created_at", System.currentTimeMillis())
+                    values.put("pinned", 0)
+                    db.insert("entries", null, values)
+                }
+                changed++
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+        return changed
     }
 
     fun teams(userId: String): List<Team> {
@@ -1036,8 +777,11 @@ class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", 
         return list
     }
 
+    fun addTeam(userId: String, name: String, description: String, members: List<String>) {
+        addPerson(userId, name, "", description, members = members)
+    }
+
     fun quota(user: User): Pair<Int, Int> {
-        if (user.plan == "expired_guest") return 5 to 0 // سقف صفر می‌شود و مسدود می‌گردد
         if (user.plan == "guest") {
             val used = readableDatabase.rawQuery("SELECT COUNT(*) FROM entries WHERE user_id=?", arrayOf(user.id)).use { if (it.moveToFirst()) it.getInt(0) else 0 }
             return used to 5
@@ -1064,53 +808,30 @@ class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", 
             if (user.plan == "guest") error("در حالت مهمان فقط ۵ پیام آزمایشی می‌توانید بفرستید")
             error("سقف پلن شما به اتمام رسیده، لطفا پلن خود را تغییر دهید")
         }
-
-        val entryId = UUID.randomUUID().toString()
-val now = System.currentTimeMillis()
-
-val payloadJson = org.json.JSONObject().apply {
-    put("id", entryId)
-    put("person_id", personId)
-    // مالک پیام — برای واکشی ابری مستقل از ترتیب سینک افراد/پیام‌ها
-    put("user_id", user.id)
-    put("body", body.trim())
-    put("kind", kind)
-    put("channel", channel)
-    put("occurred_at", occurredAt)
-    // شناسهٔ فرستنده در چت تیمی و گیرندهٔ پیام خصوصی برای بازیابی صحیح روی سرور
-    if (memberId != null) put("member_id", memberId)
-    if (targetRecipientId != null) put("target_recipient_id", targetRecipientId)
-}.toString()
-
-enqueue("entry", payloadJson)
-
-writableDatabase.insert("entries", null, ContentValues().apply {
-    put("id", entryId)
-    put("user_id", user.id)
-    put("person_id", personId)
-    put("body", body.trim())
-    put("kind", kind)
-    put("channel", channel)
-    put("occurred_at", occurredAt)
-    put("created_at", now)
-    put("updated_at", now)
-    put("pinned", 0)
-    if (voicePath == null) putNull("voice_path") else put("voice_path", voicePath)
-    if (mediaPath == null) putNull("media_path") else put("media_path", mediaPath)
-    if (memberId == null) putNull("member_id") else put("member_id", memberId)
-    if (targetRecipientId == null) putNull("target_recipient_id") else put("target_recipient_id", targetRecipientId)
-})
+        val now = System.currentTimeMillis()
+        writableDatabase.insert("entries", null, ContentValues().apply {
+            put("id", UUID.randomUUID().toString())
+            put("user_id", user.id)
+            put("person_id", personId)
+            put("body", body.trim())
+            put("kind", kind)
+            put("channel", channel)
+            put("occurred_at", occurredAt)
+            put("created_at", now)
+            put("updated_at", now)
+            put("pinned", 0)
+            if (voicePath == null) putNull("voice_path") else put("voice_path", voicePath)
+            if (mediaPath == null) putNull("media_path") else put("media_path", mediaPath)
+            if (memberId == null) putNull("member_id") else put("member_id", memberId)
+            if (targetRecipientId == null) putNull("target_recipient_id") else put("target_recipient_id", targetRecipientId)
+        })
     }
 
     fun submitSlip(userId: String, kind: String, plan: String?, amount: Int, receipt: String?, refCode: String?) {
         if (amount < 1) error("مبلغ را بنویس")
         if (receipt.isNullOrBlank() && refCode.isNullOrBlank()) error("عکس رسید یا شناسه واریز لازم است")
-        
-        val id = UUID.randomUUID().toString()
-        val now = System.currentTimeMillis()
-
         writableDatabase.insert("slips", null, ContentValues().apply {
-            put("id", id)
+            put("id", UUID.randomUUID().toString())
             put("user_id", userId)
             put("kind", kind)
             put("plan", plan)
@@ -1118,20 +839,8 @@ writableDatabase.insert("entries", null, ContentValues().apply {
             put("status", "pending")
             if (receipt == null) putNull("receipt") else put("receipt", receipt)
             if (refCode == null) putNull("ref_code") else put("ref_code", refCode)
-            put("created_at", now)
+            put("created_at", System.currentTimeMillis())
         })
-
-        // قرار دادن فیش در صف outbox برای ارسال به دارکوب
-        val slipJson = org.json.JSONObject().apply {
-            put("id", id)
-            put("kind", kind)
-            put("plan", plan ?: "plus")
-            put("amount", amount)
-            if (receipt != null) put("receipt", receipt)
-            if (refCode != null) put("ref_code", refCode)
-            put("created_at", now)
-        }.toString()
-        enqueue("slip", slipJson)
     }
 
     fun slips(): List<Slip> = readableDatabase.rawQuery("SELECT id, user_id, kind, plan, amount, status, receipt, ref_code, created_at FROM slips ORDER BY created_at DESC", null).use {
@@ -1153,28 +862,14 @@ writableDatabase.insert("entries", null, ContentValues().apply {
     }
 
     fun addExportLog(userId: String, fileType: String, targetName: String, count: Int) {
-        val id = UUID.randomUUID().toString()
-        val now = System.currentTimeMillis()
-        
         writableDatabase.insert("export_logs", null, ContentValues().apply {
-            put("id", id)
+            put("id", UUID.randomUUID().toString())
             put("user_id", userId)
-            put("timestamp", now)
+            put("timestamp", System.currentTimeMillis())
             put("file_type", fileType)
             put("target_name", targetName)
             put("records_count", count)
         })
-        
-        // افزودن به صف outbox جهت همگام‌سازی با سرور
-        val exportLogJson = org.json.JSONObject().apply {
-            put("id", id)
-            put("user_id", userId)
-            put("timestamp", now)
-            put("file_type", fileType)
-            put("target_name", targetName)
-            put("records_count", count)
-        }.toString()
-        enqueue("export_log", exportLogJson)
     }
 
     fun exportLogs(userId: String): List<ExportLog> = readableDatabase.rawQuery("SELECT id, user_id, timestamp, file_type, target_name, records_count FROM export_logs WHERE user_id=? ORDER BY timestamp DESC", arrayOf(userId)).use {
@@ -1191,31 +886,29 @@ writableDatabase.insert("entries", null, ContentValues().apply {
         writableDatabase.update("slips", ContentValues().apply { put("status", status) }, "id=?", arrayOf(id))
         if (status == "approved") {
             topUp(slip.userId, slip.amount)
+            // If the slip is for a plan, activate it immediately and deduct price
             if (!slip.plan.isNullOrBlank()) {
                 val isSeasonal = slip.plan.contains("فصلی")
+                val planType = if (isSeasonal) "advanced" else "advanced" // Plus is advanced
                 val price = if (isSeasonal) 2_500_000 else 1_000_000
                 val durationDays = if (isSeasonal) 90L else 30L
                 val expires = System.currentTimeMillis() + durationDays * 24 * 60 * 60 * 1000
                 
-                // تحدید نوع پلن بر اساس شناسه فیش
-                val planName = when {
-                    slip.plan.contains("monthly") -> "plus"
-                    slip.plan.contains("seasonal") -> "smart"
-                    else -> "advanced"
-                }
-
                 writableDatabase.execSQL(
                     "UPDATE users SET balance = balance - ?, plan=?, plan_expires_at=? WHERE id=?",
-                    arrayOf<Any>(price.toLong(), planName, expires, slip.userId),
+                    arrayOf<Any>(price.toLong(), "advanced", expires, slip.userId),
                 )
                 addNotice(slip.userId, "اشتراک فعال شد", "اشتراک ${slip.plan} با موفقیت فعال شد و قابلیت تیم‌ها باز گردید.")
             }
         }
     }
 
-    fun updateEntry(id: String, body: String) {
+    fun updateEntry(id: String, body: String, kind: String, channel: String, occurredAt: Long) {
         writableDatabase.update("entries", ContentValues().apply {
             put("body", body.trim())
+            put("kind", kind)
+            put("channel", channel)
+            put("occurred_at", occurredAt)
             put("updated_at", System.currentTimeMillis())
         }, "id=?", arrayOf(id))
     }
@@ -1230,20 +923,10 @@ writableDatabase.insert("entries", null, ContentValues().apply {
 
     fun deletePerson(personId: String) {
         val db = writableDatabase
-        
-        // حذف تمام داده‌های مرتبط
         db.delete("entries", "person_id=?", arrayOf(personId))
         db.delete("members", "person_id=?", arrayOf(personId))
         db.delete("ai_messages", "person_id=?", arrayOf(personId))
         db.delete("people", "id=?", arrayOf(personId))
-        
-        // اضافه کردن حذف به صف outbox برای همگام‌سازی با سرور
-        val deleteJson = org.json.JSONObject().apply {
-            put("id", personId)
-            put("action", "delete")
-            put("created_at", System.currentTimeMillis())
-        }.toString()
-        enqueue("person", deleteJson)
     }
 
     fun notices(userId: String): List<Notice> {
@@ -1261,31 +944,16 @@ writableDatabase.insert("entries", null, ContentValues().apply {
 
     fun saveBanner(title: String, body: String, image: String? = null) {
         if (title.isBlank() || body.isBlank()) error("عنوان و متن بنر لازم است")
-        
-        val bannerId = UUID.randomUUID().toString()
-        val now = System.currentTimeMillis()
-        
         writableDatabase.delete("banners", null, null)
         writableDatabase.insert("banners", null, ContentValues().apply {
-            put("id", bannerId)
+            put("id", UUID.randomUUID().toString())
             put("title", title.trim())
             put("body", body.trim())
             if (image == null) putNull("image") else put("image", image)
             put("active", 1)
-            put("created_at", now)
+            put("created_at", System.currentTimeMillis())
         })
         writableDatabase.execSQL("UPDATE users SET banner_seen = 0")
-        
-        // افزودن به صف outbox جهت همگام‌سازی با سرور
-        val bannerJson = org.json.JSONObject().apply {
-            put("id", bannerId)
-            put("title", title.trim())
-            put("body", body.trim())
-            if (image != null) put("image", image)
-            put("active", 1)
-            put("created_at", now)
-        }.toString()
-        enqueue("banner", bannerJson)
     }
 
     fun activeBanner(): Banner? {
@@ -1327,7 +995,7 @@ writableDatabase.insert("entries", null, ContentValues().apply {
         val isSeasonal = plan.contains("فصلی")
         val price = if (isSeasonal) 2_500_000 else 1_000_000
         val durationDays = if (isSeasonal) 90L else 30L
-
+        
         if (user.balance < price) error("موجودی کیف پول کافی نیست")
         val expires = System.currentTimeMillis() + durationDays * 24 * 60 * 60 * 1000
         writableDatabase.execSQL(
@@ -1380,20 +1048,6 @@ writableDatabase.insert("entries", null, ContentValues().apply {
             if (image == null) putNull("image_path") else put("image_path", image)
             put("created_at", createdAt)
         })
-
-        // افزودن به صف outbox جهت همگام‌سازی با سرور دارکوب
-        val aiJson = org.json.JSONObject().apply {
-            put("id", id)
-            put("user_id", userId)
-            put("person_id", personId)
-            put("role", role)
-            put("body", body)
-            if (image != null) put("image_path", image)
-            put("created_at", createdAt)
-        }.toString()
-
-        enqueue("ai_message", aiJson)
-
         return AiMessage(id, personId, role, body, image, createdAt)
     }
 
@@ -1422,9 +1076,7 @@ writableDatabase.insert("entries", null, ContentValues().apply {
     fun addModel(name: String, endpoint: String, modelId: String, apiKey: String, inputCost: Double, outputCost: Double) {
         if (name.isBlank() || modelId.isBlank()) error("نام و شناسه مدل لازم است")
         val id = UUID.randomUUID().toString()
-        val now = System.currentTimeMillis()
         val makeActive = models().none { it.active }
-        
         writableDatabase.insert("ai_models", null, ContentValues().apply {
             put("id", id)
             put("name", name.trim())
@@ -1434,22 +1086,8 @@ writableDatabase.insert("entries", null, ContentValues().apply {
             put("input_cost", inputCost)
             put("output_cost", outputCost)
             put("active", if (makeActive) 1 else 0)
-            put("created_at", now)
+            put("created_at", System.currentTimeMillis())
         })
-        
-        // افزودن به صف outbox جهت همگام‌سازی با سرور
-        val modelJson = org.json.JSONObject().apply {
-            put("id", id)
-            put("name", name.trim())
-            put("endpoint", endpoint.trim().ifBlank { "https://api.openai.com/v1" })
-            put("model_id", modelId.trim())
-            put("api_key", apiKey.trim())
-            put("input_cost", inputCost)
-            put("output_cost", outputCost)
-            put("active", if (makeActive) 1 else 0)
-            put("created_at", now)
-        }.toString()
-        enqueue("ai_model", modelJson)
     }
 
     fun activateModel(id: String) {
@@ -1481,348 +1119,17 @@ writableDatabase.insert("entries", null, ContentValues().apply {
 
     fun publishAnnouncement(title: String, body: String) {
         if (title.isBlank() || body.isBlank()) error("عنوان و متن لازم است")
-        
-        val announcementId = UUID.randomUUID().toString()
-        val now = System.currentTimeMillis()
-        
         writableDatabase.insert("announcements", null, ContentValues().apply {
-            put("id", announcementId)
+            put("id", UUID.randomUUID().toString())
             put("title", title.trim())
             put("body", body.trim())
-            put("created_at", now)
+            put("created_at", System.currentTimeMillis())
         })
         users().forEach { addNotice(it.id, title.trim(), body.trim()) }
-        
-        // افزودن به صف outbox جهت همگام‌سازی با سرور
-        val announcementJson = org.json.JSONObject().apply {
-            put("id", announcementId)
-            put("title", title.trim())
-            put("body", body.trim())
-            put("created_at", now)
-        }.toString()
-        enqueue("announcement", announcementJson)
     }
 
     fun deleteAnnouncement(id: String) {
         writableDatabase.delete("announcements", "id=?", arrayOf(id))
-    }
-
-    // --- تیم‌ها و گفتگوهای گروهی ---
-    
-    fun addTeam(name: String, description: String? = null, creatorId: String, memberIds: List<String>): String {
-        val teamId = UUID.randomUUID().toString()
-        val now = System.currentTimeMillis()
-        
-        // درج تیم
-        writableDatabase.insert("teams", null, ContentValues().apply {
-            put("id", teamId)
-            put("name", name.trim())
-            put("description", description?.trim())
-            put("creator_id", creatorId)
-            put("created_at", now)
-        })
-        
-        // افزودن سازنده به عنوان عضو
-        writableDatabase.insert("team_members", null, ContentValues().apply {
-            put("id", UUID.randomUUID().toString())
-            put("team_id", teamId)
-            put("user_id", creatorId)
-            put("role", "creator")
-            put("joined_at", now)
-        })
-        
-        // افزودن سایر اعضا
-        for (userId in memberIds) {
-            if (userId != creatorId) {  // جلوگیری از تکرار سازنده
-                writableDatabase.insert("team_members", null, ContentValues().apply {
-                    put("id", UUID.randomUUID().toString())
-                    put("team_id", teamId)
-                    put("user_id", userId)
-                    put("role", "member")
-                    put("joined_at", now)
-                })
-            }
-        }
-        
-        return teamId
-    }
-
-    /**
-     * درج یا به‌روزرسانی تیم سرور به صورت «گروه» در جدول people
-     * (با همان شناسه تیم سرور) تا در لیست تیم‌ها و صفحه گفتگو دیده شود.
-     */
-    fun upsertGroupTeam(
-        userId: String,
-        teamId: String,
-        name: String,
-        description: String? = null,
-        members: List<TeamMemberDto> = emptyList(),
-        memberNames: Map<String, String> = emptyMap(),
-        creatorId: String? = null,
-    ) {
-        val exists = readableDatabase.rawQuery(
-            "SELECT 1 FROM people WHERE id=? AND user_id=? LIMIT 1",
-            arrayOf(teamId, userId),
-        ).use { it.moveToFirst() }
-
-        if (exists) {
-            writableDatabase.update(
-                "people",
-                ContentValues().apply {
-                    put("name", name.trim())
-                    put("role", description?.trim() ?: "")
-                    put("is_group", 1)
-                    if (creatorId != null) put("creator_id", creatorId)
-                },
-                "id=? AND user_id=?",
-                arrayOf(teamId, userId),
-            )
-        } else {
-            writableDatabase.insert("people", null, ContentValues().apply {
-                put("id", teamId)
-                put("user_id", userId)
-                put("name", name.trim())
-                put("phone", "")
-                put("role", description?.trim() ?: "")
-                put("pinned", 0)
-                put("created_at", System.currentTimeMillis())
-                putNull("avatar")
-                put("is_group", 1)
-                put("saved", 0)
-                if (creatorId != null) put("creator_id", creatorId)
-            })
-        }
-
-        // درج اعضای برگشتی از سرور (TeamDto.members) در جدول لوکال members
-        // تا بخش «اعضای تیم» و «تعداد اعضا» به‌درستی پر شوند.
-        // شناسه ترکیبی (teamId:memberId) + CONFLICT_IGNORE از درج تکراری در سینک‌های بعدی جلوگیری می‌کند.
-        members.forEach { member ->
-            val memberId = member.userId.trim()
-            if (memberId.isEmpty()) return@forEach
-            val displayName = memberNames[memberId]?.trim()?.takeIf { it.isNotEmpty() } ?: memberId
-            val rowId = "$teamId:$memberId"
-            // اگر عضو از قبل وجود دارد فقط شناسه کاربر تکمیل می‌شود تا ترتیب created_at حفظ شود.
-            val updated = writableDatabase.update(
-                "members",
-                ContentValues().apply { put("user_id", memberId) },
-                "id=?",
-                arrayOf(rowId),
-            )
-            if (updated == 0) {
-                writableDatabase.insertWithOnConflict(
-                    "members",
-                    null,
-                    ContentValues().apply {
-                        put("id", rowId)
-                        put("person_id", teamId)
-                        put("name", displayName)
-                        put("user_id", memberId)
-                        put("created_at", System.currentTimeMillis())
-                    },
-                    SQLiteDatabase.CONFLICT_IGNORE,
-                )
-            }
-        }
-
-        // حذف اعضایی که دیگر روی سرور عضو این تیم نیستند (مثلاً عضو تیم را ترک کرده است)
-        val remoteMemberIds = members.map { it.userId.trim() }.filter { it.isNotEmpty() }.toSet()
-        if (remoteMemberIds.isNotEmpty()) {
-            val placeholders = remoteMemberIds.joinToString(",") { "?" }
-            writableDatabase.delete(
-                "members",
-                "person_id = ? AND user_id IS NOT NULL AND user_id != '' AND user_id NOT IN ($placeholders)",
-                arrayOf(teamId, *remoteMemberIds.toTypedArray()),
-            )
-        }
-    }
-
-    fun getTeams(userId: String): List<TeamInfo> {
-        val query = """
-            SELECT t.id, t.name, t.description, t.creator_id, t.created_at,
-                   (SELECT COUNT(*) FROM team_members WHERE team_id = t.id) as member_count
-            FROM teams t
-            INNER JOIN team_members tm ON t.id = tm.team_id
-            WHERE tm.user_id = ?
-            ORDER BY t.created_at DESC
-        """
-        val cursor = readableDatabase.rawQuery(query, arrayOf(userId))
-        val teams = mutableListOf<TeamInfo>()
-        
-        cursor.use {
-            while (it.moveToNext()) {
-                teams.add(TeamInfo(
-                    id = it.getString(0),
-                    name = it.getString(1),
-                    description = if (it.isNull(2)) null else it.getString(2),
-                    creatorId = it.getString(3),
-                    createdAt = it.getLong(4),
-                    memberCount = it.getInt(5)
-                ))
-            }
-        }
-        
-        return teams
-    }
-    
-    fun getTeamInfo(teamId: String): TeamInfo? {
-        val cursor = readableDatabase.rawQuery(
-            """
-            SELECT t.id, t.name, t.description, t.creator_id, t.created_at,
-                   COUNT(tm.id) as member_count
-            FROM teams t
-            LEFT JOIN team_members tm ON t.id = tm.team_id
-            WHERE t.id = ?
-            GROUP BY t.id
-            """,
-            arrayOf(teamId)
-        )
-        
-        return cursor.use {
-            if (it.moveToFirst()) {
-                TeamInfo(
-                    id = it.getString(0),
-                    name = it.getString(1),
-                    description = if (it.isNull(2)) null else it.getString(2),
-                    creatorId = it.getString(3),
-                    createdAt = it.getLong(4),
-                    memberCount = it.getInt(5)
-                )
-            } else null
-        }
-    }
-    
-    fun getTeamMembers(teamId: String): List<TeamMemberInfo> {
-        val cursor = readableDatabase.rawQuery(
-            "SELECT id, team_id, user_id, role, joined_at FROM team_members WHERE team_id = ? ORDER BY joined_at",
-            arrayOf(teamId)
-        )
-        val members = mutableListOf<TeamMemberInfo>()
-        
-        cursor.use {
-            while (it.moveToNext()) {
-                members.add(TeamMemberInfo(
-                    id = it.getString(0),
-                    teamId = it.getString(1),
-                    userId = it.getString(2),
-                    role = it.getString(3),
-                    joinedAt = it.getLong(4)
-                ))
-            }
-        }
-        
-        return members
-    }
-    
-    fun addTeamMember(teamId: String, userId: String, role: String = "member") {
-        writableDatabase.insert("team_members", null, ContentValues().apply {
-            put("id", UUID.randomUUID().toString())
-            put("team_id", teamId)
-            put("user_id", userId)
-            put("role", role)
-            put("joined_at", System.currentTimeMillis())
-        })
-    }
-    
-    fun deleteTeam(teamId: String) {
-        writableDatabase.beginTransaction()
-        try {
-            writableDatabase.delete("team_members", "team_id = ?", arrayOf(teamId))
-            writableDatabase.delete("teams", "id = ?", arrayOf(teamId))
-            writableDatabase.setTransactionSuccessful()
-        } finally {
-            writableDatabase.endTransaction()
-        }
-    }
-
-    /**
-     * شناسه سازنده یک تیم/گروه (از ستون creator_id جدول people).
-     */
-    fun teamCreatorId(teamId: String): String? {
-        val cursor = readableDatabase.rawQuery("SELECT creator_id FROM people WHERE id=?", arrayOf(teamId))
-        return cursor.use { if (it.moveToFirst()) it.getString(0) else null }
-    }
-
-    /**
-     * شناسه تیم‌های لوکال (گروه‌های) یک کاربر برای تطبیق با لیست سرور.
-     */
-    fun localTeamIds(userId: String): List<String> {
-        val cursor = readableDatabase.rawQuery(
-            "SELECT id FROM people WHERE user_id=? AND is_group=1",
-            arrayOf(userId),
-        )
-        val list = mutableListOf<String>()
-        cursor.use { while (it.moveToNext()) list += it.getString(0) }
-        return list
-    }
-
-    /**
-     * حذف کامل داده‌های لوکال یک تیم/گروه از جداول people، members و entries.
-     * برای «حذف تیم» توسط سازنده و «ترک تیم» توسط عضو استفاده می‌شود.
-     */
-    fun deleteTeamLocally(teamId: String) {
-        writableDatabase.beginTransaction()
-        try {
-            writableDatabase.delete("members", "person_id = ?", arrayOf(teamId))
-            writableDatabase.delete("entries", "person_id = ?", arrayOf(teamId))
-            writableDatabase.delete("people", "id = ?", arrayOf(teamId))
-            writableDatabase.setTransactionSuccessful()
-        } finally {
-            writableDatabase.endTransaction()
-        }
-    }
-    
-    fun removeTeamMember(teamId: String, userId: String) {
-        writableDatabase.delete("team_members", "team_id = ? AND user_id = ?", arrayOf(teamId, userId))
-    }
-
-    // --- پیام‌های درون‌تیمی (Team Messages) ---
-    
-    fun addTeamMessage(teamId: String, senderId: String, content: String): String {
-        val messageId = UUID.randomUUID().toString()
-        val now = System.currentTimeMillis()
-        
-        writableDatabase.insert("team_messages", null, ContentValues().apply {
-            put("id", messageId)
-            put("team_id", teamId)
-            put("sender_id", senderId)
-            put("content", content)
-            put("created_at", now)
-        })
-        
-        return messageId
-    }
-    
-    fun getTeamMessages(teamId: String, limit: Int = 50): List<TeamMessage> {
-        val cursor = readableDatabase.query(
-            "team_messages",
-            arrayOf("id", "team_id", "sender_id", "content", "created_at"),
-            "team_id = ?",
-            arrayOf(teamId),
-            null,
-            null,
-            "created_at ASC",
-            limit.toString()
-        )
-        
-        return cursor.use { c ->
-            val messages = mutableListOf<TeamMessage>()
-            if (c.moveToFirst()) {
-                do {
-                    messages.add(TeamMessage(
-                        id = c.getString(c.getColumnIndexOrThrow("id")),
-                        teamId = c.getString(c.getColumnIndexOrThrow("team_id")),
-                        senderId = c.getString(c.getColumnIndexOrThrow("sender_id")),
-                        content = c.getString(c.getColumnIndexOrThrow("content")),
-                        createdAt = c.getLong(c.getColumnIndexOrThrow("created_at"))
-                    ))
-                } while (c.moveToNext())
-            }
-            messages
-        }
-    }
-    
-    fun clearTeamMessages(teamId: String) {
-        writableDatabase.delete("team_messages", "team_id = ?", arrayOf(teamId))
     }
 
     private fun startOfDay(): Long {
@@ -1832,400 +1139,5 @@ writableDatabase.insert("entries", null, ContentValues().apply {
         calendar.set(Calendar.SECOND, 0)
         calendar.set(Calendar.MILLISECOND, 0)
         return calendar.timeInMillis
-    }
-
-    // --- توکن‌ها و داشبورد مدیریت ---
-
-    fun getTotalTokensUsed(): Long {
-        val cursor = readableDatabase.rawQuery("SELECT COALESCE(SUM(tokens_used), 0) FROM users", null)
-        return cursor.use {
-            if (it.moveToFirst()) it.getLong(0) else 0L
-        }
-    }
-
-    fun incrementUserTokens(userId: String, tokens: Long) {
-        // ۱. بروزرسانی در دیتابیس لوکال
-        writableDatabase.execSQL(
-            "UPDATE users SET tokens_used = tokens_used + ? WHERE id = ?",
-            arrayOf<Any>(tokens, userId)
-        )
-
-        // ۲. افزودن به صف outbox جهت ارسال به سرور
-        val payloadJson = org.json.JSONObject().apply {
-            put("user_id", userId)
-            put("tokens", tokens)
-            put("occurred_at", System.currentTimeMillis())
-        }.toString()
-
-        enqueue("token_usage", payloadJson)
-    }
-
-    fun getUsersAdminList(query: String = "", sortBy: String = "highest_usage", planFilter: String = "all"): List<User> {
-        var sqlQuery = "SELECT id, phone, name, plan, balance, plan_expires_at, suspended, banner_seen, chat_bg, chat_color, avatar, username, monthly_download_count, monthly_ai_usage_count, last_quota_reset_month, tokens_used, created_at FROM users WHERE 1=1"
-        val args = mutableListOf<String>()
-
-        // فیلتر جستجو
-        if (query.isNotBlank()) {
-            sqlQuery += " AND (name LIKE ? OR phone LIKE ? OR id LIKE ?)"
-            val searchPattern = "%${query.trim()}%"
-            args.add(searchPattern)
-            args.add(searchPattern)
-            args.add(searchPattern)
-        }
-
-        // فیلتر پلن
-        if (planFilter != "all") {
-            sqlQuery += " AND plan = ?"
-            args.add(planFilter)
-        }
-
-        // مرتب‌سازی
-        sqlQuery += when (sortBy) {
-            "lowest_usage" -> " ORDER BY tokens_used ASC"
-            "newest" -> " ORDER BY created_at DESC"
-            else -> " ORDER BY tokens_used DESC"  // highest_usage (پیش‌فرض)
-        }
-
-        val cursor = readableDatabase.rawQuery(sqlQuery, if (args.isEmpty()) null else args.toTypedArray())
-        val users = mutableListOf<User>()
-
-        cursor.use {
-            while (it.moveToNext()) {
-                // استفاده از getColumnIndex برای بهبود امنیت
-                val idIdx = it.getColumnIndex("id")
-                val phoneIdx = it.getColumnIndex("phone")
-                val nameIdx = it.getColumnIndex("name")
-                val planIdx = it.getColumnIndex("plan")
-                val balanceIdx = it.getColumnIndex("balance")
-                val expiresIdx = it.getColumnIndex("plan_expires_at")
-                val suspendedIdx = it.getColumnIndex("suspended")
-                val bannerSeenIdx = it.getColumnIndex("banner_seen")
-                val chatBgIdx = it.getColumnIndex("chat_bg")
-                val chatColorIdx = it.getColumnIndex("chat_color")
-                val avatarIdx = it.getColumnIndex("avatar")
-                val usernameIdx = it.getColumnIndex("username")
-                val monthlyDownloadIdx = it.getColumnIndex("monthly_download_count")
-                val monthlyAiUsageIdx = it.getColumnIndex("monthly_ai_usage_count")
-                val quotaResetIdx = it.getColumnIndex("last_quota_reset_month")
-                val tokensUsedIdx = it.getColumnIndex("tokens_used")
-                val createdAtIdx = it.getColumnIndex("created_at")
-                
-                val rawPlan = it.getString(planIdx) ?: "free"
-                val expires = if (it.isNull(expiresIdx)) null else it.getLong(expiresIdx)
-                val isExpired = expires != null && expires < System.currentTimeMillis()
-
-                val plan = when {
-                    isExpired && rawPlan == "guest" -> "expired_guest"
-                    isExpired -> "free"
-                    else -> rawPlan
-                }
-
-                val user = User(
-                    id = it.getString(idIdx),
-                    phone = it.getString(phoneIdx) ?: "",
-                    name = it.getString(nameIdx) ?: "",
-                    plan = plan,
-                    balance = it.getInt(balanceIdx),
-                    planExpiresAt = expires,
-                    suspended = it.getInt(suspendedIdx) == 1,
-                    bannerSeen = it.getInt(bannerSeenIdx) == 1,
-                    chatBg = if (it.isNull(chatBgIdx)) null else it.getString(chatBgIdx),
-                    chatColor = if (it.isNull(chatColorIdx)) null else it.getString(chatColorIdx),
-                    avatar = if (it.isNull(avatarIdx)) null else it.getString(avatarIdx),
-                    username = if (it.isNull(usernameIdx)) null else it.getString(usernameIdx),
-                    monthlyDownloadCount = it.getInt(monthlyDownloadIdx),
-                    monthlyAiUsageCount = it.getInt(monthlyAiUsageIdx),
-                    lastQuotaResetMonth = if (it.isNull(quotaResetIdx)) null else it.getString(quotaResetIdx),
-                    tokensUsed = if (it.isNull(tokensUsedIdx)) 0L else it.getLong(tokensUsedIdx),
-                    createdAt = if (it.isNull(createdAtIdx)) System.currentTimeMillis() else it.getLong(createdAtIdx),
-                )
-                users.add(user)
-            }
-        }
-
-        return users
-    }
-
-    /**
-     * سرور سے دریافتی پروفائل ڈیٹا کو لوکال SQLite میں اپڈیٹ کریں
-     * یہ method Cache clear ہونے کے بعد subscription plan کو دوبارہ restore کرتا ہے
-     */
-    fun updateUserProfileFromServer(profile: UserProfileDto) {
-        // فقط ستون‌های پروفایل را UPDATE می‌کنیم تا داده‌های محلی
-        // (avatar, chat_bg, chat_color, banner_seen, quota, ...) پاک نشوند.
-        val cv = ContentValues().apply {
-            put("phone", profile.phone)
-            put("name", profile.name)
-            put("username", profile.username)
-            put("plan", profile.plan)
-            put("balance", profile.balance)
-            put("plan_expires_at", profile.planExpiresAt ?: 0L)
-            put("suspended", if (profile.suspended) 1 else 0)
-            // --- فیلدهای Cloud-Driven ---
-            if (profile.planPurchasedAt == null) putNull("plan_purchased_at") else put("plan_purchased_at", profile.planPurchasedAt)
-            if (profile.aiProvider == null) putNull("ai_provider") else put("ai_provider", profile.aiProvider)
-            if (profile.aiModelName == null) putNull("ai_model_name") else put("ai_model_name", profile.aiModelName)
-            if (profile.aiApiKey == null) putNull("ai_api_key") else put("ai_api_key", profile.aiApiKey)
-        }
-        val updated = writableDatabase.update("users", cv, "id = ?", arrayOf(profile.userId))
-        if (updated == 0) {
-            // اگر رکورد کاربر به‌صورت لوکال وجود نداشت، یک رکورد پایه می‌سازیم.
-            val insertCv = ContentValues(cv).apply {
-                put("id", profile.userId)
-                put("created_at", System.currentTimeMillis())
-            }
-            writableDatabase.insertWithOnConflict("users", null, insertCv, SQLiteDatabase.CONFLICT_REPLACE)
-        }
-    }
-
-    /**
-     * به‌روزرسانی مستقیم پلن کاربر در دیتابیس لوکال
-     * (پس از تأیید سرور، برای اعمال فوری در همان سشن).
-     */
-    fun setUserPlan(userId: String, plan: String, planExpiresAt: Long?) {
-        writableDatabase.update(
-            "users",
-            ContentValues().apply {
-                put("plan", plan)
-                put("plan_expires_at", planExpiresAt ?: 0L)
-                put("plan_purchased_at", System.currentTimeMillis())
-            },
-            "id = ?",
-            arrayOf(userId),
-        )
-    }
-
-    /**
-     * ذخیرهٔ تنظیمات هوش مصنوعی کاربر (مدل/پرووایدر/کلید) در دیتابیس محلی.
-     * متناظر با اندپوینت PUT /api/v1/users/{user_id}/ai-config در سرور.
-     */
-    fun setUserAiConfig(userId: String, provider: String?, modelName: String?, apiKey: String?) {
-        writableDatabase.update(
-            "users",
-            ContentValues().apply {
-                if (provider == null) putNull("ai_provider") else put("ai_provider", provider)
-                if (modelName == null) putNull("ai_model_name") else put("ai_model_name", modelName)
-                if (apiKey == null) putNull("ai_api_key") else put("ai_api_key", apiKey)
-            },
-            "id = ?",
-            arrayOf(userId),
-        )
-    }
-
-    /**
-     * آیا هیچ گفتگو/پیامی برای این کاربر به صورت محلی وجود ندارد؟
-     * برای تشخیص نیاز به «سینک اولیهٔ کامل» پس از نصب مجدد / پاک‌شدن کش استفاده می‌شود.
-     */
-    fun isLocalDataEmpty(userId: String): Boolean {
-        val hasPeople = readableDatabase.rawQuery(
-            "SELECT 1 FROM people WHERE user_id=? LIMIT 1",
-            arrayOf(userId),
-        ).use { it.moveToFirst() }
-        if (hasPeople) return false
-        val hasEntries = readableDatabase.rawQuery(
-            "SELECT 1 FROM entries WHERE user_id=? LIMIT 1",
-            arrayOf(userId),
-        ).use { it.moveToFirst() }
-        return !hasEntries
-    }
-
-    /**
-     * درج/به‌روزرسانی گروهی مخاطبین دریافتی از سرور در یک Transaction واحد.
-     * استفاده از یک تراکنش برای جلوگیری از کندی/فریز در حجم بالا.
-     */
-    fun upsertPeopleLocally(userId: String, people: List<SyncPersonItem>) {
-        if (people.isEmpty()) return
-        val db = writableDatabase
-        db.beginTransaction()
-        try {
-            people.forEach { p ->
-                val exists = db.rawQuery("SELECT 1 FROM people WHERE id=? LIMIT 1", arrayOf(p.id))
-                    .use { it.moveToFirst() }
-                val cv = ContentValues().apply {
-                    put("user_id", userId)
-                    put("name", p.name)
-                    put("phone", p.phone ?: "")
-                    put("role", p.role ?: "")
-                    put("pinned", if (p.pinned) 1 else 0)
-                    put("is_group", if (p.isGroup) 1 else 0)
-                    put("saved", if (p.saved) 1 else 0)
-                    if (p.avatar == null) putNull("avatar") else put("avatar", p.avatar)
-                }
-                if (exists) {
-                    // فقط ستون‌های سروری به‌روزرسانی می‌شوند تا creator_id و سایر داده‌های محلی حفظ گردند
-                    db.update("people", cv, "id=?", arrayOf(p.id))
-                } else {
-                    cv.put("id", p.id)
-                    cv.put("created_at", p.createdAt)
-                    db.insertWithOnConflict("people", null, cv, SQLiteDatabase.CONFLICT_IGNORE)
-                }
-            }
-            db.setTransactionSuccessful()
-        } finally {
-            db.endTransaction()
-        }
-    }
-
-    /**
-     * درج/به‌روزرسانی گروهی پیام‌ها و یادداشت‌های دریافتی از سرور در یک Transaction واحد.
-     * استفاده از یک تراکنش برای جلوگیری از کندی/فریز در حجم بالا.
-     */
-    fun upsertEntriesLocally(userId: String, entries: List<SyncEntryItem>) {
-        if (entries.isEmpty()) return
-        val db = writableDatabase
-        db.beginTransaction()
-        try {
-            val now = System.currentTimeMillis()
-            entries.forEach { e ->
-                val exists = db.rawQuery("SELECT 1 FROM entries WHERE id=? LIMIT 1", arrayOf(e.id))
-                    .use { it.moveToFirst() }
-                val cv = ContentValues().apply {
-                    put("user_id", userId)
-                    put("person_id", e.personId)
-                    put("body", e.body)
-                    put("kind", e.kind)
-                    put("channel", e.channel)
-                    put("occurred_at", e.occurredAt)
-                    put("updated_at", now)
-                    if (e.voicePath == null) putNull("voice_path") else put("voice_path", e.voicePath)
-                    if (e.mediaPath == null) putNull("media_path") else put("media_path", e.mediaPath)
-                    if (e.memberId == null) putNull("member_id") else put("member_id", e.memberId)
-                    if (e.targetRecipientId == null) putNull("target_recipient_id") else put("target_recipient_id", e.targetRecipientId)
-                }
-                if (exists) {
-                    db.update("entries", cv, "id=?", arrayOf(e.id))
-                } else {
-                    cv.put("id", e.id)
-                    cv.put("created_at", if (e.occurredAt > 0) e.occurredAt else now)
-                    db.insertWithOnConflict("entries", null, cv, SQLiteDatabase.CONFLICT_IGNORE)
-                }
-            }
-            db.setTransactionSuccessful()
-        } finally {
-            db.endTransaction()
-        }
-    }
-
-    /**
-     * درج/به‌روزرسانی گروهی پیام‌های پشتیبانی دریافتی از سرور در یک Transaction واحد.
-     * با پاک‌شدن کش/نصب مجدد، پیام‌های پشتیبانی نیز از سرور بازیابی می‌شوند.
-     */
-    fun upsertSupportMessagesLocally(userId: String, messages: List<SyncSupportMessageItem>) {
-        if (messages.isEmpty()) return
-        val db = writableDatabase
-        db.beginTransaction()
-        try {
-            messages.forEach { m ->
-                val exists = db.rawQuery("SELECT 1 FROM support_messages WHERE id=? LIMIT 1", arrayOf(m.id))
-                    .use { it.moveToFirst() }
-                val cv = ContentValues().apply {
-                    put("user_id", if (m.userId.isNotBlank()) m.userId else userId)
-                    put("from_admin", if (m.fromAdmin) 1 else 0)
-                    put("body", m.body)
-                    put("kind", m.kind)
-                    if (m.path == null) putNull("path") else put("path", m.path)
-                    put("read_admin", if (m.readAdmin) 1 else 0)
-                    put("read_user", if (m.readUser) 1 else 0)
-                    put("created_at", m.createdAt)
-                }
-                if (exists) {
-                    db.update("support_messages", cv, "id=?", arrayOf(m.id))
-                } else {
-                    cv.put("id", m.id)
-                    db.insertWithOnConflict("support_messages", null, cv, SQLiteDatabase.CONFLICT_IGNORE)
-                }
-            }
-            db.setTransactionSuccessful()
-        } finally {
-            db.endTransaction()
-        }
-    }
-
-    /**
-     * بکفیل یکبارهٔ سرور: تمام مخاطبین و پیام‌های موجود در SQLite محلی را همراه با `user_id` صحیح
-     * در صف outbox قرار می‌دهد تا رکوردهای یتیمِ قبلی (که بدون مالک روی PostgreSQL ثبت شده بودند)
-     * اصلاح شوند. کل درج در یک Transaction انجام و در انتها فقط یک درخواست Sync صف می‌شود.
-     *
-     * @return تعداد رکوردهای صف‌شده
-     */
-    fun backfillOutboxForUser(userId: String): Int {
-        if (userId.isBlank()) return 0
-        val db = writableDatabase
-        val now = System.currentTimeMillis()
-        var queued = 0
-        db.beginTransaction()
-        try {
-            // ۱. مخاطبین/پرونده‌ها
-            db.rawQuery(
-                "SELECT id, name, phone, role, pinned, avatar, is_group, saved, created_at FROM people WHERE user_id=?",
-                arrayOf(userId),
-            ).use { c ->
-                while (c.moveToNext()) {
-                    val payload = org.json.JSONObject().apply {
-                        put("id", c.getString(0))
-                        put("user_id", userId)
-                        put("name", c.getString(1) ?: "")
-                        c.getString(2)?.let { put("phone", it) }
-                        c.getString(3)?.let { put("role", it) }
-                        put("pinned", c.getInt(4) == 1)
-                        c.getString(5)?.let { put("avatar", it) }
-                        put("is_group", c.getInt(6) == 1)
-                        put("saved", c.getInt(7) == 1)
-                        put("created_at", c.getLong(8))
-                    }.toString()
-                    insertOutboxRaw(db, "person", payload, now)
-                    queued++
-                }
-            }
-            // ۲. پیام‌ها/یادداشت‌ها
-            db.rawQuery(
-                "SELECT id, person_id, body, kind, channel, occurred_at, voice_path, media_path, member_id, target_recipient_id FROM entries WHERE user_id=?",
-                arrayOf(userId),
-            ).use { c ->
-                while (c.moveToNext()) {
-                    val payload = org.json.JSONObject().apply {
-                        put("id", c.getString(0))
-                        put("person_id", c.getString(1))
-                        put("user_id", userId)
-                        put("body", c.getString(2) ?: "")
-                        put("kind", c.getString(3) ?: "text")
-                        put("channel", c.getString(4) ?: "manual")
-                        put("occurred_at", c.getLong(5))
-                        c.getString(6)?.let { put("voice_path", it) }
-                        c.getString(7)?.let { put("media_path", it) }
-                        c.getString(8)?.let { put("member_id", it) }
-                        c.getString(9)?.let { put("target_recipient_id", it) }
-                    }.toString()
-                    insertOutboxRaw(db, "entry", payload, now)
-                    queued++
-                }
-            }
-            db.setTransactionSuccessful()
-        } finally {
-            db.endTransaction()
-        }
-        // یک درخواست همگام‌سازی واحد برای کل رکوردهای صف‌شده
-        if (queued > 0) {
-            try {
-                val immediateSync = androidx.work.OneTimeWorkRequestBuilder<SyncWorker>().build()
-                androidx.work.WorkManager.getInstance(context).enqueue(immediateSync)
-            } catch (_: Exception) {}
-        }
-        return queued
-    }
-
-    /** درج خام در outbox بدون صف‌کردن سینک (برای استفادهٔ گروهی در یک Transaction). */
-    private fun insertOutboxRaw(db: SQLiteDatabase, kind: String, payload: String, now: Long) {
-        db.insertWithOnConflict(
-            "outbox",
-            null,
-            ContentValues().apply {
-                put("id", UUID.randomUUID().toString())
-                put("kind", kind)
-                put("payload", payload)
-                put("created_at", now)
-            },
-            SQLiteDatabase.CONFLICT_IGNORE,
-        )
     }
 }
