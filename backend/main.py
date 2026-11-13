@@ -134,6 +134,7 @@ class AiModel(Base):
     api_key = Column(String)
     input_cost = Column(Float)
     output_cost = Column(Float)
+    system_prompt = Column(Text, nullable=True, default="")
     active = Column(Boolean, default=False)
     created_at = Column(BigInteger)
 
@@ -286,6 +287,7 @@ def init_db():
             );
         """,
         "ALTER TABLE team_messages ADD COLUMN IF NOT EXISTS recipient_id VARCHAR(64);",
+        "ALTER TABLE ai_models ADD COLUMN IF NOT EXISTS system_prompt TEXT DEFAULT '';",
         "CREATE INDEX IF NOT EXISTS idx_team_messages_team_id ON team_messages(team_id);",
         "CREATE INDEX IF NOT EXISTS idx_team_messages_created_at ON team_messages(created_at);",
     ]

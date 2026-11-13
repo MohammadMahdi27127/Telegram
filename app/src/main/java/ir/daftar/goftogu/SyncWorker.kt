@@ -113,6 +113,7 @@ class SyncWorker(
                                 apiKey = json.getString("api_key"),
                                 inputCost = json.getDouble("input_cost").toFloat(),
                                 outputCost = json.getDouble("output_cost").toFloat(),
+                                systemPrompt = json.optString("system_prompt", ""),
                                 active = json.getBoolean("active")
                             )
                         )

@@ -172,7 +172,7 @@ class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", 
         )
         db.execSQL("CREATE TABLE notices (id TEXT PRIMARY KEY, user_id TEXT, title TEXT, body TEXT, read INTEGER, created_at INTEGER)")
         db.execSQL("CREATE TABLE banners (id TEXT PRIMARY KEY, title TEXT NOT NULL, body TEXT NOT NULL, image TEXT, active INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL)")
-        db.execSQL("CREATE TABLE ai_models (id TEXT PRIMARY KEY, name TEXT, endpoint TEXT, model_id TEXT, api_key TEXT, input_cost REAL, output_cost REAL, active INTEGER NOT NULL DEFAULT 0, created_at INTEGER)")
+        db.execSQL("CREATE TABLE ai_models (id TEXT PRIMARY KEY, name TEXT, endpoint TEXT, model_id TEXT, api_key TEXT, input_cost REAL, output_cost REAL, system_prompt TEXT DEFAULT '', active INTEGER NOT NULL DEFAULT 0, created_at INTEGER)")
         db.execSQL("CREATE TABLE announcements (id TEXT PRIMARY KEY, title TEXT, body TEXT, created_at INTEGER)")
         db.execSQL("CREATE TABLE slips (id TEXT PRIMARY KEY, user_id TEXT, kind TEXT, plan TEXT, amount INTEGER, status TEXT, receipt TEXT, ref_code TEXT, created_at INTEGER)")
         db.execSQL("ALTER TABLE entries ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0")
@@ -218,13 +218,14 @@ class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", 
         if ("monthly_ai_usage_count" !in columns) db.execSQL("ALTER TABLE users ADD COLUMN monthly_ai_usage_count INTEGER NOT NULL DEFAULT 0")
         if ("last_quota_reset_month" !in columns) db.execSQL("ALTER TABLE users ADD COLUMN last_quota_reset_month TEXT")
         if ("tokens_used" !in columns) db.execSQL("ALTER TABLE users ADD COLUMN tokens_used INTEGER NOT NULL DEFAULT 0")
-        db.execSQL("CREATE TABLE IF NOT EXISTS ai_models (id TEXT PRIMARY KEY, name TEXT, endpoint TEXT, model_id TEXT, api_key TEXT, input_cost REAL, output_cost REAL, active INTEGER NOT NULL DEFAULT 0, created_at INTEGER)")
+        db.execSQL("CREATE TABLE IF NOT EXISTS ai_models (id TEXT PRIMARY KEY, name TEXT, endpoint TEXT, model_id TEXT, api_key TEXT, input_cost REAL, output_cost REAL, system_prompt TEXT DEFAULT '', active INTEGER NOT NULL DEFAULT 0, created_at INTEGER)")
         val modelColumns = db.rawQuery("PRAGMA table_info(ai_models)", null).use {
             val names = mutableListOf<String>()
             while (it.moveToNext()) names += it.getString(1)
             names
         }
         if ("active" !in modelColumns) db.execSQL("ALTER TABLE ai_models ADD COLUMN active INTEGER NOT NULL DEFAULT 0")
+        if ("system_prompt" !in modelColumns) db.execSQL("ALTER TABLE ai_models ADD COLUMN system_prompt TEXT DEFAULT ''")
         val activeCount = db.rawQuery("SELECT COUNT(*) FROM ai_models WHERE active=1", null).use { if (it.moveToFirst()) it.getInt(0) else 0 }
         if (activeCount == 0) db.execSQL("UPDATE ai_models SET active=1 WHERE id=(SELECT id FROM ai_models ORDER BY created_at DESC LIMIT 1)")
         db.execSQL("CREATE TABLE IF NOT EXISTS announcements (id TEXT PRIMARY KEY, title TEXT, body TEXT, created_at INTEGER)")
@@ -276,6 +277,15 @@ class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", 
             }
             if ("tokens_used" !in columns) {
                 db.execSQL("ALTER TABLE users ADD COLUMN tokens_used INTEGER NOT NULL DEFAULT 0")
+            }
+            
+            val modelColumns = db.rawQuery("PRAGMA table_info(ai_models)", null).use { cursor ->
+                val list = mutableListOf<String>()
+                while (cursor.moveToNext()) list.add(cursor.getString(1))
+                list
+            }
+            if ("system_prompt" !in modelColumns) {
+                db.execSQL("ALTER TABLE ai_models ADD COLUMN system_prompt TEXT DEFAULT ''")
             }
         } catch (_: Exception) {}
         // اطمینان از وجود جدول team_messages برای نصب‌های قدیمی (بدون نیاز به Clear Data)
@@ -1181,9 +1191,9 @@ class Db(private val context: Context) : SQLiteOpenHelper(context, "daftar.db", 
                            WHERE team_id = p.id AND (recipient_id IS NULL OR recipient_id = ? OR sender_id = ?)
                        ) ORDER BY ts DESC LIMIT 1)
                FROM people p
-               WHERE p.user_id = ? AND p.is_group = 1
+               WHERE p.is_group = 1 AND (p.user_id = ? OR p.user_id IS NULL OR p.user_id = '')
                ORDER BY created_at DESC""",
-            arrayOf(userId, userId, userId, userId)
+            arrayOf(userId, userId, userId, userId, userId)
         )
         val list = mutableListOf<Team>()
         cursor.use {
@@ -1514,15 +1524,38 @@ writableDatabase.insert("entries", null, ContentValues().apply {
         writableDatabase.update("users", ContentValues().apply { put("suspended", if (suspended) 1 else 0) }, "id=?", arrayOf(id))
     }
 
-    data class AiModel(val id: String, val name: String, val endpoint: String, val modelId: String, val apiKey: String, val inputCost: Double, val outputCost: Double, val active: Boolean)
+    data class AiModel(val id: String, val name: String, val endpoint: String, val modelId: String, val apiKey: String, val inputCost: Double, val outputCost: Double, val systemPrompt: String = "", val active: Boolean, val createdAt: Long)
 
-    fun models(): List<AiModel> = readableDatabase.rawQuery("SELECT id, name, endpoint, model_id, api_key, input_cost, output_cost, active FROM ai_models ORDER BY created_at DESC", null).use {
+    fun models(): List<AiModel> = readableDatabase.rawQuery("SELECT id, name, endpoint, model_id, api_key, input_cost, output_cost, system_prompt, active, created_at FROM ai_models ORDER BY created_at DESC", null).use {
         val list = mutableListOf<AiModel>()
-        while (it.moveToNext()) list += AiModel(it.getString(0), it.getString(1), it.getString(2), it.getString(3), it.getString(4), it.getDouble(5), it.getDouble(6), it.getInt(7) == 1)
+        while (it.moveToNext()) list += AiModel(it.getString(0), it.getString(1), it.getString(2), it.getString(3), it.getString(4), it.getDouble(5), it.getDouble(6), it.getString(7) ?: "", it.getInt(8) == 1, it.getLong(9))
         list
     }
 
     fun activeModel(): AiModel? = models().firstOrNull { it.active } ?: models().firstOrNull()
+
+    fun updateActiveModelSystemPrompt(prompt: String) {
+        val active = activeModel() ?: return
+        val db = writableDatabase
+        db.update("ai_models", ContentValues().apply { put("system_prompt", prompt) }, "id=?", arrayOf(active.id))
+        
+        // بلافاصله اطلاعات کامل مدل فعال را در صف outbox می‌گذاریم
+        val payload = org.json.JSONObject().apply {
+            put("id", active.id)
+            put("name", active.name)
+            put("endpoint", active.endpoint)
+            put("model_id", active.modelId)
+            put("api_key", active.apiKey)
+            put("input_cost", active.inputCost)
+            put("output_cost", active.outputCost)
+            put("system_prompt", prompt)
+            put("active", true)
+            put("created_at", active.createdAt)
+        }.toString()
+        enqueue("ai_model", payload)
+    }
+
+    fun getActiveSystemPrompt(): String = activeModel()?.systemPrompt ?: ""
 
     fun aiMessages(userId: String, personId: String): List<AiMessage> = readableDatabase.rawQuery(
         "SELECT id, person_id, role, body, image_path, created_at FROM ai_messages WHERE user_id=? AND person_id=? ORDER BY created_at",
@@ -1585,7 +1618,7 @@ writableDatabase.insert("entries", null, ContentValues().apply {
         addModel("Gemma 4 31B", "https://openrouter.ai/api/v1", "google/gemma-4-31b-it:free", key, 0.0, 0.0)
     }
 
-    fun addModel(name: String, endpoint: String, modelId: String, apiKey: String, inputCost: Double, outputCost: Double) {
+    fun addModel(name: String, endpoint: String, modelId: String, apiKey: String, inputCost: Double, outputCost: Double, systemPrompt: String = "") {
         if (name.isBlank() || modelId.isBlank()) error("نام و شناسه مدل لازم است")
         val id = UUID.randomUUID().toString()
         val now = System.currentTimeMillis()
@@ -1599,6 +1632,7 @@ writableDatabase.insert("entries", null, ContentValues().apply {
             put("api_key", apiKey.trim())
             put("input_cost", inputCost)
             put("output_cost", outputCost)
+            put("system_prompt", systemPrompt)
             put("active", if (makeActive) 1 else 0)
             put("created_at", now)
         })
@@ -1612,6 +1646,7 @@ writableDatabase.insert("entries", null, ContentValues().apply {
             put("api_key", apiKey.trim())
             put("input_cost", inputCost)
             put("output_cost", outputCost)
+            put("system_prompt", systemPrompt)
             put("active", if (makeActive) 1 else 0)
             put("created_at", now)
         }.toString()
@@ -1628,6 +1663,23 @@ writableDatabase.insert("entries", null, ContentValues().apply {
         } finally {
             db.endTransaction()
         }
+
+        // افزودن به صف outbox جهت همگام‌سازی وضعیت فعال‌سازی با سرور
+        models().firstOrNull { it.id == id }?.let { model ->
+            val modelJson = org.json.JSONObject().apply {
+                put("id", model.id)
+                put("name", model.name)
+                put("endpoint", model.endpoint)
+                put("model_id", model.modelId)
+                put("api_key", model.apiKey)
+                put("input_cost", model.inputCost)
+                put("output_cost", model.outputCost)
+                put("system_prompt", model.systemPrompt)
+                put("active", true)
+                put("created_at", model.createdAt)
+            }.toString()
+            enqueue("ai_model", modelJson)
+        }
     }
 
     /**
@@ -1635,39 +1687,51 @@ writableDatabase.insert("entries", null, ContentValues().apply {
      * اگر مدلی با همان model_id از قبل موجود باشد فقط فعال می‌شود؛ در غیر این صورت سطر جدیدی
      * ساخته و به‌عنوان مدل فعال ست می‌شود. چون منبع این تنظیم سرور است، به outbox ارسال نمی‌شود.
      */
-    fun ensureServerAiModel(provider: String, modelName: String, endpoint: String?) {
+    fun ensureServerAiModel(provider: String, modelName: String, endpoint: String?, apiKey: String? = null, systemPrompt: String? = null) {
         val cleanModel = modelName.trim()
         if (cleanModel.isBlank()) return
-
-        val existing = models().firstOrNull { it.modelId.equals(cleanModel, ignoreCase = true) }
-        if (existing != null) {
-            if (!existing.active) activateModel(existing.id)
-            return
-        }
 
         val resolvedEndpoint = endpoint?.trim().takeUnless { it.isNullOrBlank() }
             ?: models().firstOrNull()?.endpoint?.takeIf { it.isNotBlank() }
             ?: "https://openrouter.ai/api/v1"
-        val apiKey = models().firstOrNull { it.apiKey.isNotBlank() }?.apiKey
+        
+        val resolvedKey = apiKey?.trim().takeUnless { it.isNullOrBlank() }
+            ?: models().firstOrNull { it.apiKey.isNotBlank() }?.apiKey
             ?: BuildConfig.OPENROUTER_KEY.trim()
-        if (apiKey.isBlank()) return
+        
+        if (resolvedKey.isBlank()) return
 
-        val newId = "server:${provider.trim().ifBlank { "openrouter" }}:$cleanModel"
         val db = writableDatabase
         db.beginTransaction()
         try {
+            // غیرفعال کردن تمام مدل‌های فعلی
             db.execSQL("UPDATE ai_models SET active=0")
-            db.insertWithOnConflict("ai_models", null, ContentValues().apply {
-                put("id", newId)
-                put("name", cleanModel)
-                put("endpoint", resolvedEndpoint)
-                put("model_id", cleanModel)
-                put("api_key", apiKey)
-                put("input_cost", 0.0)
-                put("output_cost", 0.0)
-                put("active", 1)
-                put("created_at", System.currentTimeMillis())
-            }, SQLiteDatabase.CONFLICT_REPLACE)
+            
+            val existing = models().firstOrNull { it.modelId.equals(cleanModel, ignoreCase = true) }
+            if (existing != null) {
+                // بروزرسانی مدل موجود با اطلاعات جدید سرور (شامل کلید و اندپوینت)
+                db.update("ai_models", ContentValues().apply {
+                    put("endpoint", resolvedEndpoint)
+                    put("api_key", resolvedKey)
+                    if (systemPrompt != null) put("system_prompt", systemPrompt)
+                    put("active", 1)
+                }, "id=?", arrayOf(existing.id))
+            } else {
+                // درج مدل جدید سرور
+                val newId = "server:${provider.trim().ifBlank { "openrouter" }}:$cleanModel"
+                db.insertWithOnConflict("ai_models", null, ContentValues().apply {
+                    put("id", newId)
+                    put("name", cleanModel)
+                    put("endpoint", resolvedEndpoint)
+                    put("model_id", cleanModel)
+                    put("api_key", resolvedKey)
+                    put("input_cost", 0.0)
+                    put("output_cost", 0.0)
+                    put("system_prompt", systemPrompt ?: "")
+                    put("active", 1)
+                    put("created_at", System.currentTimeMillis())
+                }, SQLiteDatabase.CONFLICT_REPLACE)
+            }
             db.setTransactionSuccessful()
         } finally {
             db.endTransaction()
@@ -1957,7 +2021,7 @@ writableDatabase.insert("entries", null, ContentValues().apply {
      */
     fun localTeamIds(userId: String): List<String> {
         val cursor = readableDatabase.rawQuery(
-            "SELECT id FROM people WHERE user_id=? AND is_group=1",
+            "SELECT id FROM people WHERE is_group=1 AND (user_id=? OR user_id IS NULL OR user_id='')",
             arrayOf(userId),
         )
         val list = mutableListOf<String>()

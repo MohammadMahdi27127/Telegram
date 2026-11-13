@@ -1,6 +1,9 @@
 package ir.daftar.goftogu
 
 import android.content.Intent
+import android.content.Context
+import android.content.ClipboardManager
+import android.content.ClipData
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
@@ -73,8 +76,12 @@ import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -114,6 +121,10 @@ import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.TableChart
+import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material.icons.filled.SettingsSuggest
+import androidx.compose.material.icons.filled.CloudUpload
+import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Groups
@@ -169,6 +180,8 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.Divider
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.FilterChip
@@ -193,7 +206,13 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material.icons.rounded.Groups
+import androidx.compose.material.icons.rounded.Badge
+import androidx.compose.material.icons.rounded.Notes
+import androidx.compose.material.icons.rounded.PersonSearch
+import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -225,6 +244,8 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.window.Dialog
@@ -250,7 +271,6 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
@@ -561,29 +581,28 @@ fun BottomBar(route: String, avatar: String?, name: String, hasStar: Boolean = f
     ) {
         Surface(
             modifier = Modifier.fillMaxWidth(),
-            color = if (palette.dark) {
-                Color.Black.copy(alpha = 0.05f)
-            } else {
-                palette.surface.copy(alpha = 0.05f)
-            },
+            color = Color.Transparent,
             shadowElevation = 0.dp,
         ) {
             Box(
                 Modifier
                     .fillMaxWidth()
                     .background(Color.Transparent)
-                    .padding(bottom = 16.dp, start = 16.dp, end = 16.dp),
+                    .windowInsetsPadding(WindowInsets.navigationBars)
+                    .padding(bottom = 16.dp, start = 24.dp, end = 24.dp),
             ) {
                 Row(
                     Modifier
                         .fillMaxWidth()
                         .height(68.dp)
-                        .shadow(
-                            8.dp,
-                            CircleShape,
+                        .shadow(8.dp, CircleShape)
+                        .background(if (palette.dark) palette.surface else Color.White, CircleShape)
+                        .border(
+                            1.dp,
+                            if (palette.dark) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.08f),
+                            CircleShape
                         )
-                        .clip(CircleShape)
-                        .background(if (palette.dark) palette.surface else Color.White),
+                        .clip(CircleShape),
                 ) {
                     BoxWithConstraints(Modifier.fillMaxSize().padding(horizontal = 6.dp)) {
                         val segmentWidth = maxWidth / items.size
@@ -801,8 +820,8 @@ fun TeamsScreen(
     } else {
         Scaffold(
             containerColor = palette.bg,
-            // در چیدمان RTL، FabPosition.Start در سمت راست صفحه رندر می‌شود (هم‌راستا با FAB صفحه چت‌ها)
-            floatingActionButtonPosition = FabPosition.Start,
+            // در چیدمان RTL، FabPosition.End در سمت چپ فیزیکی صفحه رندر می‌شود (خواسته UI)
+            floatingActionButtonPosition = FabPosition.End,
             floatingActionButton = {
                 // دکمه ساخت تیم فقط برای کاربران دارای پلن معتبر نمایش داده می‌شود
                 if (hasTeamAccess) {
@@ -812,7 +831,7 @@ fun TeamsScreen(
                         contentColor = Color.White,
                         shape = CircleShape,
                         modifier = Modifier
-                            .padding(bottom = 80.dp, start = 16.dp)
+                            .padding(bottom = 16.dp, end = 16.dp)
                             .shadow(6.dp, CircleShape)
                     ) {
                         Icon(Icons.Filled.Add, "ایجاد تیم جدید")
@@ -833,7 +852,10 @@ fun TeamsScreen(
                     onRefresh = { scope.launch { fetchTeams() } },
                     modifier = Modifier.weight(1f).fillMaxWidth()
                 ) {
-                    LazyColumn(Modifier.fillMaxSize()) {
+                    LazyColumn(
+                        Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(bottom = 100.dp)
+                    ) {
                         if (teams.isEmpty()) {
                             item {
                                 Box(Modifier.fillParentMaxSize(), contentAlignment = Alignment.Center) {
@@ -879,6 +901,8 @@ fun TeamsScreen(
         if (creating) {
             AddTeamSheet(app, userId, onClose = { creating = false }, onSaved = {
                 creating = false
+                // بازخوانی فوری از دیتابیس لوکال تا تیم تازه‌ساخته‌شده بدون انتظار برای شبکه/ریسپانس نمایش داده شود.
+                teams = app.db.teams(userId)
                 scope.launch { fetchTeams() }
             })
         }
@@ -1038,59 +1062,136 @@ fun AddTeamSheet(app: App, userId: String, onClose: () -> Unit, onSaved: () -> U
         }
     }
 
-    ModalBottomSheet(onDismissRequest = onClose, containerColor = card, scrimColor = Color.Black.copy(alpha = 0.32f)) {
-        Column(Modifier.fillMaxWidth().padding(24.dp).padding(bottom = 24.dp)) {
-            Text("ایجاد تیم جدید", color = ink, fontWeight = FontWeight.Bold, fontSize = 20.sp)
-            
+    ModalBottomSheet(
+        onDismissRequest = onClose,
+        containerColor = card,
+        scrimColor = Color.Black.copy(alpha = 0.32f),
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        dragHandle = {
+            Box(
+                Modifier
+                    .padding(top = 12.dp)
+                    .size(width = 36.dp, height = 4.dp)
+                    .clip(CircleShape)
+                    .background(if (dark) Color.White.copy(alpha = 0.2f) else Color.Black.copy(alpha = 0.1f))
+            )
+        }
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp)
+                .padding(bottom = 32.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(bottom = 20.dp)
+            ) {
+                Icon(
+                    Icons.Rounded.Groups,
+                    null,
+                    tint = Blue,
+                    modifier = Modifier.size(28.dp)
+                )
+                Text(
+                    "ایجاد تیم جدید",
+                    color = ink,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 20.sp,
+                    modifier = Modifier.padding(start = 12.dp)
+                )
+            }
+
+            val textFieldColors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = Blue,
+                unfocusedBorderColor = if (dark) Color.White.copy(alpha = 0.1f) else Color(0xFFE2E8F0),
+                focusedContainerColor = if (dark) Color(0xFF1E293B) else Color(0xFFF8FAFC),
+                unfocusedContainerColor = if (dark) Color(0xFF1E293B) else Color(0xFFF8FAFC),
+                cursorColor = Blue,
+                focusedLabelColor = Blue,
+                unfocusedLabelColor = if (dark) Color(0xFF94A3B8) else Color(0xFF64748B)
+            )
+
             // نام تیم
             OutlinedTextField(
                 value = teamName,
                 onValueChange = { teamName = it },
                 label = { Text("نام تیم") },
-                modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
-                shape = RoundedCornerShape(12.dp),
-                enabled = !loading
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = textFieldColors,
+                leadingIcon = { Icon(Icons.Rounded.Badge, null, tint = if (teamName.isNotEmpty()) Blue else Color.Gray) },
+                enabled = !loading,
+                singleLine = true
             )
-            
+
             // توضیحات
             OutlinedTextField(
                 value = teamDesc,
                 onValueChange = { teamDesc = it },
                 label = { Text("توضیحات (اختیاری)") },
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                shape = RoundedCornerShape(16.dp),
+                colors = textFieldColors,
+                leadingIcon = { Icon(Icons.Rounded.Notes, null, tint = if (teamDesc.isNotEmpty()) Blue else Color.Gray) },
                 enabled = !loading
             )
-            
+
             // بخش انتخاب اعضا
-            Text("انتخاب اعضا", color = ink, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 16.dp))
-            Text("تنها کاربران ثبت‌شده می‌توانند اضافه شوند", color = Color(0xFF64748B), fontSize = 12.sp, modifier = Modifier.padding(bottom = 8.dp))
-            
+            Text(
+                "افزودن اعضا",
+                color = ink,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(top = 24.dp)
+            )
+            Text(
+                "تنها کاربران ثبت‌شده می‌توانند اضافه شوند",
+                color = Color(0xFF64748B),
+                fontSize = 12.sp,
+                modifier = Modifier.padding(bottom = 12.dp)
+            )
+
             // جستجو و بررسی کاربر
-            Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 OutlinedTextField(
                     value = phoneInput,
                     onValueChange = { phoneInput = it },
                     label = { Text("شماره یا نام کاربری") },
                     modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(12.dp),
-                    enabled = !checkingUser && !loading
+                    shape = RoundedCornerShape(16.dp),
+                    colors = textFieldColors,
+                    leadingIcon = { Icon(Icons.Rounded.PersonSearch, null, tint = if (phoneInput.isNotEmpty()) Blue else Color.Gray) },
+                    enabled = !checkingUser && !loading,
+                    singleLine = true
                 )
-                
+
                 Button(
                     onClick = { checkUserExists() },
                     modifier = Modifier.height(56.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    enabled = phoneInput.isNotBlank() && !checkingUser && !loading
+                    shape = RoundedCornerShape(14.dp),
+                    enabled = phoneInput.isNotBlank() && !checkingUser && !loading,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Pill,
+                        contentColor = Blue,
+                        disabledContainerColor = if (dark) Color.White.copy(0.05f) else Color(0xFFF1F5F9)
+                    )
                 ) {
                     if (checkingUser) {
-                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = Color.White)
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            strokeWidth = 2.dp,
+                            color = Blue
+                        )
                     } else {
-                        Text("بررسی")
+                        Text("بررسی", fontWeight = FontWeight.Bold)
                     }
                 }
             }
-            
+
             // نتیجه بررسی
             if (lastCheckResult != null) {
                 if (lastCheckResult!!.exists) {
@@ -1098,23 +1199,30 @@ fun AddTeamSheet(app: App, userId: String, onClose: () -> Unit, onSaved: () -> U
                     Row(
                         Modifier
                             .fillMaxWidth()
-                            .padding(top = 8.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(Color(0xFFECFDF5))
+                            .padding(top = 12.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(if (dark) Color(0xFF064E3B).copy(0.2f) else Color(0xFFECFDF5))
+                            .border(1.dp, Color(0xFF10B981).copy(0.2f), RoundedCornerShape(16.dp))
                             .padding(12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(Icons.Filled.Check, null, tint = Color(0xFF059669), modifier = Modifier.size(24.dp))
-                        Column(Modifier.weight(1f).padding(start = 12.dp)) {
-                            Text(lastCheckResult!!.name ?: "کاربر", color = Color(0xFF111827), fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                            Text("کاربر ثبت‌شده است", color = Color(0xFF059669), fontSize = 12.sp)
+                        Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+                            Text(
+                                lastCheckResult!!.name ?: "کاربر",
+                                color = ink,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp
+                            )
+                            Text("کاربر ثبت‌نام شده", color = Color(0xFF059669), fontSize = 12.sp)
                         }
                         Button(
                             onClick = { addUserToTeam() },
-                            modifier = Modifier.height(40.dp),
-                            shape = RoundedCornerShape(8.dp)
+                            modifier = Modifier.height(36.dp),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981))
                         ) {
-                            Text("افزودن", fontSize = 12.sp)
+                            Text("افزودن", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 } else {
@@ -1122,77 +1230,110 @@ fun AddTeamSheet(app: App, userId: String, onClose: () -> Unit, onSaved: () -> U
                     Row(
                         Modifier
                             .fillMaxWidth()
-                            .padding(top = 8.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(Color(0xFFFEF2F2))
+                            .padding(top = 12.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(if (dark) Color(0xFF7F1D1D).copy(0.2f) else Color(0xFFFEF2F2))
+                            .border(1.dp, Color(0xFFEF4444).copy(0.2f), RoundedCornerShape(16.dp))
                             .padding(12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(Icons.Filled.Email, null, tint = Color(0xFFDC2626), modifier = Modifier.size(24.dp))
-                        Column(Modifier.weight(1f).padding(start = 12.dp)) {
-                            Text("کاربری ثبت‌نام نکرده", color = Color(0xFF111827), fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                            Text("می‌توانید دعوت‌نامه SMS بفرستید", color = Color(0xFFDC2626), fontSize = 12.sp)
+                        Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+                            Text("کاربری ثبت‌نام نکرده", color = ink, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            Text("دعوت‌نامه SMS بفرستید", color = Color(0xFFDC2626), fontSize = 12.sp)
                         }
                         Button(
                             onClick = { sendInvitationSms() },
-                            modifier = Modifier.height(40.dp),
-                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.height(36.dp),
+                            shape = RoundedCornerShape(10.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626))
                         ) {
-                            Text("دعوت", fontSize = 12.sp)
+                            Text("دعوت", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
             }
-            
+
             // اعضای انتخاب‌شده
             if (selectedMembers.isNotEmpty()) {
-                Text("اعضای انتخاب‌شده (${selectedMembers.size})", color = ink, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 16.dp))
-                LazyColumn(Modifier.heightIn(max = 150.dp).padding(top = 8.dp)) {
+                Text(
+                    "اعضای انتخاب‌شده (${selectedMembers.size})",
+                    color = ink,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(top = 24.dp)
+                )
+                LazyColumn(
+                    Modifier
+                        .heightIn(max = 160.dp)
+                        .padding(top = 8.dp)
+                ) {
                     items(selectedMembers.toList()) { member ->
                         Row(
                             Modifier
                                 .fillMaxWidth()
-                                .padding(vertical = 8.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(Color(0xFFF1F5F9))
-                                .padding(12.dp),
+                                .padding(vertical = 4.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(if (dark) Color.White.copy(0.05f) else Color(0xFFF1F5F9))
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(member.name ?: "کاربر", color = ink, fontSize = 14.sp, modifier = Modifier.weight(1f))
+                            Icon(Icons.Rounded.Edit, null, tint = Blue.copy(0.6f), modifier = Modifier.size(16.dp))
+                            Text(
+                                member.name ?: "کاربر",
+                                color = ink,
+                                fontSize = 14.sp,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .padding(horizontal = 10.dp)
+                            )
                             IconButton(
                                 onClick = { selectedMembers = selectedMembers.filter { it.userId != member.userId }.toSet() },
-                                modifier = Modifier.size(32.dp)
+                                modifier = Modifier.size(28.dp)
                             ) {
-                                Icon(Icons.Filled.Close, null, tint = Color(0xFF6B7280), modifier = Modifier.size(18.dp))
+                                Icon(Icons.Filled.Close, null, tint = Color.Gray, modifier = Modifier.size(16.dp))
                             }
                         }
                     }
                 }
             }
-            
+
             // پیام خطا
             if (error.isNotEmpty()) {
                 Text(
                     error,
                     color = Color(0xFFDC2626),
                     fontSize = 12.sp,
-                    modifier = Modifier.padding(top = 12.dp).fillMaxWidth()
+                    modifier = Modifier
+                        .padding(top = 16.dp)
+                        .fillMaxWidth(),
+                    textAlign = TextAlign.Center
                 )
             }
-            
+
             // دکمه ایجاد
             Button(
                 onClick = { createTeam() },
-                modifier = Modifier.fillMaxWidth().padding(top = 24.dp).height(52.dp),
-                shape = RoundedCornerShape(16.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Blue),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 28.dp)
+                    .height(52.dp)
+                    .shadow(4.dp, RoundedCornerShape(18.dp)),
+                shape = RoundedCornerShape(18.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Blue,
+                    contentColor = Color.White,
+                    disabledContainerColor = Blue.copy(alpha = 0.4f)
+                ),
                 enabled = !loading && teamName.isNotBlank() && selectedMembers.isNotEmpty()
             ) {
                 if (loading) {
-                    CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = Color.White)
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(24.dp),
+                        strokeWidth = 2.dp,
+                        color = Color.White
+                    )
                 } else {
-                    Text("ایجاد تیم", fontWeight = FontWeight.Bold)
+                    Text("ایجاد تیم", fontWeight = FontWeight.Bold, fontSize = 16.sp)
                 }
             }
         }
@@ -1263,7 +1404,7 @@ fun SupportScreen(onStartChat: () -> Unit, onBack: (() -> Unit)? = null) {
                     .weight(1f)
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = 20.dp)
-                    .padding(bottom = 24.dp),
+                    .padding(bottom = 100.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Column(
@@ -2627,7 +2768,10 @@ fun PhoneContactsScreen(onBack: () -> Unit, onPick: (String) -> Unit) {
             }
         }
         if (granted) {
-            LazyColumn(Modifier.weight(1f)) {
+            LazyColumn(
+                Modifier.weight(1f),
+                contentPadding = PaddingValues(bottom = 100.dp)
+            ) {
                 itemsIndexed(shown, key = { _, item -> item.second }) { index, (name, phone) ->
                     RiseRow(phone, index, arrived) {
                         Column(Modifier.fillMaxWidth().clickable { onPick(phone) }) {
@@ -2948,7 +3092,8 @@ fun ChatsScreen(
     val headerInk = if (dark) Color.White else Color.Black
     Scaffold(
         containerColor = palette.bg,
-        floatingActionButtonPosition = FabPosition.Start,
+        // در چیدمان RTL، FabPosition.End در سمت چپ فیزیکی صفحه رندر می‌شود (خواسته UI)
+        floatingActionButtonPosition = FabPosition.End,
         floatingActionButton = {
             val fabScale by animateFloatAsState(if (creating) 0.9f else 1f, tween(200), label = "fab")
             val fabPop = remember { Animatable(0.6f) }
@@ -2968,7 +3113,7 @@ fun ChatsScreen(
                     }
                 },
                 shape = CircleShape,
-                containerColor = chatPalette.primary,
+                containerColor = Blue,
                 contentColor = Color.White,
                 elevation = FloatingActionButtonDefaults.elevation(
                     defaultElevation = 0.dp,
@@ -2983,7 +3128,7 @@ fun ChatsScreen(
                         scaleY = scale
                         alpha = fabFade.value
                     }
-                    .padding(bottom = 80.dp, start = 16.dp)
+                    .padding(bottom = 16.dp, end = 16.dp)
                     .size(56.dp)
                     .shadow(6.dp, CircleShape)
             ) {
@@ -3254,7 +3399,11 @@ fun ChatsScreen(
             OfflineBanner()
             }
             }
-            LazyColumn(Modifier.weight(1f), state = listState) {
+            LazyColumn(
+                Modifier.weight(1f),
+                state = listState,
+                contentPadding = PaddingValues(bottom = 100.dp)
+            ) {
                 if (!contacts && account?.plan == "advanced") {
                     item(key = "ai-chat") {
                         RiseRow("ai", 0, arrived) {
@@ -4268,7 +4417,9 @@ private fun androidx.compose.foundation.layout.RowScope.IdentityAction(
             icon,
             contentDescription = label,
             tint = if (primary || dark) Color.White else Color(0xFF334155),
-            modifier = Modifier.size(24.dp),
+            modifier = Modifier.size(24.dp).let {
+                if (icon == Icons.AutoMirrored.Filled.Send) it.graphicsLayer(scaleX = -1f) else it
+            },
         )
     }
 }
@@ -4312,6 +4463,21 @@ private fun ChatInputBar(
         }
         Box(Modifier.fillMaxWidth()) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                val sendNow = body.isNotBlank() || pendingMedia != null
+                Box(
+                    Modifier.size(44.dp).clip(CircleShape).background(Blue).clickable { if (sendNow) onSend() else onMic() },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        if (sendNow) Icons.AutoMirrored.Filled.Send else Icons.Filled.Mic,
+                        if (sendNow) "ارسال" else "ضبط ویس",
+                        tint = LocalAppTheme.current.onButtonColor,
+                        modifier = Modifier.size(20.dp).let {
+                            if (sendNow) it.graphicsLayer(scaleX = -1f) else it
+                        }
+                    )
+                }
+                Spacer(Modifier.width(6.dp))
                 Surface(
                     shape = RoundedCornerShape(28.dp),
                     tonalElevation = 3.dp,
@@ -4319,13 +4485,6 @@ private fun ChatInputBar(
                     modifier = Modifier.weight(1f),
                 ) {
                     Row(Modifier.padding(horizontal = 4.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            Modifier.size(38.dp).clip(CircleShape).border(1.dp, if (dark) Color(0xFF33475C) else Color(0xFFDDE3EA), CircleShape).clickable { picker = !picker },
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(Icons.Filled.Edit, labels[category], tint = Blue, modifier = Modifier.size(18.dp))
-                        }
-                        IconButton(onClick = onAttach, modifier = Modifier.size(38.dp)) { Icon(Icons.Filled.AttachFile, "پیوست", tint = sub, modifier = Modifier.size(20.dp)) }
                         Box(Modifier.weight(1f).padding(horizontal = 4.dp)) {
                             if (body.isEmpty()) Text("نوشتن گزاره...", color = sub, fontSize = 14.sp)
                             BasicTextField(
@@ -4336,15 +4495,14 @@ private fun ChatInputBar(
                                 modifier = Modifier.fillMaxWidth(),
                             )
                         }
+                        Box(
+                            Modifier.size(38.dp).clip(CircleShape).border(1.dp, if (dark) Color(0xFF33475C) else Color(0xFFDDE3EA), CircleShape).clickable { picker = !picker },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(Icons.Filled.Edit, labels[category], tint = Blue, modifier = Modifier.size(18.dp))
+                        }
+                        IconButton(onClick = onAttach, modifier = Modifier.size(38.dp)) { Icon(Icons.Filled.AttachFile, "پیوست", tint = sub, modifier = Modifier.size(20.dp)) }
                     }
-                }
-                Spacer(Modifier.width(6.dp))
-                val sendNow = body.isNotBlank() || pendingMedia != null
-                Box(
-                    Modifier.size(44.dp).clip(CircleShape).background(Blue).clickable { if (sendNow) onSend() else onMic() },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(if (sendNow) Icons.AutoMirrored.Filled.Send else Icons.Filled.Mic, if (sendNow) "ارسال" else "ضبط ویس", tint = LocalAppTheme.current.onButtonColor, modifier = Modifier.size(20.dp))
                 }
             }
             androidx.compose.animation.AnimatedVisibility(
@@ -5723,7 +5881,10 @@ private fun AiComposer(
             }
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onPick) { Icon(Icons.Filled.AttachFile, "پیوست", tint = palette.blue) }
+            Box(Modifier.size(46.dp).clip(CircleShape).background(if (busy) palette.subtext else LocalChatPalette.current.primary).clickable(enabled = !busy, onClick = onSend), contentAlignment = Alignment.Center) {
+                Icon(Icons.AutoMirrored.Filled.Send, "ارسال", tint = Color.White, modifier = Modifier.graphicsLayer(scaleX = -1f))
+            }
+            Spacer(Modifier.width(8.dp))
             BasicTextField(
                 input,
                 onInput,
@@ -5735,10 +5896,7 @@ private fun AiComposer(
                     inner()
                 },
             )
-            Spacer(Modifier.width(8.dp))
-            Box(Modifier.size(46.dp).clip(CircleShape).background(if (busy) palette.subtext else LocalChatPalette.current.primary).clickable(enabled = !busy, onClick = onSend), contentAlignment = Alignment.Center) {
-                Icon(Icons.AutoMirrored.Filled.Send, "ارسال", tint = Color.White)
-            }
+            IconButton(onClick = onPick) { Icon(Icons.Filled.AttachFile, "پیوست", tint = palette.blue) }
         }
     }
 }
@@ -5892,7 +6050,9 @@ private fun askAboutChat(app: App, userId: String, personId: String, turns: List
         "$time $kind: $text"
     }.ifBlank { "هنوز متنی ثبت نشده." }.take(12000)
 
+    val adminCommand = app.db.getActiveSystemPrompt()
     val system = """
+        ${if (adminCommand.isNotBlank()) "فرمان سراسری سیستم (اولویت بالا):\n$adminCommand\n---" else ""}
         من دستیار اختصاصی دفتر گفتگو هستم و فقط می‌توانم دربارهٔ پیام‌ها، یادداشت‌ها و خلاصه‌سازی گفتگوهای همین مخاطب به شما کمک کنم.
         تنها از اطلاعات موجود در متن گفتگوها و یادداشت‌های ارائه شده برای پاسخگویی، تحلیل، خلاصه‌سازی و استخراج نکات عملی استفاده کن.
         اگر کاربر سوالی پرسید که به متن زیر مربوط نمی‌شود (مانند سوالات عمومی، برنامه‌نویسی، دانستنی‌ها، مباحث فلسفی و غیره)، دقیقاً با این جمله پاسخ بده: "من دستیار اختصاصی دفتر گفتگو هستم و فقط می‌توانم دربارهٔ پیام‌ها، یادداشت‌ها و خلاصه‌سازی گفتگوهای همین مخاطب به شما کمک کنم."
@@ -6669,7 +6829,14 @@ fun ProfileScreen(
     }
     val pulse = rememberInfiniteTransition(label = "cam")
     val camScale by pulse.animateFloat(0.92f, 1.08f, infiniteRepeatable(tween(900), RepeatMode.Reverse), label = "cam-scale")
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).background(page), horizontalAlignment = Alignment.CenterHorizontally) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .background(page)
+            .padding(bottom = 100.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
         Row(Modifier.fillMaxWidth()) { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "بازگشت", tint = ink) } }
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).clip(RoundedCornerShape(24.dp)).background(card).padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -8483,149 +8650,164 @@ fun AdminDashboard(app: App, userId: String, onBack: () -> Unit) {
                         fontWeight = if (activeTab == "ai_chat") FontWeight.Bold else FontWeight.Normal
                     )
                 }
+                TextButton(
+                    onClick = { activeTab = "console" },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(
+                        "کنسول فرمان",
+                        color = if (activeTab == "console") Color(0xFF3B82F6) else muted,
+                        fontWeight = if (activeTab == "console") FontWeight.Bold else FontWeight.Normal
+                    )
+                }
             }
 
             // Content
-            if (activeTab == "users") {
-                LazyColumn(Modifier.fillMaxSize()) {
-                    // Header Stats Card
-                    item {
-                        Card(
-                            modifier = Modifier.fillMaxWidth().padding(16.dp),
-                            shape = RoundedCornerShape(24.dp),
-                            colors = CardDefaults.cardColors(containerColor = Color(0xFF1E40AF)),
-                            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
-                        ) {
-                            Column(
-                                Modifier.padding(24.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally
+            when (activeTab) {
+                "users" -> {
+                    LazyColumn(Modifier.fillMaxSize()) {
+                        // Header Stats Card
+                        item {
+                            Card(
+                                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                                shape = RoundedCornerShape(24.dp),
+                                colors = CardDefaults.cardColors(containerColor = Color(0xFF1E40AF)),
+                                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
                             ) {
-                                Icon(
-                                    Icons.Filled.TableChart,
-                                    null,
-                                    tint = Color(0xFF60A5FA),
-                                    modifier = Modifier.size(40.dp)
-                                )
+                                Column(
+                                    Modifier.padding(24.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    Icon(
+                                        Icons.Filled.TableChart,
+                                        null,
+                                        tint = Color(0xFF60A5FA),
+                                        modifier = Modifier.size(40.dp)
+                                    )
+                                    Text(
+                                        "مجموع توکن‌های مصرفی",
+                                        color = Color(0xFFBFDBFE),
+                                        fontSize = 14.sp,
+                                        modifier = Modifier.padding(top = 12.dp)
+                                    )
+                                    Text(
+                                        persianDigits((stats?.totalTokensUsed ?: 0).toString()),
+                                        color = Color.White,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 32.sp,
+                                        modifier = Modifier.padding(top = 8.dp)
+                                    )
+                                    Text(
+                                        "کاربر فعال: ${persianDigits((stats?.totalUsers ?: 0).toString())}",
+                                        color = Color(0xFFBFDBFE),
+                                        fontSize = 12.sp,
+                                        modifier = Modifier.padding(top = 12.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        // Search Bar
+                        item {
+                            OutlinedTextField(
+                                value = searchQuery,
+                                onValueChange = { searchQuery = it },
+                                label = { Text("جستجو (نام، شماره، آیدی)") },
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                leadingIcon = {
+                                    Icon(Icons.Filled.Search, null, tint = muted)
+                                }
+                            )
+                        }
+
+                        // Filter Chips Row
+                        item {
+                            Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                                Text("مرتب‌سازی:", color = ink, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                                Row(
+                                    Modifier.fillMaxWidth().padding(top = 8.dp).horizontalScroll(rememberScrollState()),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    listOf(
+                                        "highest_usage" to "بیشترین مصرف",
+                                        "lowest_usage" to "کمترین مصرف",
+                                        "newest" to "جدیدترین"
+                                    ).forEach { (value, label) ->
+                                        FilterChip(
+                                            selected = sortBy == value,
+                                            onClick = { sortBy = value },
+                                            label = { Text(label, fontSize = 12.sp) },
+                                            shape = RoundedCornerShape(8.dp)
+                                        )
+                                    }
+                                }
+
+                                Text("فیلتر پلن:", color = ink, fontWeight = FontWeight.SemiBold, fontSize = 12.sp, modifier = Modifier.padding(top = 12.dp))
+                                Row(
+                                    Modifier.fillMaxWidth().padding(top = 8.dp).horizontalScroll(rememberScrollState()),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    listOf(
+                                        "all" to "همه",
+                                        "free" to "رایگان",
+                                        "plus" to "پلاس",
+                                        "smart" to "هوشمند",
+                                        "guest" to "مهمان"
+                                    ).forEach { (value, label) ->
+                                        FilterChip(
+                                            selected = planFilter == value,
+                                            onClick = { planFilter = value },
+                                            label = { Text(label, fontSize = 12.sp) },
+                                            shape = RoundedCornerShape(8.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // Error Message
+                        if (error.isNotEmpty()) {
+                            item {
                                 Text(
-                                    "مجموع توکن‌های مصرفی",
-                                    color = Color(0xFFBFDBFE),
-                                    fontSize = 14.sp,
-                                    modifier = Modifier.padding(top = 12.dp)
-                                )
-                                Text(
-                                    persianDigits((stats?.totalTokensUsed ?: 0).toString()),
-                                    color = Color.White,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 32.sp,
-                                    modifier = Modifier.padding(top = 8.dp)
-                                )
-                                Text(
-                                    "کاربر فعال: ${persianDigits((stats?.totalUsers ?: 0).toString())}",
-                                    color = Color(0xFFBFDBFE),
+                                    error,
+                                    color = Color(0xFFDC2626),
                                     fontSize = 12.sp,
-                                    modifier = Modifier.padding(top = 12.dp)
+                                    modifier = Modifier.fillMaxWidth().padding(16.dp)
                                 )
                             }
                         }
-                    }
 
-                    // Search Bar
-                    item {
-                        OutlinedTextField(
-                            value = searchQuery,
-                            onValueChange = { searchQuery = it },
-                            label = { Text("جستجو (نام، شماره، آیدی)") },
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                            shape = RoundedCornerShape(12.dp),
-                            leadingIcon = {
-                                Icon(Icons.Filled.Search, null, tint = muted)
-                            }
-                        )
-                    }
-
-                    // Filter Chips Row
-                    item {
-                        Column(Modifier.fillMaxWidth().padding(16.dp)) {
-                            Text("مرتب‌سازی:", color = ink, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
-                            Row(
-                                Modifier.fillMaxWidth().padding(top = 8.dp).horizontalScroll(rememberScrollState()),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                listOf(
-                                    "highest_usage" to "بیشترین مصرف",
-                                    "lowest_usage" to "کمترین مصرف",
-                                    "newest" to "جدیدترین"
-                                ).forEach { (value, label) ->
-                                    FilterChip(
-                                        selected = sortBy == value,
-                                        onClick = { sortBy = value },
-                                        label = { Text(label, fontSize = 12.sp) },
-                                        shape = RoundedCornerShape(8.dp)
-                                    )
-                                }
-                            }
-
-                            Text("فیلتر پلن:", color = ink, fontWeight = FontWeight.SemiBold, fontSize = 12.sp, modifier = Modifier.padding(top = 12.dp))
-                            Row(
-                                Modifier.fillMaxWidth().padding(top = 8.dp).horizontalScroll(rememberScrollState()),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                listOf(
-                                    "all" to "همه",
-                                    "free" to "رایگان",
-                                    "plus" to "پلاس",
-                                    "smart" to "هوشمند",
-                                    "guest" to "مهمان"
-                                ).forEach { (value, label) ->
-                                    FilterChip(
-                                        selected = planFilter == value,
-                                        onClick = { planFilter = value },
-                                        label = { Text(label, fontSize = 12.sp) },
-                                        shape = RoundedCornerShape(8.dp)
-                                    )
+                        // Loading
+                        if (loading) {
+                            item {
+                                Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
+                                    CircularProgressIndicator()
                                 }
                             }
                         }
-                    }
 
-                    // Error Message
-                    if (error.isNotEmpty()) {
-                        item {
-                            Text(
-                                error,
-                                color = Color(0xFFDC2626),
-                                fontSize = 12.sp,
-                                modifier = Modifier.fillMaxWidth().padding(16.dp)
-                            )
-                        }
-                    }
-
-                    // Loading
-                    if (loading) {
-                        item {
-                            Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
-                                CircularProgressIndicator()
+                        // User Cards
+                        stats?.users?.let { users ->
+                            items(users) { user ->
+                                UserAdminCard(
+                                    user = user,
+                                    onChatClick = {
+                                        // Navigate to support chat
+                                    },
+                                    palette = palette
+                                )
                             }
-                        }
-                    }
-
-                    // User Cards
-                    stats?.users?.let { users ->
-                        items(users) { user ->
-                            UserAdminCard(
-                                user = user,
-                                onChatClick = {
-                                    // Navigate to support chat
-                                },
-                                palette = palette
-                            )
                         }
                     }
                 }
-            } else {
-                // AI Chat Tab
-                Box(Modifier.fillMaxSize()) {
-                    AdminAiChatScreen(app, userId, onBack = { activeTab = "users" })
+                "ai_chat" -> {
+                    Box(Modifier.fillMaxSize()) {
+                        AdminAiChatScreen(app, userId, onBack = { activeTab = "users" })
+                    }
+                }
+                "console" -> {
+                    AiCommandConsole(app, userId, palette)
                 }
             }
         }
@@ -8969,6 +9151,195 @@ private fun AdminChatBubble(
                     fontSize = 10.sp,
                     modifier = Modifier.padding(top = 4.dp).align(Alignment.End)
                 )
+            }
+        }
+    }
+}
+
+@Composable
+fun AiCommandConsole(app: App, userId: String, palette: TgPalette) {
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val dark = palette.dark
+    val ink = if (dark) Color.White else Color(0xFF111827)
+    val card = if (dark) Color(0xFF1E293B) else Color.White
+    val terminalBg = if (dark) Color(0xFF0F172A) else Color(0xFF1F2937)
+    val terminalText = Color(0xFF10B981) // Green text for terminal
+
+    var masterCommand by remember { mutableStateOf(app.db.getActiveSystemPrompt()) }
+    var testInput by remember { mutableStateOf("") }
+    var terminalOutput by remember { mutableStateOf("Ready to execute commands...") }
+    var running by remember { mutableStateOf(false) }
+
+    Column(
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(20.dp)
+    ) {
+        // Section 1: Master Command
+        Card(
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = card),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        ) {
+            Column(Modifier.padding(16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.SettingsSuggest, null, tint = Color(0xFF3B82F6), modifier = Modifier.size(24.dp))
+                    Text(
+                        "دستورالعمل و فرمان سراسری (System Prompt)",
+                        color = ink,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp,
+                        modifier = Modifier.padding(start = 8.dp)
+                    )
+                }
+                
+                Text(
+                    "این دستور به ابتدای تمام درخواست‌های هوش مصنوعی در اپلیکیشن اضافه می‌شود و رفتار کلی آن را کنترل می‌کند.",
+                    color = palette.subtext,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(vertical = 12.dp)
+                )
+
+                OutlinedTextField(
+                    value = masterCommand,
+                    onValueChange = { masterCommand = it },
+                    modifier = Modifier.fillMaxWidth().height(150.dp),
+                    placeholder = { Text("فرمان سیستمی را اینجا بنویسید...", fontSize = 13.sp) },
+                    shape = RoundedCornerShape(12.dp),
+                    colors = TextFieldDefaults.colors(
+                        unfocusedContainerColor = terminalBg.copy(alpha = 0.05f),
+                        focusedContainerColor = terminalBg.copy(alpha = 0.05f)
+                    )
+                )
+
+                // Quick Chips
+                Row(
+                    Modifier.fillMaxWidth().padding(top = 12.dp).horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    val quickCommands = listOf(
+                        "پاسخ‌ها کوتاه و رسمی باشد",
+                        "همیشه به زبان فارسی پاسخ بده",
+                        "تمرکز بر خلاصه‌سازی نکات کلیدی",
+                        "لحن دوستانه و صمیمی"
+                    )
+                    quickCommands.forEach { cmd ->
+                        AssistChip(
+                            onClick = { masterCommand = if (masterCommand.isBlank()) cmd else "$masterCommand\n$cmd" },
+                            label = { Text(cmd, fontSize = 11.sp) }
+                        )
+                    }
+                }
+
+                Button(
+                    onClick = {
+                        app.db.updateActiveModelSystemPrompt(masterCommand)
+                        android.widget.Toast.makeText(context, "فرمان سراسری با موفقیت ثبت و همگام‌سازی شد", android.widget.Toast.LENGTH_SHORT).show()
+                    },
+                    modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3B82F6))
+                ) {
+                    Icon(Icons.Default.CloudUpload, null, modifier = Modifier.size(18.dp))
+                    Text("ثبت و اعمال فرمان روی کل اپلیکیشن", modifier = Modifier.padding(start = 8.dp))
+                }
+            }
+        }
+
+        // Section 2: Live AI Terminal
+        Card(
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = card),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        ) {
+            Column(Modifier.padding(16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Terminal, null, tint = Color(0xFF10B981), modifier = Modifier.size(24.dp))
+                    Text(
+                        "خط فرمان تعاملی و تست زنده (Live AI Terminal)",
+                        color = ink,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp,
+                        modifier = Modifier.padding(start = 8.dp)
+                    )
+                }
+
+                OutlinedTextField(
+                    value = testInput,
+                    onValueChange = { testInput = it },
+                    modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
+                    placeholder = { Text("سوال یا دستور تست خود را اینجا بنویسید...", fontSize = 13.sp) },
+                    shape = RoundedCornerShape(12.dp),
+                    trailingIcon = {
+                        if (running) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                        else IconButton(
+                            onClick = {
+                                if (testInput.isNotBlank()) {
+                                    running = true
+                                    terminalOutput = "> Executing: $testInput\n> System Prompt applied: ${masterCommand.take(30)}...\nThinking..."
+                                    scope.launch(Dispatchers.IO) {
+                                        try {
+                                            val systemMsg = if (masterCommand.isNotBlank()) "Master Command:\n$masterCommand\n---\nTest Environment." else "Test Environment."
+                                            val messages = listOf(
+                                                Triple("system", systemMsg, null as String?),
+                                                Triple("user", testInput, null as String?)
+                                            )
+                                            val response = askModel(app, messages)
+                                            withContext(Dispatchers.Main) {
+                                                terminalOutput = "> Response received:\n\n$response"
+                                            }
+                                        } catch (e: Exception) {
+                                            withContext(Dispatchers.Main) {
+                                                terminalOutput = "> Error: ${e.message}"
+                                            }
+                                        } finally {
+                                            running = false
+                                        }
+                                    }
+                                }
+                            },
+                            enabled = testInput.isNotBlank()
+                        ) {
+                            Icon(Icons.Default.PlayArrow, null, tint = if (testInput.isNotBlank()) Color(0xFF10B981) else Color.Gray)
+                        }
+                    }
+                )
+
+                // Terminal Output Box
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(top = 16.dp)
+                        .heightIn(min = 150.dp, max = 300.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(terminalBg)
+                        .padding(12.dp)
+                ) {
+                    Column(Modifier.verticalScroll(rememberScrollState())) {
+                        Text(
+                            terminalOutput,
+                            color = terminalText,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 13.sp,
+                            lineHeight = 18.sp
+                        )
+                    }
+                    
+                    IconButton(
+                        onClick = {
+                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                            val clip = android.content.ClipData.newPlainText("AI Output", terminalOutput)
+                            clipboard.setPrimaryClip(clip)
+                            android.widget.Toast.makeText(context, "خروجی در کلیپ‌بورد کپی شد", android.widget.Toast.LENGTH_SHORT).show()
+                        },
+                        modifier = Modifier.align(Alignment.TopEnd).size(32.dp)
+                    ) {
+                        Icon(Icons.Default.ContentCopy, null, tint = terminalText.copy(alpha = 0.5f), modifier = Modifier.size(16.dp))
+                    }
+                }
             }
         }
     }

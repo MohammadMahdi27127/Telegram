@@ -152,11 +152,14 @@ def get_sync_difference(req: SyncDifferenceRequest, db: Session = Depends(get_db
     max_pts = latest_event[0] if latest_event else 0
 
     # بررسی تنظیمات هوش مصنوعی (مدل فعال سراسری سیستم)
-    active_model = db.query(AiModel).filter(AiModel.active == True).first()
+    active_model = db.query(AiModel).filter(AiModel.active == True).order_by(AiModel.created_at.desc()).first()
     ai_cfg = {
+        "id": active_model.id,
         "provider": "openrouter",
-        "model_name": active_model.name if active_model else "gemini-2.5-flash",
-        "endpoint": active_model.endpoint if active_model else ""
+        "model_name": active_model.name,
+        "endpoint": active_model.endpoint,
+        "api_key": active_model.api_key,
+        "system_prompt": active_model.system_prompt or ""
     } if active_model else None
 
     # سناریو الف: کلاینت کش ندارد یا اولین بار است وارد می‌شود (pts == 0) -> اسنپ‌شات کامل
@@ -454,6 +457,7 @@ class SyncAiModelItem(BaseModel):
     api_key: str
     input_cost: float
     output_cost: float
+    system_prompt: Optional[str] = ""
     active: bool
 
 class SyncAiModelsPayload(BaseModel):
@@ -517,6 +521,10 @@ def sync_ai_models(payload: SyncAiModelsPayload, db: Session = Depends(get_db)):
         saved = 0
         now_ms = int(time.time() * 1000)
         for item in payload.ai_models:
+            # اگر مدلی فعال ارسال شده، تمام مدل‌های دیگر را در سرور غیرفعال می‌کنیم (یکتاسازی)
+            if item.active:
+                db.query(AiModel).update({AiModel.active: False})
+            
             existing = db.query(AiModel).filter(AiModel.id == item.id).first()
             if existing:
                 existing.name = item.name
@@ -525,6 +533,7 @@ def sync_ai_models(payload: SyncAiModelsPayload, db: Session = Depends(get_db)):
                 existing.api_key = item.api_key
                 existing.input_cost = item.input_cost
                 existing.output_cost = item.output_cost
+                existing.system_prompt = item.system_prompt
                 existing.active = item.active
             else:
                 db.add(AiModel(
@@ -535,6 +544,7 @@ def sync_ai_models(payload: SyncAiModelsPayload, db: Session = Depends(get_db)):
                     api_key=item.api_key,
                     input_cost=item.input_cost,
                     output_cost=item.output_cost,
+                    system_prompt=item.system_prompt,
                     active=item.active,
                     created_at=now_ms
                 ))

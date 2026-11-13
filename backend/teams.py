@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Header, status
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from main import SessionLocal, User, Team, TeamMember, TeamMessage
+from main import SessionLocal, User, Team, TeamMember, TeamMessage, Person
 from config import settings
 
 logger = logging.getLogger(__name__)
@@ -164,7 +164,51 @@ def create_team(req: CreateTeamRequest, db: Session = Depends(get_db)):
                     joined_at=now
                 )
                 db.add(member)
-        
+
+        # ثبت یک رکورد «گفتگوی گروهی» (people با is_group=True) برای سازنده تا تیم
+        # از مسیر سینک PTS (اسنپ‌شات/دلتا در POST /sync/difference) نیز برگردانده شود
+        # و در لیست «تیم‌های من» هرگز گم نشود.
+        person = db.query(Person).filter(Person.id == team_id).first()
+        if person is None:
+            db.add(Person(
+                id=team_id,
+                user_id=req.creator_id,
+                name=team.name,
+                phone="",
+                role=team.description or "",
+                pinned=False,
+                avatar=None,
+                is_group=True,
+                saved=False,
+                created_at=now,
+            ))
+
+        # رویداد سینک (PTS) از نوع dialog برای سازنده و همه اعضای تیم؛ هر دستگاه
+        # همین شناسهٔ تیم را به‌عنوان گفتگوی گروهی محلی می‌سازد.
+        from sync import record_sync_event
+        dialog_recipients = {req.creator_id, *req.member_user_ids}
+        for uid in dialog_recipients:
+            if not uid:
+                continue
+            record_sync_event(
+                db,
+                uid,
+                "dialog",
+                team_id,
+                {
+                    "id": team_id,
+                    "user_id": uid,
+                    "name": team.name,
+                    "phone": "",
+                    "role": team.description or "",
+                    "pinned": False,
+                    "avatar": None,
+                    "is_group": True,
+                    "saved": False,
+                    "created_at": now,
+                },
+            )
+
         db.commit()
         
         # دریافت اعضا برای پاسخ

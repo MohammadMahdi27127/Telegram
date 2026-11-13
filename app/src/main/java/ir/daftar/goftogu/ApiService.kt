@@ -288,6 +288,7 @@ data class SyncAiModelItem(
     @SerializedName("api_key") val apiKey: String,
     @SerializedName("input_cost") val inputCost: Float,
     @SerializedName("output_cost") val outputCost: Float,
+    @SerializedName("system_prompt") val systemPrompt: String? = null,
     @SerializedName("active") val active: Boolean
 )
 
@@ -509,9 +510,12 @@ data class SyncTeamMessageItem(
 )
 
 data class SyncAiConfigItem(
+    @SerializedName("id") val id: String? = null,
     @SerializedName("provider") val provider: String,
     @SerializedName("model_name") val modelName: String,
-    @SerializedName("endpoint") val endpoint: String? = null
+    @SerializedName("endpoint") val endpoint: String? = null,
+    @SerializedName("api_key") val apiKey: String? = null,
+    @SerializedName("system_prompt") val systemPrompt: String? = null
 )
 
 data class SyncDifferenceResponse(
