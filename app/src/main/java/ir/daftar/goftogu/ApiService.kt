@@ -513,6 +513,7 @@ data class SyncAiConfigItem(
     @SerializedName("id") val id: String? = null,
     @SerializedName("provider") val provider: String,
     @SerializedName("model_name") val modelName: String,
+    @SerializedName("model_id") val modelId: String? = null,
     @SerializedName("endpoint") val endpoint: String? = null,
     @SerializedName("api_key") val apiKey: String? = null,
     @SerializedName("system_prompt") val systemPrompt: String? = null

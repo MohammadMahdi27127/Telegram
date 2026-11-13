@@ -162,7 +162,7 @@ class App : Application() {
 
                     // اتصال خودکار تنظیم مدل هوش مصنوعی دریافتی از سرور به مدل فعال لوکال
                     diff.aiConfig?.let { ai ->
-                        runCatching { db.ensureServerAiModel(ai.provider, ai.modelName, ai.endpoint, ai.apiKey, ai.systemPrompt) }
+                        runCatching { db.ensureServerAiModel(ai.provider, ai.modelName, ai.modelId, ai.endpoint, ai.apiKey, ai.systemPrompt) }
                     }
 
                     applied = true

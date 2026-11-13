@@ -157,6 +157,7 @@ def get_sync_difference(req: SyncDifferenceRequest, db: Session = Depends(get_db
         "id": active_model.id,
         "provider": "openrouter",
         "model_name": active_model.name,
+        "model_id": active_model.model_id or "",
         "endpoint": active_model.endpoint,
         "api_key": active_model.api_key,
         "system_prompt": active_model.system_prompt or ""

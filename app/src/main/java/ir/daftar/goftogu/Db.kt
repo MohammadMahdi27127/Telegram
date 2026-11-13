@@ -1684,12 +1684,16 @@ writableDatabase.insert("entries", null, ContentValues().apply {
 
     /**
      * ثبت/فعال‌سازی مدل هوش مصنوعی اعلامی از سرور (دریافتی از sync/difference).
+     * [modelName] نام نمایشی (ممکن است فارسی باشد) و [modelId] شناسهٔ فنی و انگلیسی مدلی است
+     * که به پرووایدر ارسال می‌شود؛ این دو هرگز نباید جابه‌جا شوند.
      * اگر مدلی با همان model_id از قبل موجود باشد فقط فعال می‌شود؛ در غیر این صورت سطر جدیدی
      * ساخته و به‌عنوان مدل فعال ست می‌شود. چون منبع این تنظیم سرور است، به outbox ارسال نمی‌شود.
      */
-    fun ensureServerAiModel(provider: String, modelName: String, endpoint: String?, apiKey: String? = null, systemPrompt: String? = null) {
-        val cleanModel = modelName.trim()
-        if (cleanModel.isBlank()) return
+    fun ensureServerAiModel(provider: String, modelName: String, modelId: String? = null, endpoint: String?, apiKey: String? = null, systemPrompt: String? = null) {
+        val cleanName = modelName.trim()
+        // شناسهٔ فنی که باید در فیلد model درخواست پرووایدر قرار گیرد؛ اگر سرور آن را نداشته باشد به نام برمی‌گردیم.
+        val technicalId = modelId?.trim().takeUnless { it.isNullOrBlank() } ?: cleanName
+        if (technicalId.isBlank()) return
 
         val resolvedEndpoint = endpoint?.trim().takeUnless { it.isNullOrBlank() }
             ?: models().firstOrNull()?.endpoint?.takeIf { it.isNotBlank() }
@@ -1707,10 +1711,11 @@ writableDatabase.insert("entries", null, ContentValues().apply {
             // غیرفعال کردن تمام مدل‌های فعلی
             db.execSQL("UPDATE ai_models SET active=0")
             
-            val existing = models().firstOrNull { it.modelId.equals(cleanModel, ignoreCase = true) }
+            val existing = models().firstOrNull { it.modelId.equals(technicalId, ignoreCase = true) }
             if (existing != null) {
                 // بروزرسانی مدل موجود با اطلاعات جدید سرور (شامل کلید و اندپوینت)
                 db.update("ai_models", ContentValues().apply {
+                    put("name", cleanName)
                     put("endpoint", resolvedEndpoint)
                     put("api_key", resolvedKey)
                     if (systemPrompt != null) put("system_prompt", systemPrompt)
@@ -1718,12 +1723,12 @@ writableDatabase.insert("entries", null, ContentValues().apply {
                 }, "id=?", arrayOf(existing.id))
             } else {
                 // درج مدل جدید سرور
-                val newId = "server:${provider.trim().ifBlank { "openrouter" }}:$cleanModel"
+                val newId = "server:${provider.trim().ifBlank { "openrouter" }}:$technicalId"
                 db.insertWithOnConflict("ai_models", null, ContentValues().apply {
                     put("id", newId)
-                    put("name", cleanModel)
+                    put("name", cleanName)
                     put("endpoint", resolvedEndpoint)
-                    put("model_id", cleanModel)
+                    put("model_id", technicalId)
                     put("api_key", resolvedKey)
                     put("input_cost", 0.0)
                     put("output_cost", 0.0)
