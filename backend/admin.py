@@ -1,11 +1,16 @@
 import hashlib
 import logging
+import mimetypes
+import os
 import secrets
 import time
 import uuid
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, func
 from sqlalchemy.orm import Session
@@ -14,6 +19,10 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
 ADMIN_TOKEN_SALT = "hamsohbat-admin-web-v1"
+DOWNLOADS_DIR = Path(os.environ.get("DOWNLOADS_DIR", "downloads"))
+RECEIPTS_DIR = DOWNLOADS_DIR / "receipts"
+ALLOWED_RECEIPT_EXT = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".pdf"}
+MAX_RECEIPT_BYTES = 12 * 1024 * 1024
 
 
 def get_db():
@@ -46,7 +55,33 @@ def require_admin(
     return True
 
 
-# ─── Pydantic models ─────────────────────────────────────────────────────────
+def _parse_day_start(date_str: Optional[str]) -> Optional[int]:
+    """YYYY-MM-DD → epoch ms start of day UTC"""
+    if not date_str:
+        return None
+    try:
+        dt = datetime.strptime(date_str.strip(), "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        return int(dt.timestamp() * 1000)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="فرمت تاریخ باید YYYY-MM-DD باشد")
+
+
+def _parse_day_end(date_str: Optional[str]) -> Optional[int]:
+    if not date_str:
+        return None
+    start = _parse_day_start(date_str)
+    return start + 24 * 60 * 60 * 1000 - 1 if start is not None else None
+
+
+def _paginate(total: int, page: int, page_size: int):
+    page = max(1, page)
+    page_size = min(max(1, page_size), 100)
+    total_pages = max(1, (total + page_size - 1) // page_size) if total else 1
+    offset = (page - 1) * page_size
+    return page, page_size, total_pages, offset
+
+
+# ─── Models ──────────────────────────────────────────────────────────────────
 
 
 class AdminLoginRequest(BaseModel):
@@ -82,6 +117,9 @@ class UserStatsResponse(BaseModel):
 class AdminStatsResponse(BaseModel):
     total_tokens_used: int
     total_users: int
+    page: int = 1
+    page_size: int = 50
+    total_pages: int = 1
     users: List[UserStatsResponse]
 
 
@@ -99,8 +137,17 @@ class SlipResponse(BaseModel):
     amount: int = 0
     status: str = "pending"
     receipt: Optional[str] = None
+    receipt_url: Optional[str] = None
     ref_code: Optional[str] = None
     created_at: Optional[int] = None
+
+
+class SlipListResponse(BaseModel):
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+    items: List[SlipResponse]
 
 
 class SlipActionRequest(BaseModel):
@@ -166,6 +213,23 @@ class SetActiveModelRequest(BaseModel):
     model_id: str
 
 
+class NotificationsResponse(BaseModel):
+    pending_slips: int = 0
+    unread_support: int = 0
+    latest_slip_at: Optional[int] = None
+    latest_support_at: Optional[int] = None
+
+
+def _receipt_url(receipt: Optional[str]) -> Optional[str]:
+    if not receipt:
+        return None
+    if receipt.startswith("http://") or receipt.startswith("https://") or receipt.startswith("/"):
+        return receipt
+    # stored as relative filename under receipts/
+    name = Path(receipt).name
+    return f"/api/v1/admin/receipts/{name}"
+
+
 # ─── Auth ────────────────────────────────────────────────────────────────────
 
 
@@ -198,8 +262,43 @@ def admin_login(req: AdminLoginRequest, db: Session = Depends(get_db)):
     )
 
 
+# ─── Notifications ───────────────────────────────────────────────────────────
+
+
+@router.get("/notifications", response_model=NotificationsResponse)
+def admin_notifications(
+    _: bool = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    from main import Slip, SupportMessage
+
+    pending_slips = (
+        db.query(func.count(Slip.id)).filter(Slip.status == "pending").scalar() or 0
+    )
+    unread_support = (
+        db.query(func.count(SupportMessage.id))
+        .filter(
+            SupportMessage.from_admin.is_(False),
+            SupportMessage.read_admin.is_(False),
+        )
+        .scalar()
+        or 0
+    )
+    latest_slip = db.query(func.max(Slip.created_at)).filter(Slip.status == "pending").scalar()
+    latest_support = (
+        db.query(func.max(SupportMessage.created_at))
+        .filter(SupportMessage.from_admin.is_(False))
+        .scalar()
+    )
+    return NotificationsResponse(
+        pending_slips=int(pending_slips),
+        unread_support=int(unread_support),
+        latest_slip_at=latest_slip,
+        latest_support_at=latest_support,
+    )
+
+
 # ─── Users ───────────────────────────────────────────────────────────────────
-# توجه: users-stats بدون require_admin می‌ماند تا APK اندروید نشکند.
 
 
 @router.get("/users-stats", response_model=AdminStatsResponse)
@@ -207,8 +306,13 @@ def get_users_stats(
     query: Optional[str] = None,
     sort_by: str = "newest",
     plan: str = "all",
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
     db: Session = Depends(get_db),
 ):
+    """بدون توکن اجباری — سازگار با APK. صفحه‌بندی و فیلتر تاریخ اضافه شد."""
     try:
         from main import User
 
@@ -226,6 +330,16 @@ def get_users_stats(
                 | User.username.ilike(search_pattern)
             )
 
+        ts_from = _parse_day_start(date_from)
+        ts_to = _parse_day_end(date_to)
+        if ts_from is not None:
+            user_query = user_query.filter(User.created_at >= ts_from)
+        if ts_to is not None:
+            user_query = user_query.filter(User.created_at <= ts_to)
+
+        total_users = user_query.count()
+        page, page_size, total_pages, offset = _paginate(total_users, page, page_size)
+
         if sort_by == "highest_usage":
             user_query = user_query.order_by(User.tokens_used.desc())
         elif sort_by == "lowest_usage":
@@ -233,7 +347,7 @@ def get_users_stats(
         else:
             user_query = user_query.order_by(User.created_at.desc())
 
-        users = user_query.all()
+        users = user_query.offset(offset).limit(page_size).all()
         total_tokens = db.query(func.coalesce(func.sum(User.tokens_used), 0)).scalar() or 0
 
         user_responses = [
@@ -255,9 +369,14 @@ def get_users_stats(
 
         return AdminStatsResponse(
             total_tokens_used=int(total_tokens),
-            total_users=len(users),
+            total_users=total_users,
+            page=page,
+            page_size=page_size,
+            total_pages=total_pages,
             users=user_responses,
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error fetching admin stats: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
@@ -320,23 +439,37 @@ def admin_set_plan(
 # ─── Slips ────────────────────────────────────────────────────────────────────
 
 
-@router.get("/slips", response_model=List[SlipResponse])
+@router.get("/slips", response_model=SlipListResponse)
 def list_slips(
     status: str = "all",
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
     _: bool = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     from main import Slip, User
 
-    q = db.query(Slip).order_by(desc(Slip.created_at))
+    q = db.query(Slip)
     if status != "all":
         q = q.filter(Slip.status == status)
 
-    slips = q.limit(300).all()
-    result: List[SlipResponse] = []
+    ts_from = _parse_day_start(date_from)
+    ts_to = _parse_day_end(date_to)
+    if ts_from is not None:
+        q = q.filter(Slip.created_at >= ts_from)
+    if ts_to is not None:
+        q = q.filter(Slip.created_at <= ts_to)
+
+    total = q.count()
+    page, page_size, total_pages, offset = _paginate(total, page, page_size)
+    slips = q.order_by(desc(Slip.created_at)).offset(offset).limit(page_size).all()
+
+    items: List[SlipResponse] = []
     for s in slips:
         u = db.query(User).filter(User.id == s.user_id).first() if s.user_id else None
-        result.append(
+        items.append(
             SlipResponse(
                 id=s.id,
                 user_id=s.user_id,
@@ -347,11 +480,14 @@ def list_slips(
                 amount=s.amount or 0,
                 status=s.status or "pending",
                 receipt=s.receipt,
+                receipt_url=_receipt_url(s.receipt),
                 ref_code=s.ref_code,
                 created_at=s.created_at,
             )
         )
-    return result
+    return SlipListResponse(
+        total=total, page=page, page_size=page_size, total_pages=total_pages, items=items
+    )
 
 
 @router.post("/slips/{slip_id}/action")
@@ -405,6 +541,68 @@ def slip_action(
         "plan": user.plan,
         "plan_expires_at": user.plan_expires_at,
     }
+
+
+@router.post("/slips/{slip_id}/receipt")
+async def upload_slip_receipt(
+    slip_id: str,
+    file: UploadFile = File(...),
+    _: bool = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    from main import Slip
+
+    slip = db.query(Slip).filter(Slip.id == slip_id).first()
+    if not slip:
+        raise HTTPException(status_code=404, detail="فیش یافت نشد")
+
+    original = file.filename or "receipt.bin"
+    ext = Path(original).suffix.lower()
+    if ext not in ALLOWED_RECEIPT_EXT:
+        raise HTTPException(
+            status_code=400,
+            detail=f"فرمت مجاز: {', '.join(sorted(ALLOWED_RECEIPT_EXT))}",
+        )
+
+    content = await file.read()
+    if len(content) > MAX_RECEIPT_BYTES:
+        raise HTTPException(status_code=400, detail="حجم فایل بیش از ۱۲ مگابایت است")
+
+    RECEIPTS_DIR.mkdir(parents=True, exist_ok=True)
+    safe_name = f"{slip_id}_{int(time.time())}{ext}"
+    dest = RECEIPTS_DIR / safe_name
+    dest.write_bytes(content)
+
+    relative = f"receipts/{safe_name}"
+    slip.receipt = relative
+    db.commit()
+
+    return {
+        "status": "ok",
+        "slip_id": slip.id,
+        "receipt": relative,
+        "receipt_url": _receipt_url(relative),
+    }
+
+
+@router.get("/receipts/{filename}")
+def get_receipt_file(
+    filename: str,
+    _: bool = Depends(require_admin),
+):
+    # prevent path traversal
+    safe = Path(filename).name
+    path = RECEIPTS_DIR / safe
+    if not path.is_file():
+        # also try downloads root for legacy paths
+        alt = DOWNLOADS_DIR / safe
+        if alt.is_file():
+            path = alt
+        else:
+            raise HTTPException(status_code=404, detail="فایل یافت نشد")
+
+    media_type, _ = mimetypes.guess_type(str(path))
+    return FileResponse(path, media_type=media_type or "application/octet-stream", filename=safe)
 
 
 # ─── Support ─────────────────────────────────────────────────────────────────
