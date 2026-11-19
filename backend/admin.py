@@ -183,7 +183,6 @@ def admin_login(req: AdminLoginRequest, db: Session = Depends(get_db)):
 
     password_hash = hashlib.sha256(f"{user.salt}{req.password}".encode()).hexdigest()
     if password_hash != user.password_hash:
-        # fallback به رمز تنظیمات
         from config import settings
 
         if req.password != getattr(settings, "ADMIN_PASSWORD", ""):
@@ -281,11 +280,7 @@ def suspend_user(
 
     user.suspended = bool(req.suspended)
     db.commit()
-    return {
-        "status": "ok",
-        "user_id": user.id,
-        "suspended": user.suspended,
-    }
+    return {"status": "ok", "user_id": user.id, "suspended": user.suspended}
 
 
 @router.post("/users/{user_id}/plan")
@@ -322,7 +317,7 @@ def admin_set_plan(
     }
 
 
-# ─── Slips (فیش‌ها) ──────────────────────────────────────────────────────────
+# ─── Slips ────────────────────────────────────────────────────────────────────
 
 
 @router.get("/slips", response_model=List[SlipResponse])
@@ -381,7 +376,6 @@ def slip_action(
         db.commit()
         return {"status": "ok", "slip_id": slip.id, "new_status": "rejected"}
 
-    # approve
     target_user_id = req.user_id or slip.user_id
     if not target_user_id:
         raise HTTPException(
@@ -401,7 +395,6 @@ def slip_action(
     slip.status = "approved"
     user.plan = plan
     user.plan_expires_at = int(time.time() * 1000) + max(1, req.duration_days) * 24 * 60 * 60 * 1000
-    # در صورت نیاز موجودی را صفر نگه می‌داریم؛ پلن با تأیید فیش فعال می‌شود
 
     db.commit()
     return {
@@ -414,7 +407,7 @@ def slip_action(
     }
 
 
-# ─── Support ─────────────────────────────────────────────────────────────────
+# ─── Suppor ──────────────────────────────────────────────────────────────────
 
 
 @router.get("/support/threads", response_model=List[SupportThreadResponse])
@@ -424,67 +417,59 @@ def list_support_threads(
 ):
     from main import SupportMessage, User
 
-    rows = (
-        db.query(
-            SupportMessage.user_id,
-            func.max(SupportMessage.created_at).label("last_at"),
-            func.count(SupportMessage.id).label("total"),
-            func.sum(
-                func.cast(
-                    (SupportMessage.from_admin == False)  # noqa: E712
-                    & (SupportMessage.read_admin == False),  # noqa: E712
-                    type_=db.bind.dialect.type_descriptor.__self__.__class__.__mro__[0]
-                    if False
-                    else __import__("sqlalchemy").Integer,
-                )
-            ).label("unread"),
-        )
-        .group_by(SupportMessage.user_id)
-        .order_by(desc("last_at"))
-        .all()
-    )
-
-    # fallback simpler aggregation if dialect issues
     try:
-        threads = []
-        user_ids = [r.user_id for r in rows]
+        user_ids = [
+            r[0]
+            for r in db.query(SupportMessage.user_id)
+            .distinct()
+            .all()
+        ]
+        threads: List[SupportThreadResponse] = []
         users = {
             u.id: u
             for u in db.query(User).filter(User.id.in_(user_ids)).all()
         } if user_ids else {}
 
-        for r in rows:
+        for uid in user_ids:
             last_msg = (
                 db.query(SupportMessage)
-                .filter(SupportMessage.user_id == r.user_id)
+                .filter(SupportMessage.user_id == uid)
                 .order_by(desc(SupportMessage.created_at))
                 .first()
+            )
+            total = (
+                db.query(func.count(SupportMessage.id))
+                .filter(SupportMessage.user_id == uid)
+                .scalar()
+                or 0
             )
             unread = (
                 db.query(func.count(SupportMessage.id))
                 .filter(
-                    SupportMessage.user_id == r.user_id,
-                    SupportMessage.from_admin == False,  # noqa: E712
-                    SupportMessage.read_admin == False,  # noqa: E712
+                    SupportMessage.user_id == uid,
+                    SupportMessage.from_admin.is_(False),
+                    SupportMessage.read_admin.is_(False),
                 )
                 .scalar()
                 or 0
             )
-            u = users.get(r.user_id)
+            u = users.get(uid)
             threads.append(
                 SupportThreadResponse(
-                    user_id=r.user_id,
+                    user_id=uid,
                     user_name=u.name if u else None,
                     user_phone=u.phone if u else None,
                     last_message=last_msg.body if last_msg else None,
-                    last_at=r.last_at,
+                    last_at=last_msg.created_at if last_msg else None,
                     unread_admin=int(unread),
-                    total_messages=int(r.total or 0),
+                    total_messages=int(total),
                 )
             )
+
+        threads.sort(key=lambda t: t.last_at or 0, reverse=True)
         return threads
     except Exception as e:
-        logger.error(f"support threads error: {e}", exp_info=True)
+        logger.error(f"support threads error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -504,7 +489,6 @@ def get_support_messages(
         .all()
     )
 
-    # mark user messages as read by admin
     for m in msgs:
         if not m.from_admin and not m.read_admin:
             m.read_admin = True
