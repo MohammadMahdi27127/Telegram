@@ -24,6 +24,8 @@ RECEIPTS_DIR = DOWNLOADS_DIR / "receipts"
 ALLOWED_RECEIPT_EXT = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".pdf"}
 MAX_RECEIPT_BYTES = 12 * 1024 * 1024
 
+_PERSIAN_DIGITS = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
+
 
 def get_db():
     from main import SessionLocal
@@ -38,11 +40,27 @@ def get_db():
 def _admin_phone() -> str:
     from config import settings
 
-    return (getattr(settings, "ADMIN_PHONE", None) or "09052893115").strip()
+    return _normalize_phone(getattr(settings, "ADMIN_PHONE", None) or "09052893115")
+
+
+def _admin_password() -> str:
+    from config import settings
+
+    return (getattr(settings, "ADMIN_PASSWORD", None) or "138727127").strip()
+
+
+def _normalize_phone(phone: str) -> str:
+    p = (phone or "").strip().replace(" ", "").replace("-", "")
+    p = p.translate(_PERSIAN_DIGITS)
+    if p.startswith("+98"):
+        p = "0" + p[3:]
+    elif p.startswith("98") and len(p) >= 12:
+        p = "0" + p[2:]
+    return p
 
 
 def make_admin_token(phone: str) -> str:
-    raw = f"{ADMIN_TOKEN_SALT}:{phone.strip()}"
+    raw = f"{ADMIN_TOKEN_SALT}:{_normalize_phone(phone)}"
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
@@ -56,7 +74,6 @@ def require_admin(
 
 
 def _parse_day_start(date_str: Optional[str]) -> Optional[int]:
-    """YYYY-MM-DD → epoch ms start of day UTC"""
     if not date_str:
         return None
     try:
@@ -81,7 +98,38 @@ def _paginate(total: int, page: int, page_size: int):
     return page, page_size, total_pages, offset
 
 
-# ─── Models ──────────────────────────────────────────────────────────────────
+def _hash_password(password: str, salt: str) -> str:
+    return hashlib.sha256(f"{salt}{password}".encode()).hexdigest()
+
+
+def _ensure_admin_user(db: Session, phone: str):
+    """اگر کاربر ادمین نبود بساز؛ اگر بود و رمز env عوض شده، هش را به‌روز کن."""
+    from main import User
+
+    user = db.query(User).filter(User.phone == phone).first()
+    pwd = _admin_password()
+    if user:
+        return user
+
+    salt = secrets.token_hex(16)
+    user = User(
+        id=str(uuid.uuid4()),
+        phone=phone,
+        salt=salt,
+        password_hash=_hash_password(pwd, salt),
+        name="محمد مهدی",
+        plan="admin",
+        balance=1000000,
+        suspended=False,
+        banner_seen=True,
+        created_at=int(time.time() * 1000),
+        username="admin",
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    logger.info("Admin user auto-created during login: %s", phone)
+    return user
 
 
 class AdminLoginRequest(BaseModel):
@@ -225,32 +273,56 @@ def _receipt_url(receipt: Optional[str]) -> Optional[str]:
         return None
     if receipt.startswith("http://") or receipt.startswith("https://") or receipt.startswith("/"):
         return receipt
-    # stored as relative filename under receipts/
     name = Path(receipt).name
     return f"/api/v1/admin/receipts/{name}"
-
-
-# ─── Auth ────────────────────────────────────────────────────────────────────
 
 
 @router.post("/login", response_model=AdminLoginResponse)
 def admin_login(req: AdminLoginRequest, db: Session = Depends(get_db)):
     from main import User
 
-    phone = req.phone.strip().replace(" ", "")
-    if phone != _admin_phone():
-        raise HTTPException(status_code=403, detail="فقط ادمین سیستم می‌تواند وارد شود")
+    phone = _normalize_phone(req.phone)
+    password = (req.password or "").strip()
+    admin_phone = _admin_phone()
+    env_password = _admin_password()
+
+    if phone != admin_phone:
+        raise HTTPException(status_code=403, detail="فقط شمارهٔ ادمین سیستم مجاز به ورود است")
 
     user = db.query(User).filter(User.phone == phone).first()
+
+    # مسیر ۱: رمز محیطی ADMIN_PASSWORD همیشه معتبر است
+    if password == env_password:
+        if not user:
+            user = _ensure_admin_user(db, phone)
+        else:
+            # هم‌تراز کردن هش با رمز فعلی env (اگر قبلاً فرق داشت)
+            expected = _hash_password(password, user.salt or "")
+            if expected != (user.password_hash or ""):
+                salt = secrets.token_hex(16)
+                user.salt = salt
+                user.password_hash = _hash_password(password, salt)
+                db.commit()
+                db.refresh(user)
+        token = make_admin_token(phone)
+        return AdminLoginResponse(
+            status="ok",
+            token=token,
+            name=user.name,
+            phone=user.phone,
+            user_id=user.id,
+        )
+
+    # مسیر ۲: بررسی هش ذخیره‌شده در دیتابیس
     if not user:
-        raise HTTPException(status_code=401, detail="حساب ادمین یافت نشد")
+        raise HTTPException(
+            status_code=401,
+            detail="حساب ادمین یافت نشد. رمز پیش‌فرض را امتحان کنید یا seed_admin را اجرا کنید.",
+        )
 
-    password_hash = hashlib.sha256(f"{user.salt}{req.password}".encode()).hexdigest()
-    if password_hash != user.password_hash:
-        from config import settings
-
-        if req.password != getattr(settings, "ADMIN_PASSWORD", ""):
-            raise HTTPException(status_code=401, detail="رمز عبور نادرست است")
+    expected_hash = _hash_password(password, user.salt or "")
+    if expected_hash != (user.password_hash or ""):
+        raise HTTPException(status_code=401, detail="رمز عبور نادرست است")
 
     token = make_admin_token(phone)
     return AdminLoginResponse(
@@ -260,9 +332,6 @@ def admin_login(req: AdminLoginRequest, db: Session = Depends(get_db)):
         phone=user.phone,
         user_id=user.id,
     )
-
-
-# ─── Notifications ───────────────────────────────────────────────────────────
 
 
 @router.get("/notifications", response_model=NotificationsResponse)
@@ -298,9 +367,6 @@ def admin_notifications(
     )
 
 
-# ─── Users ───────────────────────────────────────────────────────────────────
-
-
 @router.get("/users-stats", response_model=AdminStatsResponse)
 def get_users_stats(
     query: Optional[str] = None,
@@ -312,7 +378,6 @@ def get_users_stats(
     page_size: int = Query(50, ge=1, le=100),
     db: Session = Depends(get_db),
 ):
-    """بدون توکن اجباری — سازگار با APK. صفحه‌بندی و فیلتر تاریخ اضافه شد."""
     try:
         from main import User
 
@@ -434,9 +499,6 @@ def admin_set_plan(
         "plan": user.plan,
         "plan_expires_at": user.plan_expires_at,
     }
-
-
-# ─── Slips ────────────────────────────────────────────────────────────────────
 
 
 @router.get("/slips", response_model=SlipListResponse)
@@ -590,11 +652,9 @@ def get_receipt_file(
     filename: str,
     _: bool = Depends(require_admin),
 ):
-    # prevent path traversal
     safe = Path(filename).name
     path = RECEIPTS_DIR / safe
     if not path.is_file():
-        # also try downloads root for legacy paths
         alt = DOWNLOADS_DIR / safe
         if alt.is_file():
             path = alt
@@ -603,9 +663,6 @@ def get_receipt_file(
 
     media_type, _ = mimetypes.guess_type(str(path))
     return FileResponse(path, media_type=media_type or "application/octet-stream", filename=safe)
-
-
-# ─── Support ─────────────────────────────────────────────────────────────────
 
 
 @router.get("/support/threads", response_model=List[SupportThreadResponse])
@@ -661,7 +718,7 @@ def list_support_threads(
         threads.sort(key=lambda t: t.last_at or 0, reverse=True)
         return threads
     except Exception as e:
-        logger.error(f"support threads error: {e}", exc_info=True)
+        logger.error(f"support threads error: {e}", exp_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -760,9 +817,6 @@ def reply_support(
         read_user=False,
         created_at=msg.created_at,
     )
-
-
-# ─── AI Models ───────────────────────────────────────────────────────────────
 
 
 @router.get("/ai-models", response_model=List[AiModelResponse])
