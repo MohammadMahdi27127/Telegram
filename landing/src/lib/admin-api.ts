@@ -36,21 +36,17 @@ export function clearAdminSession() {
   localStorage.removeItem(ADMIN_META_KEY);
 }
 
-async function adminFetch<T>(
-  path: string,
-  options: RequestInit = {},
-): Promise<T> {
+async function adminFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = getAdminToken();
   const headers: Record<string, string> = {
-    "Content-Type": "application/json",
     ...(options.headers as Record<string, string> | undefined),
   };
+  if (!(options.body instanceof FormData)) {
+    headers["Content-Type"] = headers["Content-Type"] || "application/json";
+  }
   if (token) headers["X-Admin-Token"] = token;
 
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...options,
-    headers,
-  });
+  const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
 
   if (res.status === 401) {
     clearAdminSession();
@@ -101,19 +97,34 @@ export type AdminUser = {
   plan_expires_at?: number | null;
 };
 
+export type PaginatedUsers = {
+  total_tokens_used: number;
+  total_users: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+  users: AdminUser[];
+};
+
 export async function fetchUsers(params?: {
   query?: string;
   sort_by?: string;
   plan?: string;
+  date_from?: string;
+  date_to?: string;
+  page?: number;
+  page_size?: number;
 }) {
   const q = new URLSearchParams();
   if (params?.query) q.set("query", params.query);
   if (params?.sort_by) q.set("sort_by", params.sort_by);
   if (params?.plan) q.set("plan", params.plan);
+  if (params?.date_from) q.set("date_from", params.date_from);
+  if (params?.date_to) q.set("date_to", params.date_to);
+  if (params?.page) q.set("page", String(params.page));
+  if (params?.page_size) q.set("page_size", String(params.page_size));
   const qs = q.toString() ? `?${q}` : "";
-  return adminFetch<{ total_tokens_used: number; total_users: number; users: AdminUser[] }>(
-    `/admin/users-stats${qs}`,
-  );
+  return adminFetch<PaginatedUsers>(`/admin/users-stats${qs}`);
 }
 
 export async function suspendUser(userId: string, suspended: boolean) {
@@ -133,12 +144,33 @@ export type AdminSlip = {
   amount: number;
   status: string;
   receipt?: string | null;
+  receipt_url?: string | null;
   ref_code?: string | null;
   created_at?: number | null;
 };
 
-export async function fetchSlips(status = "all") {
-  return adminFetch<AdminSlip[]>(`/admin/slips?status=${encodeURIComponent(status)}`);
+export type PaginatedSlips = {
+  total: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+  items: AdminSlip[];
+};
+
+export async function fetchSlips(params?: {
+  status?: string;
+  date_from?: string;
+  date_to?: string;
+  page?: number;
+  page_size?: number;
+}) {
+  const q = new URLSearchParams();
+  q.set("status", params?.status || "all");
+  if (params?.date_from) q.set("date_from", params.date_from);
+  if (params?.date_to) q.set("date_to", params.date_to);
+  if (params?.page) q.set("page", String(params.page));
+  if (params?.page_size) q.set("page_size", String(params.page_size));
+  return adminFetch<PaginatedSlips>(`/admin/slips?${q}`);
 }
 
 export async function slipAction(
@@ -149,6 +181,32 @@ export async function slipAction(
     method: "POST",
     body: JSON.stringify(body),
   });
+}
+
+export async function uploadSlipReceipt(slipId: string, file: File) {
+  const form = new FormData();
+  form.append("file", file);
+  return adminFetch<{ status: string; receipt: string; receipt_url: string }>(
+    `/admin/slips/${slipId}/receipt`,
+    { method: "POST", body: form },
+  );
+}
+
+/** Build authorized URL for receipt preview */
+export function receiptFetchUrl(receiptUrl?: string | null) {
+  if (!receiptUrl) return null;
+  if (receiptUrl.startsWith("http")) return receiptUrl;
+  return receiptUrl.startsWith("/") ? receiptUrl : `/${receiptUrl}`;
+}
+
+export async function fetchReceiptBlob(receiptUrl: string): Promise<string> {
+  const token = getAdminToken();
+  const res = await fetch(receiptUrl.startsWith("/") ? receiptUrl : `/${receiptUrl}`, {
+    headers: token ? { "X-Admin-Token": token } : {},
+  });
+  if (!res.ok) throw new Error("دانلود رسید ناموفق");
+  const blob = await res.blob();
+  return URL.createObjectURL(blob);
 }
 
 export type SupportThread = {
@@ -231,6 +289,17 @@ export async function setActiveAiModel(modelId: string) {
 
 export async function deleteAiModel(modelId: string) {
   return adminFetch(`/admin/ai-models/${modelId}`, { method: "DELETE" });
+}
+
+export type AdminNotifications = {
+  pending_slips: number;
+  unread_support: number;
+  latest_slip_at?: number | null;
+  latest_support_at?: number | null;
+};
+
+export async function fetchNotifications() {
+  return adminFetch<AdminNotifications>("/admin/notifications");
 }
 
 export function formatTs(ms?: number | null) {
