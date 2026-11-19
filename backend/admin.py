@@ -199,6 +199,7 @@ def admin_login(req: AdminLoginRequest, db: Session = Depends(get_db)):
 
 
 # ─── Users ───────────────────────────────────────────────────────────────────
+# توجه: users-stats بدون require_admin می‌ماند تا APK اندروید نشکند.
 
 
 @router.get("/users-stats", response_model=AdminStatsResponse)
@@ -206,7 +207,6 @@ def get_users_stats(
     query: Optional[str] = None,
     sort_by: str = "newest",
     plan: str = "all",
-    _: bool = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     try:
@@ -407,7 +407,7 @@ def slip_action(
     }
 
 
-# ─── Suppor ──────────────────────────────────────────────────────────────────
+# ─── Support ─────────────────────────────────────────────────────────────────
 
 
 @router.get("/support/threads", response_model=List[SupportThreadResponse])
@@ -418,16 +418,10 @@ def list_support_threads(
     from main import SupportMessage, User
 
     try:
-        user_ids = [
-            r[0]
-            for r in db.query(SupportMessage.user_id)
-            .distinct()
-            .all()
-        ]
+        user_ids = [r[0] for r in db.query(SupportMessage.user_id).distinct().all()]
         threads: List[SupportThreadResponse] = []
         users = {
-            u.id: u
-            for u in db.query(User).filter(User.id.in_(user_ids)).all()
+            u.id: u for u in db.query(User).filter(User.id.in_(user_ids)).all()
         } if user_ids else {}
 
         for uid in user_ids:
